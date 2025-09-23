@@ -1,0 +1,111 @@
+import streamlit as st
+import yfinance as yf
+import numpy as np
+from scipy.stats import norm
+from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+import robin_stocks.robinhood as rh  # For Robinhood integration
+
+# Black-Scholes Greeks Function
+def black_scholes_greeks(S, K, T, r, sigma, option_type='call'):
+    d1 = (np.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
+    d2 = d1 - sigma * np.sqrt(T)
+    if option_type == 'call':
+        delta = norm.cdf(d1)
+        gamma = norm.pdf(d1) / (S * sigma * np.sqrt(T))
+        theta = - (S * norm.pdf(d1) * sigma / (2 * np.sqrt(T))) - r * K * np.exp(-r * T) * norm.cdf(d2)
+        vega = S * norm.pdf(d1) * np.sqrt(T)
+        rho = K * T * np.exp(-r * T) * norm.cdf(d2)
+    return {'delta': delta, 'gamma': gamma, 'theta': theta, 'vega': vega, 'rho': rho}
+
+# Sentiment Score (Mock from VADER; replace with X API if needed)
+analyzer = SentimentIntensityAnalyzer()
+def get_sentiment_score(ticker):
+    # Mock sentiment from keywords (replace with real X/web search)
+    sentiments = ['bullish breakout', 'high ROI', 'momentum play']  # From your successful trades
+    score = sum(analyzer.polarity_scores(s)['compound'] for s in sentiments) / len(sentiments)
+    return max(0, min(1, score + 0.5))  # Bias bullish for your style
+
+# Main App
+st.title('Your Options Trading Dashboard - Top 5 Trades')
+
+# User Inputs
+tickers = st.multiselect('Select Tickers (or add)', ['NU', 'RR', 'PLTR', 'TSLA', 'SOFI', 'TEM', 'WLDS'], default=['NU', 'RR', 'PLTR', 'TSLA', 'SOFI'])
+r = 0.045  # Risk-free rate
+buying_power = st.number_input('Robinhood Buying Power', value=2505)
+
+if st.button('Generate Top 5 Trades'):
+    trades = []
+    for ticker in tickers:
+        stock = yf.Ticker(ticker)
+        data = stock.history(period='3mo')
+        S = data['Close'][-1]  # Current price
+        rsi = 100 - (100 / (1 + data['Close'].pct_change().rolling(14).mean().iloc[-1] / data['Close'].pct_change().rolling(14).std().iloc[-1]))  # RSI approx
+        vol = data['Volume'][-1] / data['Volume'].mean()  # Volume ratio
+        
+        if rsi < 60 or rsi > 75 or vol < 2:  # Filter momentum
+            continue
+        
+        # Option Chain (mock; use stock.option_chain for real)
+        expiry = '2025-10-17'  # Example 1-2 weeks
+        K = S * 1.05  # 5% OTM strike
+        T = 30/365  # 30 days
+        sigma = stock.options[0].impliedVolatility if stock.options else 0.4  # IV approx
+        sentiment = get_sentiment_score(ticker)
+        
+        greeks = black_scholes_greeks(S, K, T, r, sigma)
+        
+        entry_price = 1.0  # Mock premium; fetch from Robinhood API
+        contracts = int(buying_power * 0.15 / (entry_price * 100))  # 15% of buying power
+        projected_exit = S * 1.1272  # Fibonacci 127.2% extension
+        exit_price = (projected_exit - K) * 0.8 + entry_price  # Projected option value
+        projected_cost = entry_price * contracts * 100
+        projected_profit = (exit_price - entry_price) * contracts * 100 * 0.9  # 10% fees
+        hold_days = 7 if sentiment > 0.7 else 14
+        roi = (projected_profit / projected_cost) * 100 if projected_cost > 0 else 0
+        
+        score = roi * sentiment - (abs(greeks['theta']) * hold_days)  # Ranked score
+        
+        trades.append({
+            'Ticker': ticker,
+            'Strike': K,
+            'Expiry': expiry,
+            'Entry Price': entry_price,
+            'Contracts': contracts,
+            'Exit Price': exit_price,
+            'Projected Cost': projected_cost,
+            'Projected Profit': projected_profit,
+            'Hold Days': hold_days,
+            'Greeks': greeks,
+            'ROI %': roi,
+            'Score': score
+        })
+    
+    # Top 5 by Score
+    top_trades = sorted(trades, key=lambda x: x['Score'], reverse=True)[:5]
+    
+    st.subheader('Top 5 Options Trades')
+    for trade in top_trades:
+        with st.expander(f"{trade['Ticker']} - Projected ROI {trade['ROI %']:.1f}%"):
+            col1, col2 = st.columns(2)
+            with col1:
+                st.write(f"**Entry Price**: ${trade['Entry Price']:.2f}")
+                st.write(f"**Contracts**: {trade['Contracts']}")
+                st.write(f"**Strike**: ${trade['Strike']:.2f}")
+                st.write(f"**Expiry**: {trade['Expiry']}")
+                st.write(f"**Hold Days**: {trade['Hold Days']}")
+            with col2:
+                st.write(f"**Projected Cost**: ${trade['Projected Cost']:.2f}")
+                st.write(f"**Exit Price**: ${trade['Exit Price']:.2f}")
+                st.write(f"**Projected Profit**: ${trade['Projected Profit']:.2f}")
+                st.write("**Greeks**:")
+                for k, v in trade['Greeks'].items():
+                    st.write(f"  {k}: {v:.4f}")
+
+# Robinhood Integration (Optional Button)
+if st.button('Sync Robinhood Positions'):
+    # Authenticate (use st.secrets for username/password)
+    login = rh.login(username='your_username', password='your_password')
+    positions = rh.get_open_option_positions()
+    st.write("Current Positions:", positions)  # Display your open trades
+
+st.info("This app screens momentum trades matching your style. Customize tickers and add real Robinhood auth for live data.")
