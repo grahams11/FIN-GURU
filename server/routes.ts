@@ -16,9 +16,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const sentimentScore = Math.random() * 0.4 + 0.6; // 0.6-1.0 range for bullish bias
       
       const response = {
-        sp500: marketData.sp500,
-        nasdaq: marketData.nasdaq,
-        vix: marketData.vix,
+        sp500: {
+          symbol: marketData.sp500.symbol,
+          value: marketData.sp500.price,
+          change: marketData.sp500.change,
+          changePercent: marketData.sp500.changePercent
+        },
+        nasdaq: {
+          symbol: marketData.nasdaq.symbol,
+          value: marketData.nasdaq.price,
+          change: marketData.nasdaq.change,
+          changePercent: marketData.nasdaq.changePercent
+        },
+        vix: {
+          symbol: marketData.vix.symbol,
+          value: marketData.vix.price,
+          change: marketData.vix.change,
+          changePercent: marketData.vix.changePercent
+        },
         sentiment: {
           score: sentimentScore,
           label: sentimentScore > 0.8 ? 'Very Bullish' : 
