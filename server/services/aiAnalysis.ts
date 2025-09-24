@@ -387,30 +387,42 @@ export class AIAnalysisService {
         console.log(`${ticker}: Using estimated IV: ${(impliedVolatility * 100).toFixed(1)}% (no market data)`);
       }
       
-      // Calculate entry price using simplified Black-Scholes
+      // Calculate initial entry price using simplified Black-Scholes
       const timeToExpiry = targetDays / 365;
-      const entryPrice = this.estimateOptionPrice(currentPrice, strikePrice, timeToExpiry, impliedVolatility, isCallStrategy);
+      const estimatedEntryPrice = this.estimateOptionPrice(currentPrice, strikePrice, timeToExpiry, impliedVolatility, isCallStrategy);
       
-      // Calculate exit price target (40-70% gain target)
+      // Determine final entry price from real market data
+      const finalEntryPrice = Math.max(0.05, selectedStrike.last || selectedStrike.bid || estimatedEntryPrice);
+      
+      // Validate final entry price
+      if (!isFinite(finalEntryPrice) || finalEntryPrice <= 0) {
+        console.warn(`Invalid entry price ${finalEntryPrice} for ${ticker}`);
+        return null;
+      }
+      
+      // Calculate optimal contracts using FINAL entry price to stay within $5000 budget
+      const maxTradeAmount = 5000;
+      const costPerContract = finalEntryPrice * 100; // Options are sold in contracts of 100 shares
+      const optimalContracts = Math.floor(maxTradeAmount / costPerContract);
+      const contracts = Math.max(1, Math.min(50, optimalContracts)); // Cap at 50 contracts for risk management
+      
+      // Verify we don't exceed budget
+      const totalCost = contracts * finalEntryPrice * 100;
+      if (totalCost > maxTradeAmount) {
+        console.warn(`Trade cost ${totalCost} exceeds budget ${maxTradeAmount} for ${ticker}`);
+        return null;
+      }
+      
+      // Calculate exit price using FINAL entry price
       const gainTarget = 1.4 + (sentiment.confidence * 0.3);
-      const exitPrice = entryPrice * gainTarget;
-      
-      // Calculate contracts for $2500 buying power (15% allocation)
-      const allocation = 2500 * 0.15;
-      const contracts = Math.max(1, Math.min(20, Math.floor(allocation / (entryPrice * 100))));
+      const exitPrice = finalEntryPrice * gainTarget;
       
       // Calculate hold days
       const holdDays = Math.min(targetDays, sentiment.confidence > 0.7 ? 7 : 14);
       
-      // Validate all values are finite numbers before returning
+      // Validate all values
       if (!isFinite(strikePrice) || !strikePrice || strikePrice <= 0) {
         console.warn(`Invalid strike price ${strikePrice} for ${ticker}`);
-        return null;
-      }
-      
-      const finalEntryPrice = Math.max(0.05, selectedStrike.last || selectedStrike.bid || entryPrice);
-      if (!isFinite(finalEntryPrice) || finalEntryPrice <= 0) {
-        console.warn(`Invalid entry price ${finalEntryPrice} for ${ticker}`);
         return null;
       }
       
@@ -467,28 +479,37 @@ export class AIAnalysisService {
       
       // Calculate entry price using simplified Black-Scholes
       const timeToExpiry = targetDays / 365;
-      const entryPrice = this.estimateOptionPrice(currentPrice, strikePrice, timeToExpiry, impliedVolatility, isCallStrategy);
+      const finalEntryPrice = Math.max(0.05, this.estimateOptionPrice(currentPrice, strikePrice, timeToExpiry, impliedVolatility, isCallStrategy));
       
-      // Calculate exit price target
+      // Validate final entry price
+      if (!isFinite(finalEntryPrice) || finalEntryPrice <= 0) {
+        console.warn(`Invalid fallback entry price ${finalEntryPrice} for ${ticker}`);
+        return null;
+      }
+      
+      // Calculate optimal contracts using FINAL entry price to stay within $5000 budget
+      const maxTradeAmount = 5000;
+      const costPerContract = finalEntryPrice * 100; // Options are sold in contracts of 100 shares
+      const optimalContracts = Math.floor(maxTradeAmount / costPerContract);
+      const contracts = Math.max(1, Math.min(50, optimalContracts)); // Cap at 50 contracts for risk management
+      
+      // Verify we don't exceed budget
+      const totalCost = contracts * finalEntryPrice * 100;
+      if (totalCost > maxTradeAmount) {
+        console.warn(`Fallback trade cost ${totalCost} exceeds budget ${maxTradeAmount} for ${ticker}`);
+        return null;
+      }
+      
+      // Calculate exit price using FINAL entry price
       const gainTarget = 1.4 + (sentiment.confidence * 0.3);
-      const exitPrice = entryPrice * gainTarget;
-      
-      // Calculate contracts for allocation
-      const allocation = 2500 * 0.15;
-      const contracts = Math.max(1, Math.min(20, Math.floor(allocation / (entryPrice * 100))));
+      const exitPrice = finalEntryPrice * gainTarget;
       
       // Calculate hold days
       const holdDays = Math.min(targetDays, sentiment.confidence > 0.7 ? 7 : 14);
       
-      // Validate all fallback values are finite numbers
+      // Validate all values
       if (!isFinite(strikePrice) || !strikePrice || strikePrice <= 0) {
         console.warn(`Invalid fallback strike price ${strikePrice} for ${ticker}`);
-        return null;
-      }
-      
-      const finalEntryPrice = Math.max(0.05, entryPrice);
-      if (!isFinite(finalEntryPrice) || finalEntryPrice <= 0) {
-        console.warn(`Invalid fallback entry price ${finalEntryPrice} for ${ticker}`);
         return null;
       }
       
