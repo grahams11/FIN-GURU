@@ -181,6 +181,11 @@ export class AIAnalysisService {
         stockData.changePercent
       );
 
+      // Filter out unprofitable trades
+      if (projectedROI <= 0) {
+        return null; // Don't recommend trades with negative or zero ROI
+      }
+
       // Calculate composite score for ranking
       const score = projectedROI * aiConfidence * sentiment.bullishness - (Math.abs(greeks.theta) * 7);
 
@@ -468,7 +473,7 @@ export class AIAnalysisService {
     const exitValue = intrinsicValue + (entryPrice * 0.3); // Time value decay
     
     const roi = ((exitValue - entryPrice) / entryPrice) * 100;
-    return Math.max(-95, Math.min(300, roi)); // Cap ROI between -95% and 300%
+    return Math.min(300, roi); // Cap ROI at 300% but allow negative values
   }
 
   private static calculateAIConfidence(

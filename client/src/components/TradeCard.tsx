@@ -72,7 +72,7 @@ export function TradeCard({ trade, rank }: TradeCardProps) {
             </div>
           </div>
           <div className="text-right">
-            <p className="text-lg font-bold text-primary" data-testid={`roi-${trade.ticker}`}>
+            <p className={`text-lg font-bold ${trade.projectedROI >= 0 ? 'text-green-500' : 'text-red-500'}`} data-testid={`roi-${trade.ticker}`}>
               {trade.projectedROI > 0 ? '+' : ''}{trade.projectedROI.toFixed(1)}%
             </p>
             <p className="text-sm text-muted-foreground">Projected ROI</p>
