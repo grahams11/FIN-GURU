@@ -772,15 +772,19 @@ export class WebScraperService {
     const cleanQuery = query.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().substring(0, 10);
     if (!cleanQuery) return [];
 
+    console.log(`Searching ticker symbols for: ${cleanQuery}`);
+
     try {
-      // Try Yahoo Finance lookup first
-      const suggestions = await this.scrapeYahooLookup(cleanQuery);
+      // Use a smart fallback approach - generate suggestions from known ticker patterns
+      const suggestions = await this.generateSmartSuggestions(cleanQuery);
+      
       if (suggestions.length > 0) {
-        return suggestions.slice(0, 10); // Return top 10 suggestions
+        console.log(`Found ${suggestions.length} ticker suggestions for ${cleanQuery}`);
+        return suggestions.slice(0, 10);
       }
 
-      // Fallback to Google Finance search
-      return await this.scrapeGoogleFinanceSearch(cleanQuery);
+      // If no smart suggestions, try exact match validation
+      return await this.validateExactSymbol(cleanQuery);
     } catch (error) {
       console.error(`Error scraping symbol suggestions for ${query}:`, error);
       return [];
@@ -858,5 +862,128 @@ export class WebScraperService {
       console.error(`Google Finance search failed for ${query}:`, error);
       return [];
     }
+  }
+
+  /**
+   * Generate smart ticker suggestions using known patterns and price validation
+   */
+  private static async generateSmartSuggestions(query: string): Promise<import('@shared/schema').SymbolSuggestion[]> {
+    const suggestions: import('@shared/schema').SymbolSuggestion[] = [];
+    
+    // Common ticker patterns to try
+    const candidates = [
+      query, // Exact match
+      ...this.getCommonTickerVariations(query)
+    ];
+
+    // Known company mappings for common searches
+    const knownCompanies: Record<string, {name: string, exchange: string}> = {
+      'AAPL': { name: 'Apple Inc.', exchange: 'NASDAQ' },
+      'GOOGL': { name: 'Alphabet Inc.', exchange: 'NASDAQ' },
+      'MSFT': { name: 'Microsoft Corporation', exchange: 'NASDAQ' },
+      'AMZN': { name: 'Amazon.com Inc.', exchange: 'NASDAQ' },
+      'TSLA': { name: 'Tesla Inc.', exchange: 'NASDAQ' },
+      'META': { name: 'Meta Platforms Inc.', exchange: 'NASDAQ' },
+      'NVDA': { name: 'NVIDIA Corporation', exchange: 'NASDAQ' },
+      'NFLX': { name: 'Netflix Inc.', exchange: 'NASDAQ' },
+      'INTC': { name: 'Intel Corporation', exchange: 'NASDAQ' },
+      'AMD': { name: 'Advanced Micro Devices', exchange: 'NASDAQ' },
+      'PLTR': { name: 'Palantir Technologies Inc.', exchange: 'NYSE' },
+      'SOFI': { name: 'SoFi Technologies Inc.', exchange: 'NASDAQ' },
+      'UBER': { name: 'Uber Technologies Inc.', exchange: 'NYSE' },
+      'LYFT': { name: 'Lyft Inc.', exchange: 'NASDAQ' },
+      'COIN': { name: 'Coinbase Global Inc.', exchange: 'NASDAQ' },
+      'SQ': { name: 'Block Inc.', exchange: 'NYSE' },
+      'PYPL': { name: 'PayPal Holdings Inc.', exchange: 'NASDAQ' },
+      'BA': { name: 'Boeing Company', exchange: 'NYSE' },
+      'JPM': { name: 'JPMorgan Chase & Co.', exchange: 'NYSE' },
+      'GS': { name: 'Goldman Sachs Group Inc.', exchange: 'NYSE' },
+      'V': { name: 'Visa Inc.', exchange: 'NYSE' },
+      'MA': { name: 'Mastercard Inc.', exchange: 'NYSE' },
+      'DIS': { name: 'Walt Disney Company', exchange: 'NYSE' },
+      'KO': { name: 'Coca-Cola Company', exchange: 'NYSE' },
+      'PEP': { name: 'PepsiCo Inc.', exchange: 'NASDAQ' },
+      'NKE': { name: 'Nike Inc.', exchange: 'NYSE' },
+      'ADBE': { name: 'Adobe Inc.', exchange: 'NASDAQ' },
+      'CRM': { name: 'Salesforce Inc.', exchange: 'NYSE' },
+      'ORCL': { name: 'Oracle Corporation', exchange: 'NYSE' },
+      'BABA': { name: 'Alibaba Group Holding', exchange: 'NYSE' },
+      'JD': { name: 'JD.com Inc.', exchange: 'NASDAQ' },
+      'PDD': { name: 'PDD Holdings Inc.', exchange: 'NASDAQ' },
+      'SHOP': { name: 'Shopify Inc.', exchange: 'NYSE' },
+      'ZM': { name: 'Zoom Video Communications', exchange: 'NASDAQ' },
+      'SPOT': { name: 'Spotify Technology S.A.', exchange: 'NYSE' }
+    };
+
+    for (const candidate of candidates) {
+      // Check if it's a known ticker
+      if (knownCompanies[candidate]) {
+        const company = knownCompanies[candidate];
+        
+        // Validate with price check to ensure it's still active
+        try {
+          const priceData = await this.scrapeStockPrice(candidate);
+          if (priceData.price > 0) {
+            suggestions.push({
+              symbol: candidate,
+              name: company.name,
+              exchange: company.exchange,
+              type: 'Stock'
+            });
+          }
+        } catch (error) {
+          // Skip if price validation fails
+          console.log(`Price validation failed for ${candidate}, skipping`);
+        }
+      }
+    }
+
+    // Filter suggestions to only include partial matches
+    return suggestions.filter(s => s.symbol.includes(query) || query.length >= 2);
+  }
+
+  /**
+   * Generate common ticker variations for search
+   */
+  private static getCommonTickerVariations(query: string): string[] {
+    const variations = [];
+    
+    // If query is short, don't generate variations to avoid too many false matches
+    if (query.length < 2) return [];
+    
+    // For companies that might have different ticker endings
+    const commonEndings = ['', 'A', 'B', 'C'];
+    for (const ending of commonEndings) {
+      if (query.length <= 4) {
+        variations.push(query + ending);
+      }
+    }
+    
+    // Remove duplicates and the original query
+    return [...new Set(variations)].filter(v => v !== query && v.length <= 5);
+  }
+
+  /**
+   * Validate if exact symbol exists by checking price
+   */
+  private static async validateExactSymbol(query: string): Promise<import('@shared/schema').SymbolSuggestion[]> {
+    try {
+      console.log(`Validating exact symbol: ${query}`);
+      const priceData = await this.scrapeStockPrice(query);
+      
+      if (priceData.price > 0) {
+        console.log(`Exact symbol ${query} validated with price: $${priceData.price}`);
+        return [{
+          symbol: query,
+          name: `${query} Corporation`, // Generic name since we can't determine the exact name
+          exchange: undefined,
+          type: 'Stock'
+        }];
+      }
+    } catch (error) {
+      console.log(`Exact symbol validation failed for ${query}:`, error.message);
+    }
+    
+    return [];
   }
 }

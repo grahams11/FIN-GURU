@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import React, { useState } from "react";
+import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -8,11 +8,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
-import { PlusCircle, Calculator } from "lucide-react";
+import { PlusCircle, Calculator, Check, ChevronsUpDown, Loader2 } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
+import { cn } from "@/lib/utils";
+import { SymbolSuggestion, PriceQuote } from "@shared/schema";
 
 const positionSchema = z.object({
   ticker: z.string().min(1, "Ticker is required").max(10, "Ticker too long"),
@@ -42,6 +46,9 @@ interface PositionInputFormProps {
 
 export function PositionInputForm({ onSuccess }: PositionInputFormProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [tickerInput, setTickerInput] = useState("");
+  const [tickerPopoverOpen, setTickerPopoverOpen] = useState(false);
+  const [currentPrice, setCurrentPrice] = useState<number | null>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -60,6 +67,39 @@ export function PositionInputForm({ onSuccess }: PositionInputFormProps) {
   });
 
   const positionType = form.watch("positionType");
+
+  // Ticker symbol search query with debouncing
+  const tickerSearchQuery = useQuery({
+    queryKey: ["/api/symbols", tickerInput],
+    queryFn: async (): Promise<SymbolSuggestion[]> => {
+      if (!tickerInput || tickerInput.length < 1) return [];
+      const response = await fetch(`/api/symbols?q=${encodeURIComponent(tickerInput)}`);
+      if (!response.ok) throw new Error('Failed to search symbols');
+      return response.json();
+    },
+    enabled: tickerInput.length >= 1,
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  });
+
+  // Price quote query for selected ticker
+  const selectedTickerValue = form.watch("ticker");
+  const priceQuery = useQuery({
+    queryKey: ["/api/price", selectedTickerValue],
+    queryFn: async (): Promise<PriceQuote> => {
+      const response = await fetch(`/api/price/${selectedTickerValue.toUpperCase()}`);
+      if (!response.ok) throw new Error('Failed to fetch price');
+      return response.json();
+    },
+    enabled: !!selectedTickerValue && selectedTickerValue.length > 0,
+    staleTime: 30 * 1000, // 30 seconds
+  });
+
+  // Update current price when price query succeeds
+  React.useEffect(() => {
+    if (priceQuery.data?.price) {
+      setCurrentPrice(priceQuery.data.price);
+    }
+  }, [priceQuery.data]);
 
   const createPositionMutation = useMutation({
     mutationFn: async (data: PositionFormData) => {
@@ -160,15 +200,84 @@ export function PositionInputForm({ onSuccess }: PositionInputFormProps) {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Ticker Symbol</FormLabel>
-                    <FormControl>
-                      <Input 
-                        placeholder="AAPL" 
-                        {...field} 
-                        className="uppercase"
-                        data-testid="input-ticker"
-                      />
-                    </FormControl>
+                    <Popover open={tickerPopoverOpen} onOpenChange={setTickerPopoverOpen}>
+                      <PopoverTrigger asChild>
+                        <FormControl>
+                          <Button
+                            variant="outline"
+                            role="combobox"
+                            className={cn(
+                              "w-full justify-between",
+                              !field.value && "text-muted-foreground"
+                            )}
+                            data-testid="input-ticker"
+                          >
+                            {field.value ? field.value.toUpperCase() : "Select ticker..."}
+                            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                          </Button>
+                        </FormControl>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-full p-0" data-testid="ticker-dropdown">
+                        <Command>
+                          <CommandInput 
+                            placeholder="Search ticker symbols..."
+                            value={tickerInput}
+                            onValueChange={(value) => {
+                              setTickerInput(value);
+                            }}
+                            data-testid="ticker-search-input"
+                          />
+                          <CommandList>
+                            {tickerSearchQuery.isLoading && (
+                              <div className="flex items-center justify-center p-4">
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                                <span className="ml-2 text-sm text-muted-foreground">Searching...</span>
+                              </div>
+                            )}
+                            {tickerSearchQuery.data && tickerSearchQuery.data.length === 0 && tickerInput.length > 0 && (
+                              <CommandEmpty>No ticker symbols found.</CommandEmpty>
+                            )}
+                            {tickerSearchQuery.data && tickerSearchQuery.data.length > 0 && (
+                              <CommandGroup>
+                                {tickerSearchQuery.data.map((suggestion) => (
+                                  <CommandItem
+                                    key={suggestion.symbol}
+                                    value={suggestion.symbol}
+                                    onSelect={(currentValue) => {
+                                      field.onChange(currentValue.toUpperCase());
+                                      setTickerPopoverOpen(false);
+                                      setTickerInput("");
+                                    }}
+                                    data-testid={`ticker-option-${suggestion.symbol}`}
+                                  >
+                                    <Check
+                                      className={cn(
+                                        "mr-2 h-4 w-4",
+                                        field.value === suggestion.symbol ? "opacity-100" : "opacity-0"
+                                      )}
+                                    />
+                                    <div className="flex flex-col">
+                                      <span className="font-medium">{suggestion.symbol}</span>
+                                      <span className="text-sm text-muted-foreground truncate">
+                                        {suggestion.name}
+                                        {suggestion.exchange && ` • ${suggestion.exchange}`}
+                                      </span>
+                                    </div>
+                                  </CommandItem>
+                                ))}
+                              </CommandGroup>
+                            )}
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
                     <FormMessage />
+                    {currentPrice && (
+                      <div className="text-sm text-muted-foreground mt-1">
+                        Current Price: ${currentPrice.toFixed(2)}
+                        {priceQuery.isLoading && <Loader2 className="ml-2 h-3 w-3 animate-spin inline" />}
+                      </div>
+                    )}
                   </FormItem>
                 )}
               />
