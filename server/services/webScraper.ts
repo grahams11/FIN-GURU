@@ -385,9 +385,12 @@ export class WebScraperService {
             const bid = parseFloat($(cells[0]).text().replace(/[,$]/g, ''));
             const ask = parseFloat($(cells[1]).text().replace(/[,$]/g, ''));
             const last = parseFloat($(cells[3]).text().replace(/[,$]/g, ''));
+            // Try to extract IV from additional columns
+            const iv = cells.length > 6 ? parseFloat($(cells[6]).text().replace(/[%,$]/g, '')) : undefined;
+            const oi = cells.length > 5 ? parseInt($(cells[5]).text().replace(/[,$]/g, '')) : undefined;
             
             if (!isNaN(strike) && strike > 0) {
-              calls.push({ strike, bid, ask, last });
+              calls.push({ strike, bid, ask, last, iv: iv && !isNaN(iv) ? iv / 100 : undefined, oi });
             }
           }
         });
@@ -400,9 +403,12 @@ export class WebScraperService {
             const bid = parseFloat($(cells[0]).text().replace(/[,$]/g, ''));
             const ask = parseFloat($(cells[1]).text().replace(/[,$]/g, ''));
             const last = parseFloat($(cells[3]).text().replace(/[,$]/g, ''));
+            // Try to extract IV from additional columns
+            const iv = cells.length > 6 ? parseFloat($(cells[6]).text().replace(/[%,$]/g, '')) : undefined;
+            const oi = cells.length > 5 ? parseInt($(cells[5]).text().replace(/[,$]/g, '')) : undefined;
             
             if (!isNaN(strike) && strike > 0) {
-              puts.push({ strike, bid, ask, last });
+              puts.push({ strike, bid, ask, last, iv: iv && !isNaN(iv) ? iv / 100 : undefined, oi });
             }
           }
         });
@@ -468,9 +474,13 @@ export class WebScraperService {
             const last = parseFloat($(cells[3]).text().replace(/[,$]/g, ''));
             const bid = parseFloat($(cells[4]).text().replace(/[,$]/g, ''));
             const ask = parseFloat($(cells[5]).text().replace(/[,$]/g, ''));
+            // Yahoo Finance typically has IV in column 10 (index 9)
+            const iv = cells.length > 9 ? parseFloat($(cells[9]).text().replace(/[%,$]/g, '')) : undefined;
+            const volume = cells.length > 8 ? parseInt($(cells[8]).text().replace(/[,$]/g, '')) : undefined;
+            const oi = cells.length > 7 ? parseInt($(cells[7]).text().replace(/[,$]/g, '')) : undefined;
             
             if (!isNaN(strike) && strike > 0) {
-              calls.push({ strike, bid, ask, last });
+              calls.push({ strike, bid, ask, last, iv: iv && !isNaN(iv) ? iv / 100 : undefined, oi, volume });
             }
           }
         });
@@ -483,9 +493,13 @@ export class WebScraperService {
             const last = parseFloat($(cells[3]).text().replace(/[,$]/g, ''));
             const bid = parseFloat($(cells[4]).text().replace(/[,$]/g, ''));
             const ask = parseFloat($(cells[5]).text().replace(/[,$]/g, ''));
+            // Yahoo Finance typically has IV in column 10 (index 9)
+            const iv = cells.length > 9 ? parseFloat($(cells[9]).text().replace(/[%,$]/g, '')) : undefined;
+            const volume = cells.length > 8 ? parseInt($(cells[8]).text().replace(/[,$]/g, '')) : undefined;
+            const oi = cells.length > 7 ? parseInt($(cells[7]).text().replace(/[,$]/g, '')) : undefined;
             
             if (!isNaN(strike) && strike > 0) {
-              puts.push({ strike, bid, ask, last });
+              puts.push({ strike, bid, ask, last, iv: iv && !isNaN(iv) ? iv / 100 : undefined, oi, volume });
             }
           }
         });
@@ -550,9 +564,14 @@ export class WebScraperService {
             const last = parseFloat($(cells[2]).text().replace(/[,$]/g, ''));
             
             if (!isNaN(strike) && strike > 0) {
+              // Try to extract IV and other data
+              const iv = cells.length > 6 ? parseFloat($(cells[6]).text().replace(/[%,$]/g, '')) : undefined;
+              const volume = cells.length > 5 ? parseInt($(cells[4]).text().replace(/[,$]/g, '')) : undefined;
+              const oi = cells.length > 7 ? parseInt($(cells[7]).text().replace(/[,$]/g, '')) : undefined;
+              
               // Determine if it's a call or put based on table context or cell content
               const isCall = $(row).closest('.calls-table').length > 0 || $(row).find('.call-indicator').length > 0;
-              const contract = { strike, bid, ask, last };
+              const contract = { strike, bid, ask, last, iv: iv && !isNaN(iv) ? iv / 100 : undefined, oi, volume };
               
               if (isCall) {
                 calls.push(contract);

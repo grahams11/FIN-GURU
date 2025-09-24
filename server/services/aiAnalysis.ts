@@ -245,10 +245,11 @@ export class AIAnalysisService {
       // Analyze sentiment using rule-based analysis
       const sentiment = this.analyzeSentimentWithRules(newsHeadlines, stockData.changePercent, marketContext);
       
-      // Generate options strategy using rule-based analysis
-      const optionsStrategy = this.generateOptionsStrategyWithRules(ticker, stockData, sentiment, marketContext);
+      // Generate options strategy using rule-based analysis  
+      const optionsStrategy = await this.generateOptionsStrategyWithRules(ticker, stockData, sentiment, marketContext);
       
       if (!optionsStrategy) {
+        console.warn(`Failed to generate options strategy for ${ticker}`);
         return null;
       }
 
@@ -307,12 +308,12 @@ export class AIAnalysisService {
     }
   }
 
-  private static generateOptionsStrategyWithRules(
+  private static async generateOptionsStrategyWithRules(
     ticker: string, 
     stockData: any, 
     sentiment: any, 
     marketContext: any
-  ): any {
+  ): Promise<any> {
     try {
       const currentPrice = stockData.price;
       const isCallStrategy = sentiment.bullishness >= 0.55;
@@ -321,8 +322,9 @@ export class AIAnalysisService {
       const optionsChain = await WebScraperService.scrapeOptionsChain(ticker);
       
       if (optionsChain.expirations.length === 0) {
-        console.warn(`No options data found for ${ticker}, skipping`);
-        return null;
+        console.warn(`No options data found for ${ticker}, using fallback estimation`);
+        // Fallback to estimation-based approach when scraping fails
+        return this.generateFallbackOptionsStrategy(ticker, stockData, sentiment, marketContext);
       }
       
       // Select appropriate expiration (nearest 2-8 weeks out)
@@ -371,13 +373,22 @@ export class AIAnalysisService {
       const strikePrice = selectedStrike.strike;
       const expiryDate = new Date(selectedExpiration);
       
-      // Estimate implied volatility based on VIX and stock volatility
-      const baseIV = 0.25; // Base 25%
-      const vixBoost = (marketContext.marketData?.vix?.price || 20) > 25 ? 0.1 : 0;
-      const impliedVolatility = Math.min(0.8, baseIV + vixBoost + (Math.abs(stockData.changePercent) / 100));
+      // Use real market implied volatility from scraped options data, with fallback estimation
+      let impliedVolatility: number;
+      if (selectedStrike.iv && selectedStrike.iv > 0) {
+        // Use real market IV from scraped data
+        impliedVolatility = Math.min(0.8, Math.max(0.10, selectedStrike.iv)); // Clamp between 10%-80%
+        console.log(`${ticker}: Using real market IV: ${(impliedVolatility * 100).toFixed(1)}%`);
+      } else {
+        // Fallback to estimated IV when market data unavailable
+        const baseIV = 0.25; // Base 25%
+        const vixBoost = (marketContext.marketData?.vix?.price || 20) > 25 ? 0.1 : 0;
+        impliedVolatility = Math.min(0.8, baseIV + vixBoost + (Math.abs(stockData.changePercent) / 100));
+        console.log(`${ticker}: Using estimated IV: ${(impliedVolatility * 100).toFixed(1)}% (no market data)`);
+      }
       
       // Calculate entry price using simplified Black-Scholes
-      const timeToExpiry = daysOut / 365;
+      const timeToExpiry = targetDays / 365;
       const entryPrice = this.estimateOptionPrice(currentPrice, strikePrice, timeToExpiry, impliedVolatility, isCallStrategy);
       
       // Calculate exit price target (40-70% gain target)
@@ -389,22 +400,166 @@ export class AIAnalysisService {
       const contracts = Math.max(1, Math.min(20, Math.floor(allocation / (entryPrice * 100))));
       
       // Calculate hold days
-      const holdDays = Math.min(daysOut, sentiment.confidence > 0.7 ? 7 : 14);
+      const holdDays = Math.min(targetDays, sentiment.confidence > 0.7 ? 7 : 14);
+      
+      // Validate all values are finite numbers before returning
+      if (!isFinite(strikePrice) || !strikePrice || strikePrice <= 0) {
+        console.warn(`Invalid strike price ${strikePrice} for ${ticker}`);
+        return null;
+      }
+      
+      const finalEntryPrice = Math.max(0.05, selectedStrike.last || selectedStrike.bid || entryPrice);
+      if (!isFinite(finalEntryPrice) || finalEntryPrice <= 0) {
+        console.warn(`Invalid entry price ${finalEntryPrice} for ${ticker}`);
+        return null;
+      }
+      
+      if (!isFinite(exitPrice) || exitPrice <= 0) {
+        console.warn(`Invalid exit price ${exitPrice} for ${ticker}`);
+        return null;
+      }
       
       return {
-        strikePrice: strikePrice,
+        strikePrice: Math.round(strikePrice * 100) / 100,
         expiry: this.formatExpiry(expiryDate.toISOString()),
-        entryPrice: Math.max(0.05, selectedStrike.last || selectedStrike.bid || entryPrice), // Use real market price
+        entryPrice: Math.round(finalEntryPrice * 100) / 100,
         exitPrice: Math.round(exitPrice * 100) / 100,
-        contracts,
-        holdDays,
-        impliedVolatility
+        contracts: Math.max(1, contracts),
+        holdDays: Math.max(1, holdDays),
+        impliedVolatility: Math.round(impliedVolatility * 10000) / 10000
       };
       
     } catch (error) {
       console.error(`Error generating options strategy for ${ticker}:`, error);
       return null;
     }
+  }
+  
+  // Fallback method using estimation when scraping fails
+  private static generateFallbackOptionsStrategy(
+    ticker: string, 
+    stockData: any, 
+    sentiment: any, 
+    marketContext: any
+  ): any {
+    try {
+      const currentPrice = stockData.price;
+      const isCallStrategy = sentiment.bullishness >= 0.55;
+      
+      // Use estimated strike price using market conventions
+      const strikeVariance = sentiment.bullishness >= 0.7 ? 0.01 : 0.02;
+      const targetStrike = isCallStrategy ? 
+        currentPrice * (1 + strikeVariance) : // Slightly OTM calls
+        currentPrice * (1 - strikeVariance); // Slightly OTM puts
+      
+      // Get valid strike price using market conventions
+      const strikePrice = this.getValidStrike(currentPrice, targetStrike);
+      
+      // Calculate expiry date using real options expiration schedule
+      const targetDays = Math.max(14, Math.min(56, 21 + Math.round(sentiment.confidence * 21)));
+      const expiryDate = this.getNextValidExpiration(targetDays);
+      
+      // Estimate implied volatility based on VIX and stock volatility
+      const baseIV = 0.25; // Base 25%
+      const vixBoost = (marketContext.marketData?.vix?.price || 20) > 25 ? 0.1 : 0;
+      const impliedVolatility = Math.min(0.8, baseIV + vixBoost + (Math.abs(stockData.changePercent) / 100));
+      console.log(`${ticker}: Using estimated IV: ${(impliedVolatility * 100).toFixed(1)}% (fallback)`);
+      
+      // Calculate entry price using simplified Black-Scholes
+      const timeToExpiry = targetDays / 365;
+      const entryPrice = this.estimateOptionPrice(currentPrice, strikePrice, timeToExpiry, impliedVolatility, isCallStrategy);
+      
+      // Calculate exit price target
+      const gainTarget = 1.4 + (sentiment.confidence * 0.3);
+      const exitPrice = entryPrice * gainTarget;
+      
+      // Calculate contracts for allocation
+      const allocation = 2500 * 0.15;
+      const contracts = Math.max(1, Math.min(20, Math.floor(allocation / (entryPrice * 100))));
+      
+      // Calculate hold days
+      const holdDays = Math.min(targetDays, sentiment.confidence > 0.7 ? 7 : 14);
+      
+      // Validate all fallback values are finite numbers
+      if (!isFinite(strikePrice) || !strikePrice || strikePrice <= 0) {
+        console.warn(`Invalid fallback strike price ${strikePrice} for ${ticker}`);
+        return null;
+      }
+      
+      const finalEntryPrice = Math.max(0.05, entryPrice);
+      if (!isFinite(finalEntryPrice) || finalEntryPrice <= 0) {
+        console.warn(`Invalid fallback entry price ${finalEntryPrice} for ${ticker}`);
+        return null;
+      }
+      
+      if (!isFinite(exitPrice) || exitPrice <= 0) {
+        console.warn(`Invalid fallback exit price ${exitPrice} for ${ticker}`);
+        return null;
+      }
+      
+      return {
+        strikePrice: Math.round(strikePrice * 100) / 100,
+        expiry: this.formatExpiry(expiryDate.toISOString()),
+        entryPrice: Math.round(finalEntryPrice * 100) / 100,
+        exitPrice: Math.round(exitPrice * 100) / 100,
+        contracts: Math.max(1, contracts),
+        holdDays: Math.max(1, holdDays),
+        impliedVolatility: Math.round(impliedVolatility * 10000) / 10000
+      };
+      
+    } catch (error) {
+      console.error(`Error generating fallback options strategy for ${ticker}:`, error);
+      return null;
+    }
+  }
+  
+  // Helper methods for fallback strategy
+  private static getValidStrike(currentPrice: number, targetPrice: number): number {
+    // Determine strike intervals based on stock price
+    let interval: number;
+    if (currentPrice < 25) {
+      interval = 2.5;
+    } else if (currentPrice < 50) {
+      interval = 2.5;
+    } else if (currentPrice < 200) {
+      interval = 5;
+    } else {
+      interval = 10;
+    }
+    
+    // Round to nearest valid strike
+    return Math.round(targetPrice / interval) * interval;
+  }
+  
+  private static getNextValidExpiration(targetDays: number): Date {
+    const today = new Date();
+    const targetDate = new Date(today);
+    targetDate.setDate(today.getDate() + targetDays);
+    
+    // Find next third Friday (monthly expiration)
+    const year = targetDate.getFullYear();
+    const month = targetDate.getMonth();
+    
+    // Third Friday is the 15th-21st that falls on a Friday
+    for (let day = 15; day <= 21; day++) {
+      const candidate = new Date(year, month, day);
+      if (candidate.getDay() === 5) { // Friday
+        if (candidate >= targetDate) {
+          return candidate;
+        }
+      }
+    }
+    
+    // If no suitable date in current month, try next month
+    for (let day = 15; day <= 21; day++) {
+      const candidate = new Date(year, month + 1, day);
+      if (candidate.getDay() === 5) { // Friday
+        return candidate;
+      }
+    }
+    
+    // Fallback: just add target days
+    return targetDate;
   }
 
   private static analyzeSentimentWithRules(headlines: string[], priceChange: number, marketContext: any): any {

@@ -61,9 +61,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log('Generating top trade recommendations...');
       const recommendations = await AIAnalysisService.generateTradeRecommendations();
       
-      // Store recommendations in storage
+      // Filter out invalid recommendations and add validation
+      const validRecommendations = recommendations.filter(rec => {
+        if (!rec || !rec.ticker) {
+          console.warn('Skipping recommendation with missing ticker');
+          return false;
+        }
+        if (!isFinite(rec.strikePrice) || !rec.strikePrice || rec.strikePrice <= 0) {
+          console.warn(`Skipping ${rec.ticker}: invalid strike price ${rec.strikePrice}`);
+          return false;
+        }
+        if (!isFinite(rec.entryPrice) || !rec.entryPrice || rec.entryPrice <= 0) {
+          console.warn(`Skipping ${rec.ticker}: invalid entry price ${rec.entryPrice}`);
+          return false;
+        }
+        if (!isFinite(rec.exitPrice) || !rec.exitPrice || rec.exitPrice <= 0) {
+          console.warn(`Skipping ${rec.ticker}: invalid exit price ${rec.exitPrice}`);
+          return false;
+        }
+        if (!isFinite(rec.currentPrice) || !rec.currentPrice || rec.currentPrice <= 0) {
+          console.warn(`Skipping ${rec.ticker}: invalid current price ${rec.currentPrice}`);
+          return false;
+        }
+        return true;
+      });
+      
+      console.log(`Storing ${validRecommendations.length} valid trades (filtered from ${recommendations.length})`);
+      
+      // Store only valid recommendations in storage
       const trades = await Promise.all(
-        recommendations.map(async (rec) => {
+        validRecommendations.map(async (rec) => {
           try {
             return await storage.createOptionsTrade({
               ticker: rec.ticker,
@@ -106,9 +133,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Generate new recommendations
       const recommendations = await AIAnalysisService.generateTradeRecommendations();
       
-      // Store new recommendations
+      // Filter out invalid recommendations and add validation
+      const validRecommendations = recommendations.filter(rec => {
+        if (!rec || !rec.ticker) {
+          console.warn('Skipping recommendation with missing ticker');
+          return false;
+        }
+        if (!isFinite(rec.strikePrice) || !rec.strikePrice || rec.strikePrice <= 0) {
+          console.warn(`Skipping ${rec.ticker}: invalid strike price ${rec.strikePrice}`);
+          return false;
+        }
+        if (!isFinite(rec.entryPrice) || !rec.entryPrice || rec.entryPrice <= 0) {
+          console.warn(`Skipping ${rec.ticker}: invalid entry price ${rec.entryPrice}`);
+          return false;
+        }
+        if (!isFinite(rec.exitPrice) || !rec.exitPrice || rec.exitPrice <= 0) {
+          console.warn(`Skipping ${rec.ticker}: invalid exit price ${rec.exitPrice}`);
+          return false;
+        }
+        if (!isFinite(rec.currentPrice) || !rec.currentPrice || rec.currentPrice <= 0) {
+          console.warn(`Skipping ${rec.ticker}: invalid current price ${rec.currentPrice}`);
+          return false;
+        }
+        return true;
+      });
+      
+      console.log(`Storing ${validRecommendations.length} valid trades (filtered from ${recommendations.length})`);
+      
+      // Store only valid recommendations
       const trades = await Promise.all(
-        recommendations.map(async (rec) => {
+        validRecommendations.map(async (rec) => {
           try {
             return await storage.createOptionsTrade({
               ticker: rec.ticker,
