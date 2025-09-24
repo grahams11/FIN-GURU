@@ -6,15 +6,30 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Progress } from "@/components/ui/progress";
-import { TrendingUp, TrendingDown, DollarSign, BarChart3, Clock, Target } from "lucide-react";
-import type { PortfolioPosition, PositionPerformance, TradeHistory, PerformanceMetrics } from "@shared/schema";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { TrendingUp, TrendingDown, DollarSign, BarChart3, Clock, Target, Brain, AlertTriangle, CheckCircle, Plus } from "lucide-react";
+import type { 
+  PortfolioPosition, 
+  PositionPerformance, 
+  TradeHistory, 
+  PerformanceMetrics,
+  PositionAnalysis,
+  PortfolioAnalysis 
+} from "@shared/schema";
+import { PositionInputForm } from "./PositionInputForm";
 
 export function PortfolioTracker() {
-  const [activeTab, setActiveTab] = useState("positions");
+  const [activeTab, setActiveTab] = useState("input");
 
   const { data: positions, isLoading: positionsLoading } = useQuery<PortfolioPosition[]>({
     queryKey: ['/api/positions'],
     refetchInterval: 30000 // Refresh every 30 seconds
+  });
+
+  const { data: portfolioAnalysis, isLoading: portfolioAnalysisLoading } = useQuery<PortfolioAnalysis>({
+    queryKey: ['/api/positions/analysis'],
+    refetchInterval: 30000,
+    enabled: positions && positions.length > 0
   });
 
   const { data: performance, isLoading: performanceLoading } = useQuery<PositionPerformance[]>({
@@ -39,7 +54,8 @@ export function PortfolioTracker() {
     }).format(value);
   };
 
-  const formatPercent = (value: number) => {
+  const formatPercent = (value: number | null | undefined) => {
+    if (value == null) return '0.00%';
     return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
   };
 
@@ -74,12 +90,239 @@ export function PortfolioTracker() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList className="grid w-full grid-cols-4">
+        <TabsList className="grid w-full grid-cols-5">
+          <TabsTrigger value="input" data-testid="tab-input">
+            <Plus className="h-4 w-4 mr-2" />
+            Add Position
+          </TabsTrigger>
           <TabsTrigger value="positions" data-testid="tab-positions">Positions</TabsTrigger>
+          <TabsTrigger value="analysis" data-testid="tab-analysis">Live Analysis</TabsTrigger>
           <TabsTrigger value="performance" data-testid="tab-performance">Performance</TabsTrigger>
-          <TabsTrigger value="history" data-testid="tab-history">Trade History</TabsTrigger>
-          <TabsTrigger value="analytics" data-testid="tab-analytics">Analytics</TabsTrigger>
+          <TabsTrigger value="history" data-testid="tab-history">History</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="input" className="space-y-4">
+          <PositionInputForm 
+            onSuccess={() => {
+              // Switch to positions tab after successful input
+              setActiveTab("positions");
+            }} 
+          />
+        </TabsContent>
+
+        <TabsContent value="analysis" className="space-y-4">
+          {portfolioAnalysisLoading ? (
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {[...Array(6)].map((_, i) => (
+                <Card key={i}>
+                  <CardContent className="p-6">
+                    <div className="animate-pulse space-y-3">
+                      <div className="bg-muted h-4 w-24 rounded" />
+                      <div className="bg-muted h-8 w-32 rounded" />
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          ) : portfolioAnalysis ? (
+            <>
+              {/* Portfolio Overview Cards */}
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                <Card>
+                  <CardContent className="p-6">
+                    <div className="flex items-center justify-between space-y-0 pb-2">
+                      <div className="text-sm font-medium">Portfolio Health</div>
+                      <Brain className="h-4 w-4 text-muted-foreground" />
+                    </div>
+                    <div>
+                      <div className="text-2xl font-bold" data-testid="text-portfolio-health">
+                        {portfolioAnalysis?.overallSentiment?.toFixed(1) || '0.0'}/5.0
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Overall strength
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardContent className="p-6">
+                    <div className="flex items-center justify-between space-y-0 pb-2">
+                      <div className="text-sm font-medium">Risk Level</div>
+                      <AlertTriangle className="h-4 w-4 text-muted-foreground" />
+                    </div>
+                    <div>
+                      <div className="text-2xl font-bold" data-testid="text-risk-level">
+                        {portfolioAnalysis?.riskLevel || 'N/A'}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Current exposure
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardContent className="p-6">
+                    <div className="flex items-center justify-between space-y-0 pb-2">
+                      <div className="text-sm font-medium">Total Positions</div>
+                      <DollarSign className="h-4 w-4 text-muted-foreground" />
+                    </div>
+                    <div>
+                      <div className="text-2xl font-bold" data-testid="text-total-positions">
+                        {portfolioAnalysis?.positions?.length || 0}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Active trades
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardContent className="p-6">
+                    <div className="flex items-center justify-between space-y-0 pb-2">
+                      <div className="text-sm font-medium">Recommendations</div>
+                      <CheckCircle className="h-4 w-4 text-muted-foreground" />
+                    </div>
+                    <div>
+                      <div className="text-2xl font-bold text-primary" data-testid="text-recommendations-count">
+                        {portfolioAnalysis?.recommendations?.length || 0}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        AI suggestions
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Key Recommendations */}
+              {portfolioAnalysis?.recommendations && portfolioAnalysis.recommendations.length > 0 && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Brain className="h-5 w-5" />
+                      AI Recommendations
+                    </CardTitle>
+                    <CardDescription>
+                      Live analysis and suggestions based on current market conditions
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {portfolioAnalysis.recommendations.map((rec, index) => (
+                      <Alert key={index} className={rec.priority === 'high' ? 'border-destructive' : rec.priority === 'medium' ? 'border-yellow-500' : 'border-primary'}>
+                        <AlertTriangle className="h-4 w-4" />
+                        <AlertTitle className="capitalize">{rec.priority} Priority</AlertTitle>
+                        <AlertDescription>
+                          <div className="space-y-2">
+                            <p><strong>{rec.action}:</strong> {rec.description}</p>
+                            <p className="text-sm text-muted-foreground">
+                              <strong>Reasoning:</strong> {rec.reasoning}
+                            </p>
+                          </div>
+                        </AlertDescription>
+                      </Alert>
+                    ))}
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Individual Position Analysis */}
+              {portfolioAnalysis?.positions && portfolioAnalysis.positions.length > 0 && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <BarChart3 className="h-5 w-5" />
+                      Position Analysis
+                    </CardTitle>
+                    <CardDescription>
+                      Detailed analysis for each position with exit strategies
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Position</TableHead>
+                            <TableHead>Current Price</TableHead>
+                            <TableHead>Sentiment</TableHead>
+                            <TableHead>P&L</TableHead>
+                            <TableHead>Exit Strategy</TableHead>
+                            <TableHead>Risk</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {portfolioAnalysis.positions.map((analysis: PositionAnalysis) => {
+                            const pnl = analysis.unrealizedPnL;
+                            const pnlPercent = analysis.unrealizedPnLPercent;
+                            
+                            return (
+                              <TableRow key={analysis.ticker} data-testid={`row-analysis-${analysis.ticker}`}>
+                                <TableCell>
+                                  <div>
+                                    <div className="font-medium">{analysis.ticker}</div>
+                                    <div className="text-sm text-muted-foreground">
+                                      {analysis.positionType} • {Math.abs(analysis.quantity)} shares
+                                    </div>
+                                  </div>
+                                </TableCell>
+                                <TableCell data-testid={`text-current-price-${analysis.ticker}`}>
+                                  {formatCurrency(analysis.currentPrice)}
+                                </TableCell>
+                                <TableCell>
+                                  <div className="flex items-center gap-2">
+                                    <div className={`w-2 h-2 rounded-full ${
+                                      analysis.sentiment >= 4 ? 'bg-green-500' :
+                                      analysis.sentiment >= 3 ? 'bg-yellow-500' : 'bg-red-500'
+                                    }`}></div>
+                                    <span className="text-sm font-medium" data-testid={`text-sentiment-${analysis.ticker}`}>
+                                      {analysis.sentiment?.toFixed(1) || '0.0'}/5.0
+                                    </span>
+                                  </div>
+                                </TableCell>
+                                <TableCell data-testid={`text-pnl-${analysis.ticker}`}>
+                                  <div className={`flex items-center gap-1 ${pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                    {pnl >= 0 ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
+                                    <span>{formatCurrency(pnl)}</span>
+                                    <span className="text-sm">({formatPercent(pnlPercent)})</span>
+                                  </div>
+                                </TableCell>
+                                <TableCell>
+                                  <div className="max-w-xs">
+                                    <p className="text-sm font-medium text-primary">{analysis.exitStrategy.action}</p>
+                                    <p className="text-xs text-muted-foreground truncate">{analysis.exitStrategy.reasoning}</p>
+                                  </div>
+                                </TableCell>
+                                <TableCell>
+                                  <Badge variant={
+                                    analysis.riskLevel === 'high' ? 'destructive' :
+                                    analysis.riskLevel === 'medium' ? 'secondary' : 'default'
+                                  }>
+                                    {analysis.riskLevel}
+                                  </Badge>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </>
+          ) : (
+            <Card>
+              <CardContent className="p-6 text-center">
+                <p className="text-muted-foreground" data-testid="text-no-analysis">
+                  Add some positions to see live analysis and AI recommendations.
+                </p>
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
 
         <TabsContent value="positions" className="space-y-4">
           <Card>
@@ -457,13 +700,13 @@ export function PortfolioTracker() {
                   <div className="flex justify-between">
                     <span>Profit Factor</span>
                     <span className="font-medium" data-testid="text-profit-factor">
-                      {metrics.profitFactor.toFixed(2)}
+                      {metrics.profitFactor?.toFixed(2) || '0.00'}
                     </span>
                   </div>
                   <div className="flex justify-between">
                     <span>Sharpe Ratio</span>
                     <span className="font-medium" data-testid="text-sharpe-ratio">
-                      {metrics.sharpeRatio.toFixed(2)}
+                      {metrics.sharpeRatio?.toFixed(2) || '0.00'}
                     </span>
                   </div>
                   <div className="flex justify-between">

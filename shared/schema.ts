@@ -253,3 +253,65 @@ export interface AlertNotification {
   timestamp: Date;
   isRead: boolean;
 }
+
+export interface OptionsMetadata {
+  strike: number;
+  expiry: string;
+  optionType: 'call' | 'put';
+  entryPrice: number;
+  contracts: number;
+}
+
+export interface PositionAnalysis {
+  id: string;
+  ticker: string;
+  positionType: 'options' | 'stock';
+  currentPrice: number;
+  entryPrice: number;
+  currentValue: number;
+  unrealizedPnL: number;
+  unrealizedPnLPercent: number;
+  dayChange: number;
+  dayChangePercent: number;
+  quantity: number;
+  totalCost: number;
+  breakEvenPrice?: number;
+  
+  // Options specific
+  greeks?: Greeks;
+  timeToExpiry?: number;
+  impliedVolatility?: number;
+  moneyness?: 'ITM' | 'OTM' | 'ATM';
+  
+  // Analysis
+  sentiment: number;
+  confidence: number;
+  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
+  
+  // Exit Strategy
+  exitStrategy: {
+    profitTarget: number;
+    stopLoss: number;
+    timeBasedExit: string;
+    recommendation: 'HOLD' | 'TAKE_PROFIT' | 'CUT_LOSS' | 'MONITOR';
+    reasoning: string[];
+  };
+}
+
+export interface PortfolioAnalysis {
+  totalValue: number;
+  totalCost: number;
+  totalPnL: number;
+  totalPnLPercent: number;
+  dayChange: number;
+  positions: PositionAnalysis[];
+  riskMetrics: {
+    portfolioRisk: 'LOW' | 'MEDIUM' | 'HIGH';
+    concentration: number;
+    beta: number;
+    maxLoss: number;
+  };
+  recommendations: string[];
+  overallSentiment: number;
+  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
+}
