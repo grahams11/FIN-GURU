@@ -55,77 +55,117 @@ export class WebScraperService {
   }
 
   private static async scrapeYahooFinance(symbol: string): Promise<StockData> {
-    const url = `${this.YAHOO_FINANCE_BASE}/quote/${symbol}`;
+    // Try multiple Yahoo Finance URLs with cache-busting
+    const urls = [
+      `${this.YAHOO_FINANCE_BASE}/quote/${symbol}?t=${Date.now()}`,
+      `${this.YAHOO_FINANCE_BASE}/quote/${symbol}`,
+      `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}`
+    ];
     
-    try {
-      const response = await axios.get(url, { 
-        headers: this.HEADERS,
-        timeout: 10000
-      });
-      
-      const $ = cheerio.load(response.data);
-      
-      // Try multiple selectors for price
-      let price = 0;
-      const priceSelectors = [
-        '[data-symbol="' + symbol.replace('%5E', '^') + '"] [data-field="regularMarketPrice"]',
-        '[data-testid="qsp-price"]',
-        '.Fw\\(b\\).Fz\\(36px\\)',
-        '.Trsdu\\(0\\.3s\\).Fw\\(b\\).Fz\\(36px\\)'
-      ];
+    for (const url of urls) {
+      try {
+        if (url.includes('query1.finance.yahoo.com')) {
+          // Try Yahoo Finance API directly
+          const response = await axios.get(url, {
+            headers: {
+              ...this.HEADERS,
+              'Accept': 'application/json'
+            },
+            timeout: 8000
+          });
+          
+          if (response.data?.chart?.result?.[0]?.meta) {
+            const meta = response.data.chart.result[0].meta;
+            const currentPrice = meta.regularMarketPrice || meta.previousClose;
+            const previousClose = meta.previousClose;
+            const change = currentPrice - previousClose;
+            const changePercent = (change / previousClose) * 100;
+            
+            console.log(`${symbol}: Got live price ${currentPrice} from Yahoo API`);
+            
+            return {
+              symbol: symbol.replace('%5E', '^'),
+              price: currentPrice,
+              change: change,
+              changePercent: changePercent,
+              volume: meta.regularMarketVolume
+            };
+          }
+        } else {
+          // Try HTML scraping with improved selectors
+          const response = await axios.get(url, {
+            headers: {
+              ...this.HEADERS,
+              'Cache-Control': 'no-cache',
+              'Pragma': 'no-cache'
+            },
+            timeout: 8000
+          });
+          
+          const $ = cheerio.load(response.data);
+          
+          // Enhanced price selectors for 2024/2025 Yahoo Finance
+          let price = 0;
+          const priceSelectors = [
+            `[data-symbol="${symbol}"] [data-field="regularMarketPrice"]`,
+            '[data-testid="qsp-price"] span',
+            '[data-testid="qsp-price"]',
+            'fin-streamer[data-field="regularMarketPrice"]',
+            '.Fw\\(b\\).Fz\\(36px\\)',
+            '.yf-1tejb6',
+            '[class*="price"]'
+          ];
 
-      for (const selector of priceSelectors) {
-        const priceText = $(selector).first().text().replace(/,/g, '');
-        if (priceText && !isNaN(parseFloat(priceText))) {
-          price = parseFloat(priceText);
-          break;
+          for (const selector of priceSelectors) {
+            const priceElement = $(selector).first();
+            let priceText = priceElement.attr('value') || priceElement.text();
+            priceText = priceText.replace(/[,$]/g, '').trim();
+            
+            if (priceText && !isNaN(parseFloat(priceText))) {
+              price = parseFloat(priceText);
+              console.log(`${symbol}: Found price ${price} using selector: ${selector}`);
+              break;
+            }
+          }
+
+          if (price > 0) {
+            // Try to get change data
+            let change = 0;
+            let changePercent = 0;
+            const changeSelectors = [
+              `[data-symbol="${symbol}"] [data-field="regularMarketChange"]`,
+              '[data-testid="qsp-price-change"]',
+              'fin-streamer[data-field="regularMarketChange"]',
+              '.Fw\\(500\\).Pstart\\(8px\\)'
+            ];
+
+            for (const selector of changeSelectors) {
+              const changeElement = $(selector).first();
+              const changeText = changeElement.attr('value') || changeElement.text();
+              const match = changeText.match(/([+-]?\d+\.?\d*)\s*\(([+-]?\d+\.?\d*)%\)/);
+              if (match) {
+                change = parseFloat(match[1]);
+                changePercent = parseFloat(match[2]);
+                break;
+              }
+            }
+
+            return {
+              symbol: symbol.replace('%5E', '^'),
+              price,
+              change,
+              changePercent,
+              volume: undefined
+            };
+          }
         }
+      } catch (error) {
+        console.warn(`Failed to scrape ${url} for ${symbol}:`, error instanceof Error ? error.message : 'Unknown error');
+        continue;
       }
-
-      // Try multiple selectors for change
-      let change = 0;
-      let changePercent = 0;
-      const changeSelectors = [
-        '[data-symbol="' + symbol.replace('%5E', '^') + '"] [data-field="regularMarketChange"]',
-        '[data-testid="qsp-price-change"]',
-        '.Fw\\(500\\).Pstart\\(8px\\)'
-      ];
-
-      for (const selector of changeSelectors) {
-        const changeText = $(selector).first().text();
-        const match = changeText.match(/([+-]?\d+\.?\d*)\s*\(([+-]?\d+\.?\d*)%\)/);
-        if (match) {
-          change = parseFloat(match[1]);
-          changePercent = parseFloat(match[2]);
-          break;
-        }
-      }
-
-      // Fallback: try to get volume
-      let volume = undefined;
-      const volumeSelectors = [
-        '[data-symbol="' + symbol.replace('%5E', '^') + '"] [data-field="regularMarketVolume"]',
-        '[data-testid="VOLUME-value"]'
-      ];
-
-      for (const selector of volumeSelectors) {
-        const volumeText = $(selector).first().text().replace(/,/g, '');
-        if (volumeText && !isNaN(parseInt(volumeText))) {
-          volume = parseInt(volumeText);
-          break;
-        }
-      }
-
-      return {
-        symbol: symbol.replace('%5E', '^'),
-        price,
-        change,
-        changePercent,
-        volume
-      };
-    } catch (error) {
-      throw new Error(`Failed to scrape Yahoo Finance for ${symbol}: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
+    
+    throw new Error(`All data sources failed for ${symbol}`);
   }
 
   static async scrapeStockNews(symbol: string): Promise<string[]> {
