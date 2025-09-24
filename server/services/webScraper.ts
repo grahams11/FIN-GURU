@@ -761,4 +761,102 @@ export class WebScraperService {
       return [];
     }
   }
+
+  /**
+   * Search for ticker symbols using web scraping
+   */
+  static async scrapeSymbolSuggestions(query: string): Promise<import('@shared/schema').SymbolSuggestion[]> {
+    if (!query || query.length === 0) return [];
+    
+    // Sanitize query input
+    const cleanQuery = query.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().substring(0, 10);
+    if (!cleanQuery) return [];
+
+    try {
+      // Try Yahoo Finance lookup first
+      const suggestions = await this.scrapeYahooLookup(cleanQuery);
+      if (suggestions.length > 0) {
+        return suggestions.slice(0, 10); // Return top 10 suggestions
+      }
+
+      // Fallback to Google Finance search
+      return await this.scrapeGoogleFinanceSearch(cleanQuery);
+    } catch (error) {
+      console.error(`Error scraping symbol suggestions for ${query}:`, error);
+      return [];
+    }
+  }
+
+  private static async scrapeYahooLookup(query: string): Promise<import('@shared/schema').SymbolSuggestion[]> {
+    try {
+      const response = await axios.get(`${this.YAHOO_FINANCE_BASE}/lookup?s=${query}`, {
+        headers: this.HEADERS,
+        timeout: 5000
+      });
+      
+      const $ = cheerio.load(response.data);
+      const suggestions: import('@shared/schema').SymbolSuggestion[] = [];
+      
+      // Look for search results table
+      $('table tbody tr').each((i, element) => {
+        if (i >= 10) return false; // Limit to 10 results
+        
+        const symbolElement = $(element).find('td:nth-child(1) a');
+        const nameElement = $(element).find('td:nth-child(2)');
+        const exchangeElement = $(element).find('td:nth-child(3)');
+        const typeElement = $(element).find('td:nth-child(4)');
+        
+        const symbol = symbolElement.text().trim();
+        const name = nameElement.text().trim();
+        const exchange = exchangeElement.text().trim();
+        const type = typeElement.text().trim();
+        
+        if (symbol && name) {
+          suggestions.push({
+            symbol,
+            name,
+            exchange: exchange || undefined,
+            type: type || undefined
+          });
+        }
+      });
+      
+      return suggestions;
+    } catch (error) {
+      console.error(`Yahoo Finance lookup failed for ${query}:`, error);
+      return [];
+    }
+  }
+
+  private static async scrapeGoogleFinanceSearch(query: string): Promise<import('@shared/schema').SymbolSuggestion[]> {
+    try {
+      const response = await axios.get(`https://www.google.com/finance/quote/${query}:NASDAQ`, {
+        headers: this.HEADERS,
+        timeout: 5000
+      });
+      
+      const $ = cheerio.load(response.data);
+      const suggestions: import('@shared/schema').SymbolSuggestion[] = [];
+      
+      // Try to find the ticker symbol from the page
+      const titleText = $('title').text();
+      const match = titleText.match(/^([A-Z]+)/);
+      
+      if (match && match[1] === query) {
+        // Found exact match
+        const name = $('[data-attrid="title"]').text().split(' - ')[0] || query;
+        suggestions.push({
+          symbol: query,
+          name,
+          exchange: 'NASDAQ',
+          type: 'Stock'
+        });
+      }
+      
+      return suggestions;
+    } catch (error) {
+      console.error(`Google Finance search failed for ${query}:`, error);
+      return [];
+    }
+  }
 }

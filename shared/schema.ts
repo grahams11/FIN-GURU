@@ -315,3 +315,17 @@ export interface PortfolioAnalysis {
   overallSentiment: number;
   riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
 }
+
+export interface SymbolSuggestion {
+  symbol: string;
+  name: string;
+  exchange?: string;
+  type?: string;
+}
+
+export interface PriceQuote {
+  symbol: string;
+  price: number;
+  change?: number;
+  changePercent?: number;
+}

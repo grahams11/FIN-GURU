@@ -515,6 +515,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Ticker symbol search endpoint
+  app.get('/api/symbols', async (req, res) => {
+    try {
+      const query = req.query.q as string;
+      
+      if (!query || typeof query !== 'string') {
+        return res.status(400).json({ message: 'Query parameter q is required' });
+      }
+      
+      const suggestions = await WebScraperService.scrapeSymbolSuggestions(query);
+      res.json(suggestions);
+    } catch (error) {
+      console.error('Error searching ticker symbols:', error);
+      res.status(500).json({ message: 'Failed to search ticker symbols' });
+    }
+  });
+
+  // Price quote endpoint
+  app.get('/api/price/:symbol', async (req, res) => {
+    try {
+      const { symbol } = req.params;
+      
+      if (!symbol) {
+        return res.status(400).json({ message: 'Symbol parameter is required' });
+      }
+      
+      const stockData = await WebScraperService.scrapeStockPrice(symbol.toUpperCase());
+      
+      const priceQuote = {
+        symbol: stockData.symbol,
+        price: stockData.price,
+        change: stockData.change,
+        changePercent: stockData.changePercent
+      };
+      
+      res.json(priceQuote);
+    } catch (error) {
+      console.error(`Error fetching price for ${req.params.symbol}:`, error);
+      res.status(500).json({ message: 'Failed to fetch stock price' });
+    }
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }
