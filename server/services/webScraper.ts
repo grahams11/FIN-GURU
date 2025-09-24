@@ -912,7 +912,8 @@ export class WebScraperService {
       'PDD': { name: 'PDD Holdings Inc.', exchange: 'NASDAQ' },
       'SHOP': { name: 'Shopify Inc.', exchange: 'NYSE' },
       'ZM': { name: 'Zoom Video Communications', exchange: 'NASDAQ' },
-      'SPOT': { name: 'Spotify Technology S.A.', exchange: 'NYSE' }
+      'SPOT': { name: 'Spotify Technology S.A.', exchange: 'NYSE' },
+      'RR': { name: 'Richtech Robotics Inc.', exchange: 'NASDAQ' }
     };
 
     for (const candidate of candidates) {
@@ -924,6 +925,7 @@ export class WebScraperService {
         try {
           const priceData = await this.scrapeStockPrice(candidate);
           if (priceData.price > 0) {
+            console.log(`${candidate}: Using known company name: ${company.name}`);
             suggestions.push({
               symbol: candidate,
               name: company.name,
