@@ -46,12 +46,28 @@ export class WebScraperService {
   }
 
   static async scrapeStockPrice(symbol: string): Promise<StockData> {
-    try {
-      return await this.scrapeYahooFinance(symbol);
-    } catch (error) {
-      console.error(`Error scraping ${symbol}:`, error);
-      return this.getDefaultData(symbol);
+    // Try multiple sources for freshest data
+    const sources = [
+      () => this.scrapeGoogleFinance(symbol),
+      () => this.scrapeMarketWatch(symbol), 
+      () => this.scrapeYahooFinance(symbol)
+    ];
+
+    for (const scraper of sources) {
+      try {
+        const data = await scraper();
+        if (data.price > 0) {
+          console.log(`${symbol}: Got fresh price ${data.price}`);
+          return data;
+        }
+      } catch (error) {
+        console.warn(`Source ${scraper.name} failed for ${symbol}:`, error instanceof Error ? error.message : 'Unknown error');
+        continue;
+      }
     }
+    
+    console.error(`All sources failed for ${symbol}`);
+    return this.getDefaultData(symbol);
   }
 
   private static async scrapeYahooFinance(symbol: string): Promise<StockData> {
@@ -166,6 +182,108 @@ export class WebScraperService {
     }
     
     throw new Error(`All data sources failed for ${symbol}`);
+  }
+
+  private static async scrapeGoogleFinance(symbol: string): Promise<StockData> {
+    const url = `https://www.google.com/finance/quote/${symbol}:NASDAQ`;
+    
+    try {
+      const response = await axios.get(url, {
+        headers: {
+          ...this.HEADERS,
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        },
+        timeout: 8000
+      });
+      
+      const $ = cheerio.load(response.data);
+      
+      // Google Finance selectors
+      let price = 0;
+      const priceSelectors = [
+        '[data-last-price]',
+        '.YMlKec.fxKbKc', // Google Finance price class
+        '[jsname="Vebqub"]',
+        '.kf1m0'
+      ];
+
+      for (const selector of priceSelectors) {
+        const priceElement = $(selector).first();
+        let priceText = priceElement.attr('data-last-price') || priceElement.text();
+        priceText = priceText.replace(/[,$]/g, '').trim();
+        
+        if (priceText && !isNaN(parseFloat(priceText))) {
+          price = parseFloat(priceText);
+          console.log(`${symbol}: Google Finance found price ${price} using ${selector}`);
+          break;
+        }
+      }
+
+      if (price > 0) {
+        return {
+          symbol,
+          price,
+          change: 0,
+          changePercent: 0
+        };
+      }
+      
+      throw new Error('No valid price found');
+    } catch (error) {
+      throw new Error(`Google Finance scraping failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  private static async scrapeMarketWatch(symbol: string): Promise<StockData> {
+    const url = `https://www.marketwatch.com/investing/stock/${symbol.toLowerCase()}`;
+    
+    try {
+      const response = await axios.get(url, {
+        headers: {
+          ...this.HEADERS,
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        },
+        timeout: 8000
+      });
+      
+      const $ = cheerio.load(response.data);
+      
+      // MarketWatch selectors
+      let price = 0;
+      const priceSelectors = [
+        '.intraday__price .value',
+        '[data-module="LastPrice"]',
+        '.quotewrap .data .value',
+        'bg-quote'
+      ];
+
+      for (const selector of priceSelectors) {
+        const priceElement = $(selector).first();
+        let priceText = priceElement.text();
+        priceText = priceText.replace(/[,$]/g, '').trim();
+        
+        if (priceText && !isNaN(parseFloat(priceText))) {
+          price = parseFloat(priceText);
+          console.log(`${symbol}: MarketWatch found price ${price} using ${selector}`);
+          break;
+        }
+      }
+
+      if (price > 0) {
+        return {
+          symbol,
+          price,
+          change: 0,
+          changePercent: 0
+        };
+      }
+      
+      throw new Error('No valid price found');
+    } catch (error) {
+      throw new Error(`MarketWatch scraping failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
   }
 
   static async scrapeStockNews(symbol: string): Promise<string[]> {
