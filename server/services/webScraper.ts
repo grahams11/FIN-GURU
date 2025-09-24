@@ -15,6 +15,27 @@ export interface MarketIndices {
   vix: StockData;
 }
 
+export interface OptionContract {
+  strike: number;
+  bid: number;
+  ask: number;
+  last: number;
+  iv?: number; // implied volatility
+  oi?: number; // open interest
+  volume?: number;
+}
+
+export interface OptionsChain {
+  ticker: string;
+  expirations: string[]; // ISO date strings
+  byExpiration: {
+    [isoDate: string]: {
+      calls: OptionContract[];
+      puts: OptionContract[];
+    }
+  };
+}
+
 export class WebScraperService {
   private static readonly YAHOO_FINANCE_BASE = 'https://finance.yahoo.com';
   private static readonly HEADERS = {
@@ -283,6 +304,306 @@ export class WebScraperService {
       throw new Error('No valid price found');
     } catch (error) {
       throw new Error(`MarketWatch scraping failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+  
+  // Web scrape actual options chains from multiple sources
+  static async scrapeOptionsChain(ticker: string): Promise<OptionsChain> {
+    const sources = [
+      () => this.scrapeCboeOptions(ticker),
+      () => this.scrapeYahooFinanceOptions(ticker),
+      () => this.scrapeMarketWatchOptions(ticker)
+    ];
+    
+    for (const scraper of sources) {
+      try {
+        const chain = await scraper();
+        if (chain.expirations.length > 0) {
+          console.log(`${ticker}: Found ${chain.expirations.length} expirations from options scraper`);
+          return chain;
+        }
+      } catch (error) {
+        console.warn(`Options source failed for ${ticker}:`, error instanceof Error ? error.message : 'Unknown error');
+        continue;
+      }
+    }
+    
+    // Return empty chain if all sources fail
+    return {
+      ticker,
+      expirations: [],
+      byExpiration: {}
+    };
+  }
+  
+  // Primary: Cboe delayed quotes
+  private static async scrapeCboeOptions(ticker: string): Promise<OptionsChain> {
+    const url = `https://www.cboe.com/delayed_quotes/${ticker}/options`;
+    
+    try {
+      const response = await axios.get(url, {
+        headers: {
+          ...this.HEADERS,
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        },
+        timeout: 10000
+      });
+      
+      const $ = cheerio.load(response.data);
+      
+      // Extract expiration dates
+      const expirations: string[] = [];
+      $('select[name*="expiration"] option, .expiration-list a, select.expiration option').each((_, elem) => {
+        const dateText = $(elem).text().trim();
+        const dateValue = $(elem).attr('value');
+        
+        if (dateValue && dateValue !== '') {
+          expirations.push(dateValue);
+        } else if (dateText && this.isValidDateString(dateText)) {
+          const parsedDate = this.parseExpirationDate(dateText);
+          if (parsedDate) {
+            expirations.push(parsedDate);
+          }
+        }
+      });
+      
+      // Extract options data for current/first expiration
+      const byExpiration: { [key: string]: { calls: OptionContract[], puts: OptionContract[] } } = {};
+      
+      if (expirations.length > 0) {
+        const firstExpiration = expirations[0];
+        
+        const calls: OptionContract[] = [];
+        const puts: OptionContract[] = [];
+        
+        // Parse calls table
+        $('table.calls tr, table[data-testid*="calls"] tr, .calls-table tr').each((_, row) => {
+          const cells = $(row).find('td');
+          if (cells.length >= 4) {
+            const strike = parseFloat($(cells[2]).text().replace(/[,$]/g, ''));
+            const bid = parseFloat($(cells[0]).text().replace(/[,$]/g, ''));
+            const ask = parseFloat($(cells[1]).text().replace(/[,$]/g, ''));
+            const last = parseFloat($(cells[3]).text().replace(/[,$]/g, ''));
+            
+            if (!isNaN(strike) && strike > 0) {
+              calls.push({ strike, bid, ask, last });
+            }
+          }
+        });
+        
+        // Parse puts table
+        $('table.puts tr, table[data-testid*="puts"] tr, .puts-table tr').each((_, row) => {
+          const cells = $(row).find('td');
+          if (cells.length >= 4) {
+            const strike = parseFloat($(cells[2]).text().replace(/[,$]/g, ''));
+            const bid = parseFloat($(cells[0]).text().replace(/[,$]/g, ''));
+            const ask = parseFloat($(cells[1]).text().replace(/[,$]/g, ''));
+            const last = parseFloat($(cells[3]).text().replace(/[,$]/g, ''));
+            
+            if (!isNaN(strike) && strike > 0) {
+              puts.push({ strike, bid, ask, last });
+            }
+          }
+        });
+        
+        if (calls.length > 0 || puts.length > 0) {
+          byExpiration[firstExpiration] = { calls, puts };
+        }
+      }
+      
+      return {
+        ticker,
+        expirations,
+        byExpiration
+      };
+      
+    } catch (error) {
+      throw new Error(`Cboe options scraping failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+  
+  // Secondary: Yahoo Finance Options
+  private static async scrapeYahooFinanceOptions(ticker: string): Promise<OptionsChain> {
+    const url = `https://finance.yahoo.com/quote/${ticker}/options`;
+    
+    try {
+      const response = await axios.get(url, {
+        headers: {
+          ...this.HEADERS,
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        },
+        timeout: 10000
+      });
+      
+      const $ = cheerio.load(response.data);
+      
+      // Extract expiration dates from dropdown/links
+      const expirations: string[] = [];
+      $('a[href*="/options?date="], select.expiration option').each((_, elem) => {
+        const href = $(elem).attr('href');
+        const dateParam = href?.match(/date=(\d+)/);
+        
+        if (dateParam) {
+          const timestamp = parseInt(dateParam[1]);
+          const date = new Date(timestamp * 1000);
+          expirations.push(date.toISOString().split('T')[0]);
+        }
+      });
+      
+      // Extract options data
+      const byExpiration: { [key: string]: { calls: OptionContract[], puts: OptionContract[] } } = {};
+      
+      if (expirations.length > 0) {
+        const firstExpiration = expirations[0];
+        const calls: OptionContract[] = [];
+        const puts: OptionContract[] = [];
+        
+        // Parse calls table
+        $('table[data-testid*="calls"] tbody tr').each((_, row) => {
+          const cells = $(row).find('td');
+          if (cells.length >= 5) {
+            const strike = parseFloat($(cells[2]).text().replace(/[,$]/g, ''));
+            const last = parseFloat($(cells[3]).text().replace(/[,$]/g, ''));
+            const bid = parseFloat($(cells[4]).text().replace(/[,$]/g, ''));
+            const ask = parseFloat($(cells[5]).text().replace(/[,$]/g, ''));
+            
+            if (!isNaN(strike) && strike > 0) {
+              calls.push({ strike, bid, ask, last });
+            }
+          }
+        });
+        
+        // Parse puts table
+        $('table[data-testid*="puts"] tbody tr').each((_, row) => {
+          const cells = $(row).find('td');
+          if (cells.length >= 5) {
+            const strike = parseFloat($(cells[2]).text().replace(/[,$]/g, ''));
+            const last = parseFloat($(cells[3]).text().replace(/[,$]/g, ''));
+            const bid = parseFloat($(cells[4]).text().replace(/[,$]/g, ''));
+            const ask = parseFloat($(cells[5]).text().replace(/[,$]/g, ''));
+            
+            if (!isNaN(strike) && strike > 0) {
+              puts.push({ strike, bid, ask, last });
+            }
+          }
+        });
+        
+        if (calls.length > 0 || puts.length > 0) {
+          byExpiration[firstExpiration] = { calls, puts };
+        }
+      }
+      
+      return {
+        ticker,
+        expirations,
+        byExpiration
+      };
+      
+    } catch (error) {
+      throw new Error(`Yahoo Finance options scraping failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+  
+  // Tertiary: MarketWatch Options
+  private static async scrapeMarketWatchOptions(ticker: string): Promise<OptionsChain> {
+    const url = `https://www.marketwatch.com/investing/stock/${ticker.toLowerCase()}/options`;
+    
+    try {
+      const response = await axios.get(url, {
+        headers: {
+          ...this.HEADERS,
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        },
+        timeout: 10000
+      });
+      
+      const $ = cheerio.load(response.data);
+      
+      // Extract expiration dates
+      const expirations: string[] = [];
+      $('a[data-track-code*="Options_Expirations"], .expiration-list a').each((_, elem) => {
+        const dateText = $(elem).text().trim();
+        const parsedDate = this.parseExpirationDate(dateText);
+        if (parsedDate) {
+          expirations.push(parsedDate);
+        }
+      });
+      
+      // Extract options data
+      const byExpiration: { [key: string]: { calls: OptionContract[], puts: OptionContract[] } } = {};
+      
+      if (expirations.length > 0) {
+        const firstExpiration = expirations[0];
+        const calls: OptionContract[] = [];
+        const puts: OptionContract[] = [];
+        
+        // Parse options table rows
+        $('.options-table tr, table.options tr').each((_, row) => {
+          const cells = $(row).find('td');
+          if (cells.length >= 4) {
+            const strike = parseFloat($(cells.find('.option__strike, td:nth-child(3)')).text().replace(/[,$]/g, ''));
+            const bid = parseFloat($(cells[0]).text().replace(/[,$]/g, ''));
+            const ask = parseFloat($(cells[1]).text().replace(/[,$]/g, ''));
+            const last = parseFloat($(cells[2]).text().replace(/[,$]/g, ''));
+            
+            if (!isNaN(strike) && strike > 0) {
+              // Determine if it's a call or put based on table context or cell content
+              const isCall = $(row).closest('.calls-table').length > 0 || $(row).find('.call-indicator').length > 0;
+              const contract = { strike, bid, ask, last };
+              
+              if (isCall) {
+                calls.push(contract);
+              } else {
+                puts.push(contract);
+              }
+            }
+          }
+        });
+        
+        if (calls.length > 0 || puts.length > 0) {
+          byExpiration[firstExpiration] = { calls, puts };
+        }
+      }
+      
+      return {
+        ticker,
+        expirations,
+        byExpiration
+      };
+      
+    } catch (error) {
+      throw new Error(`MarketWatch options scraping failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+  
+  // Helper methods for date parsing
+  private static isValidDateString(dateStr: string): boolean {
+    const datePatterns = [
+      /^\d{4}-\d{2}-\d{2}$/, // 2025-01-17
+      /^\w{3}\s+\d{1,2},\s+\d{4}$/, // Jan 17, 2025
+      /^\d{1,2}\/\d{1,2}\/\d{4}$/, // 1/17/2025
+      /^\w{3}\s+\d{1,2}\s+'\d{2}$/ // Jan 17 '25
+    ];
+    
+    return datePatterns.some(pattern => pattern.test(dateStr));
+  }
+  
+  private static parseExpirationDate(dateStr: string): string | null {
+    try {
+      // Try parsing various date formats
+      const date = new Date(dateStr);
+      
+      if (isNaN(date.getTime())) {
+        return null;
+      }
+      
+      // Return in ISO format (YYYY-MM-DD)
+      return date.toISOString().split('T')[0];
+    } catch (error) {
+      return null;
     }
   }
 

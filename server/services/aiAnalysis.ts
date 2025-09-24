@@ -1,5 +1,101 @@
 import type { TradeRecommendation, MarketOverviewData, Greeks } from '@shared/schema';
-import { WebScraperService } from './webScraper';
+import { WebScraperService, type OptionsChain } from './webScraper';
+
+// Options Market Standards
+class OptionsMarketStandards {
+  // Calculate realistic strike price based on market conventions
+  static getValidStrike(currentPrice: number, targetStrike: number): number {
+    let interval: number;
+    
+    // Determine strike interval based on price level
+    if (currentPrice < 50) {
+      interval = 1.0;  // $1 intervals for stocks under $50
+    } else if (currentPrice < 200) {
+      interval = 2.5;  // $2.50 intervals for stocks $50-$200
+    } else {
+      interval = 5.0;  // $5 intervals for stocks over $200
+    }
+    
+    // Round to nearest valid strike
+    const validStrike = Math.round(targetStrike / interval) * interval;
+    
+    // Ensure we have reasonable strikes around current price (not too far OTM)
+    const maxDeviation = currentPrice * 0.15; // Max 15% from current price
+    const minStrike = currentPrice - maxDeviation;
+    const maxStrike = currentPrice + maxDeviation;
+    
+    return Math.max(minStrike, Math.min(maxStrike, validStrike));
+  }
+  
+  // Get next valid options expiration date
+  static getNextValidExpiration(daysOut: number): Date {
+    const today = new Date();
+    const targetDate = new Date();
+    targetDate.setDate(today.getDate() + daysOut);
+    
+    // 2025 Monthly Expiration Dates (Third Friday of each month)
+    const monthlyExpirations2025 = [
+      new Date(2025, 0, 17),  // January 17
+      new Date(2025, 1, 21),  // February 21
+      new Date(2025, 2, 21),  // March 21
+      new Date(2025, 3, 17),  // April 17 (Thursday due to Good Friday)
+      new Date(2025, 4, 16),  // May 16
+      new Date(2025, 5, 20),  // June 20
+      new Date(2025, 6, 18),  // July 18
+      new Date(2025, 7, 15),  // August 15
+      new Date(2025, 8, 19),  // September 19
+      new Date(2025, 9, 17),  // October 17
+      new Date(2025, 10, 21), // November 21
+      new Date(2025, 11, 19)  // December 19
+    ];
+    
+    // Find the next valid expiration after target date
+    let bestExpiration = monthlyExpirations2025[0];
+    
+    for (const expDate of monthlyExpirations2025) {
+      if (expDate > targetDate) {
+        bestExpiration = expDate;
+        break;
+      }
+    }
+    
+    // If target is beyond December 2025, use December expiration
+    if (targetDate > monthlyExpirations2025[monthlyExpirations2025.length - 1]) {
+      bestExpiration = monthlyExpirations2025[monthlyExpirations2025.length - 1];
+    }
+    
+    return bestExpiration;
+  }
+  
+  // Check if a strike price is valid for the given stock price
+  static isValidStrike(currentPrice: number, strikePrice: number): boolean {
+    const validStrike = this.getValidStrike(currentPrice, strikePrice);
+    return Math.abs(validStrike - strikePrice) < 0.01; // Allow for rounding
+  }
+  
+  // Get available strikes around current price (typical 5 strikes: 2 below, 1 ATM, 2 above)
+  static getAvailableStrikes(currentPrice: number): number[] {
+    const strikes: number[] = [];
+    const atmStrike = this.getValidStrike(currentPrice, currentPrice);
+    
+    // Get interval for this price level
+    let interval: number;
+    if (currentPrice < 50) {
+      interval = 1.0;
+    } else if (currentPrice < 200) {
+      interval = 2.5;
+    } else {
+      interval = 5.0;
+    }
+    
+    // Create 5 strikes: 2 below, 1 ATM, 2 above
+    for (let i = -2; i <= 2; i++) {
+      strikes.push(atmStrike + (i * interval));
+    }
+    
+    return strikes.filter(strike => strike > 0); // Remove any negative strikes
+  }
+}
 
 // Black-Scholes Greeks Calculator
 interface BlackScholesGreeks {
@@ -221,16 +317,59 @@ export class AIAnalysisService {
       const currentPrice = stockData.price;
       const isCallStrategy = sentiment.bullishness >= 0.55;
       
-      // Calculate strike price (ATM to slightly ITM/OTM based on sentiment)
-      const strikeVariance = sentiment.bullishness >= 0.7 ? 0.01 : 0.02; // 1-2% variance based on confidence
-      const strikePrice = isCallStrategy ? 
-        currentPrice * (1 + strikeVariance) : // Slightly OTM calls
-        currentPrice * (1 - strikeVariance); // Slightly OTM puts
+      // Scrape real options chain data
+      const optionsChain = await WebScraperService.scrapeOptionsChain(ticker);
       
-      // Calculate expiry date (10-21 days out)
-      const daysOut = Math.max(10, Math.min(21, 14 + Math.round(sentiment.confidence * 7)));
-      const expiryDate = new Date();
-      expiryDate.setDate(expiryDate.getDate() + daysOut);
+      if (optionsChain.expirations.length === 0) {
+        console.warn(`No options data found for ${ticker}, skipping`);
+        return null;
+      }
+      
+      // Select appropriate expiration (nearest 2-8 weeks out)
+      const targetDays = Math.max(14, Math.min(56, 21 + Math.round(sentiment.confidence * 21)));
+      const targetDate = new Date();
+      targetDate.setDate(targetDate.getDate() + targetDays);
+      
+      let selectedExpiration = optionsChain.expirations[0]; // fallback to first
+      for (const exp of optionsChain.expirations) {
+        const expDate = new Date(exp);
+        if (expDate >= targetDate) {
+          selectedExpiration = exp;
+          break;
+        }
+      }
+      
+      const chainData = optionsChain.byExpiration[selectedExpiration];
+      if (!chainData || (!chainData.calls.length && !chainData.puts.length)) {
+        console.warn(`No options chain data for ${ticker} expiration ${selectedExpiration}`);
+        return null;
+      }
+      
+      // Select appropriate strike from real available strikes
+      const availableStrikes = isCallStrategy ? chainData.calls : chainData.puts;
+      if (availableStrikes.length === 0) {
+        console.warn(`No ${isCallStrategy ? 'calls' : 'puts'} available for ${ticker}`);
+        return null;
+      }
+      
+      // Find strike closest to ATM or slightly OTM
+      const targetStrikePrice = isCallStrategy ? 
+        currentPrice * 1.02 : // Slightly OTM calls (2% above)
+        currentPrice * 0.98;  // Slightly OTM puts (2% below)
+      
+      let selectedStrike = availableStrikes[0];
+      let bestDifference = Math.abs(selectedStrike.strike - targetStrikePrice);
+      
+      for (const strike of availableStrikes) {
+        const difference = Math.abs(strike.strike - targetStrikePrice);
+        if (difference < bestDifference) {
+          bestDifference = difference;
+          selectedStrike = strike;
+        }
+      }
+      
+      const strikePrice = selectedStrike.strike;
+      const expiryDate = new Date(selectedExpiration);
       
       // Estimate implied volatility based on VIX and stock volatility
       const baseIV = 0.25; // Base 25%
@@ -253,9 +392,9 @@ export class AIAnalysisService {
       const holdDays = Math.min(daysOut, sentiment.confidence > 0.7 ? 7 : 14);
       
       return {
-        strikePrice: Math.round(strikePrice * 100) / 100,
+        strikePrice: strikePrice,
         expiry: this.formatExpiry(expiryDate.toISOString()),
-        entryPrice: Math.round(entryPrice * 100) / 100,
+        entryPrice: Math.max(0.05, selectedStrike.last || selectedStrike.bid || entryPrice), // Use real market price
         exitPrice: Math.round(exitPrice * 100) / 100,
         contracts,
         holdDays,
