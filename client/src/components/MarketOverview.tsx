@@ -39,7 +39,7 @@ export function MarketOverview({ data, isLoading }: MarketOverviewProps) {
             <div>
               <p className="text-sm text-muted-foreground">S&P 500</p>
               <p className="text-2xl font-bold" data-testid="text-sp500-value">
-                {data?.sp500?.value ? data.sp500.value.toLocaleString() : 'N/A'}
+                {data?.sp500?.price ? data.sp500.price.toLocaleString() : 'N/A'}
               </p>
               <p 
                 className={`text-sm ${(data?.sp500.changePercent ?? 0) >= 0 ? 'text-primary' : 'text-destructive'}`}
@@ -61,7 +61,7 @@ export function MarketOverview({ data, isLoading }: MarketOverviewProps) {
             <div>
               <p className="text-sm text-muted-foreground">NASDAQ</p>
               <p className="text-2xl font-bold" data-testid="text-nasdaq-value">
-                {data?.nasdaq?.value ? data.nasdaq.value.toLocaleString() : 'N/A'}
+                {data?.nasdaq?.price ? data.nasdaq.price.toLocaleString() : 'N/A'}
               </p>
               <p 
                 className={`text-sm ${(data?.nasdaq.changePercent ?? 0) >= 0 ? 'text-primary' : 'text-destructive'}`}
@@ -83,7 +83,7 @@ export function MarketOverview({ data, isLoading }: MarketOverviewProps) {
             <div>
               <p className="text-sm text-muted-foreground">VIX</p>
               <p className="text-2xl font-bold" data-testid="text-vix-value">
-                {data?.vix?.value ? data.vix.value.toFixed(2) : 'N/A'}
+                {data?.vix?.price ? data.vix.price.toFixed(2) : 'N/A'}
               </p>
               <p 
                 className={`text-sm ${(data?.vix.changePercent ?? 0) >= 0 ? 'text-primary' : 'text-destructive'}`}
