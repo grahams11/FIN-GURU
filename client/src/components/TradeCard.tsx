@@ -79,7 +79,13 @@ export function TradeCard({ trade, rank }: TradeCardProps) {
           </div>
         </div>
         
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
+          <div>
+            <p className="text-xs text-muted-foreground uppercase tracking-wide">Current Price</p>
+            <p className="text-sm font-medium text-primary" data-testid={`current-${trade.ticker}`}>
+              ${trade.currentPrice.toFixed(2)}
+            </p>
+          </div>
           <div>
             <p className="text-xs text-muted-foreground uppercase tracking-wide">Strike Price</p>
             <p className="text-sm font-medium" data-testid={`strike-${trade.ticker}`}>

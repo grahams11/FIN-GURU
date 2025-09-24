@@ -191,6 +191,7 @@ export class AIAnalysisService {
 
       return {
         ticker,
+        currentPrice: stockData.price,
         strikePrice: optionsStrategy.strikePrice,
         expiry: optionsStrategy.expiry,
         entryPrice: optionsStrategy.entryPrice,
@@ -220,11 +221,11 @@ export class AIAnalysisService {
       const currentPrice = stockData.price;
       const isCallStrategy = sentiment.bullishness >= 0.55;
       
-      // Calculate strike price (5-15% OTM)
-      const otmPercent = 0.05 + (sentiment.bullishness * 0.1); // 5-15% based on sentiment
+      // Calculate strike price (ATM to slightly ITM/OTM based on sentiment)
+      const strikeVariance = sentiment.bullishness >= 0.7 ? 0.01 : 0.02; // 1-2% variance based on confidence
       const strikePrice = isCallStrategy ? 
-        currentPrice * (1 + otmPercent) : 
-        currentPrice * (1 - otmPercent);
+        currentPrice * (1 + strikeVariance) : // Slightly OTM calls
+        currentPrice * (1 - strikeVariance); // Slightly OTM puts
       
       // Calculate expiry date (10-21 days out)
       const daysOut = Math.max(10, Math.min(21, 14 + Math.round(sentiment.confidence * 7)));
@@ -467,13 +468,21 @@ export class AIAnalysisService {
     entryPrice: number,
     sentiment: number
   ): number {
-    const expectedMove = currentPrice * (0.05 + sentiment * 0.1); // 5-15% move based on sentiment
-    const targetPrice = currentPrice + expectedMove;
-    const intrinsicValue = Math.max(0, targetPrice - strikePrice);
-    const exitValue = intrinsicValue + (entryPrice * 0.3); // Time value decay
+    // More realistic move expectation for ATM options
+    const expectedMove = currentPrice * (0.03 + sentiment * 0.05); // 3-8% move based on sentiment
+    const isCall = strikePrice > currentPrice;
+    const targetPrice = isCall ? currentPrice + expectedMove : currentPrice - expectedMove;
+    
+    // Calculate intrinsic value at target
+    const intrinsicValue = isCall ? 
+      Math.max(0, targetPrice - strikePrice) : 
+      Math.max(0, strikePrice - targetPrice);
+    
+    // Estimate exit value with some time value remaining
+    const exitValue = intrinsicValue + (entryPrice * 0.4); // More conservative time value
     
     const roi = ((exitValue - entryPrice) / entryPrice) * 100;
-    return Math.min(300, roi); // Cap ROI at 300% but allow negative values
+    return Math.min(200, roi); // Cap ROI at 200% but allow negative values
   }
 
   private static calculateAIConfidence(

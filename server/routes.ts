@@ -67,6 +67,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           try {
             return await storage.createOptionsTrade({
               ticker: rec.ticker,
+              currentPrice: rec.currentPrice,
               strikePrice: rec.strikePrice,
               expiry: rec.expiry,
               entryPrice: rec.entryPrice,
@@ -111,6 +112,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           try {
             return await storage.createOptionsTrade({
               ticker: rec.ticker,
+              currentPrice: rec.currentPrice,
               strikePrice: rec.strikePrice,
               expiry: rec.expiry,
               entryPrice: rec.entryPrice,
