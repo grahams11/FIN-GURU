@@ -25,7 +25,7 @@ export class WebScraperService {
     try {
       const symbols = ['%5EGSPC', '%5EIXIC', '%5EVIX']; // S&P 500, NASDAQ, VIX
       const results = await Promise.allSettled(
-        symbols.map(symbol => this.scrapeYahooFinance(symbol))
+        symbols.map(symbol => this.scrapeStockPrice(symbol))
       );
 
       const [sp500Result, nasdaqResult, vixResult] = results;
