@@ -249,6 +249,7 @@ export function PositionInputForm({ onSuccess }: PositionInputFormProps) {
                                       setTickerInput("");
                                     }}
                                     data-testid={`ticker-option-${suggestion.symbol}`}
+                                    className="data-[selected=true]:text-accent-foreground [&_span:nth-child(2)]:data-[selected=true]:!text-black [&_span:nth-child(2)]:!text-black"
                                   >
                                     <Check
                                       className={cn(
@@ -258,7 +259,7 @@ export function PositionInputForm({ onSuccess }: PositionInputFormProps) {
                                     />
                                     <div className="flex flex-col">
                                       <span className="font-medium">{suggestion.symbol}</span>
-                                      <span className="text-sm text-muted-foreground truncate">
+                                      <span className="text-sm text-black dark:text-black truncate !text-black">
                                         {suggestion.name}
                                         {suggestion.exchange && ` • ${suggestion.exchange}`}
                                       </span>

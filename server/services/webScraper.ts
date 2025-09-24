@@ -960,7 +960,7 @@ export class WebScraperService {
     }
     
     // Remove duplicates and the original query
-    return [...new Set(variations)].filter(v => v !== query && v.length <= 5);
+    return Array.from(new Set(variations)).filter(v => v !== query && v.length <= 5);
   }
 
   /**
@@ -973,17 +973,75 @@ export class WebScraperService {
       
       if (priceData.price > 0) {
         console.log(`Exact symbol ${query} validated with price: $${priceData.price}`);
+        
+        // Try to get actual company name
+        const companyName = await this.scrapeCompanyName(query);
+        
         return [{
           symbol: query,
-          name: `${query} Corporation`, // Generic name since we can't determine the exact name
+          name: companyName || `${query} Inc.`, // Use scraped name or generic fallback
           exchange: undefined,
           type: 'Stock'
         }];
       }
     } catch (error) {
-      console.log(`Exact symbol validation failed for ${query}:`, error.message);
+      console.log(`Exact symbol validation failed for ${query}:`, (error as Error).message);
     }
     
     return [];
+  }
+
+  /**
+   * Scrape actual company name for a ticker symbol
+   */
+  private static async scrapeCompanyName(symbol: string): Promise<string | null> {
+    try {
+      // Try Google Finance first for company name
+      const response = await axios.get(`https://www.google.com/finance/quote/${symbol}:NASDAQ`, {
+        headers: this.HEADERS,
+        timeout: 5000
+      });
+      
+      const $ = cheerio.load(response.data);
+      
+      // Try to find company name from page title or specific selectors
+      const titleText = $('title').text();
+      if (titleText && titleText.includes(':')) {
+        const parts = titleText.split(':')[0].trim();
+        if (parts && parts !== symbol && parts.length > symbol.length) {
+          return parts;
+        }
+      }
+      
+      // Try alternative selector for company name
+      const companyNameElement = $('h1[data-attrid="title"]');
+      if (companyNameElement.length > 0) {
+        const companyName = companyNameElement.text().trim();
+        if (companyName && companyName !== symbol) {
+          return companyName;
+        }
+      }
+      
+      // Fallback to Yahoo Finance
+      const yahooResponse = await axios.get(`${this.YAHOO_FINANCE_BASE}/quote/${symbol}`, {
+        headers: this.HEADERS,
+        timeout: 5000
+      });
+      
+      const $yahoo = cheerio.load(yahooResponse.data);
+      const yahooTitle = $yahoo('h1').first().text().trim();
+      if (yahooTitle && yahooTitle !== symbol) {
+        // Clean up the title (remove ticker symbol if present)
+        const cleanTitle = yahooTitle.replace(new RegExp(`\\(${symbol}\\)`, 'gi'), '').trim();
+        if (cleanTitle) {
+          return cleanTitle;
+        }
+      }
+      
+    } catch (error) {
+      console.log(`Failed to scrape company name for ${symbol}:`, (error as Error).message);
+    }
+    
+    return null;
   }
 }
