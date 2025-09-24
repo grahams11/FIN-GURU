@@ -168,6 +168,161 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Portfolio positions endpoints
+  app.get('/api/positions', async (req, res) => {
+    try {
+      const positions = await storage.getPositions();
+      res.json(positions);
+    } catch (error) {
+      console.error('Error fetching positions:', error);
+      res.status(500).json({ message: 'Failed to fetch positions' });
+    }
+  });
+  
+  app.get('/api/positions/performance', async (req, res) => {
+    try {
+      const performance = await storage.getPositionPerformance();
+      res.json(performance);
+    } catch (error) {
+      console.error('Error fetching position performance:', error);
+      res.status(500).json({ message: 'Failed to fetch position performance' });
+    }
+  });
+  
+  app.post('/api/positions/:id/close', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const success = await storage.closePosition(id);
+      
+      if (success) {
+        res.json({ message: 'Position closed successfully' });
+      } else {
+        res.status(404).json({ message: 'Position not found' });
+      }
+    } catch (error) {
+      console.error('Error closing position:', error);
+      res.status(500).json({ message: 'Failed to close position' });
+    }
+  });
+  
+  // Trade history endpoints
+  app.get('/api/trade-history', async (req, res) => {
+    try {
+      const limit = req.query.limit ? parseInt(req.query.limit as string) : 50;
+      const trades = await storage.getTradeHistory(undefined, limit);
+      res.json(trades);
+    } catch (error) {
+      console.error('Error fetching trade history:', error);
+      res.status(500).json({ message: 'Failed to fetch trade history' });
+    }
+  });
+  
+  app.get('/api/performance-metrics', async (req, res) => {
+    try {
+      const metrics = await storage.getPerformanceMetrics();
+      res.json(metrics);
+    } catch (error) {
+      console.error('Error fetching performance metrics:', error);
+      res.status(500).json({ message: 'Failed to fetch performance metrics' });
+    }
+  });
+  
+  // Watchlist endpoints
+  app.get('/api/watchlists', async (req, res) => {
+    try {
+      const watchlists = await storage.getWatchlists();
+      res.json(watchlists);
+    } catch (error) {
+      console.error('Error fetching watchlists:', error);
+      res.status(500).json({ message: 'Failed to fetch watchlists' });
+    }
+  });
+  
+  app.post('/api/watchlists', async (req, res) => {
+    try {
+      const watchlist = await storage.createWatchlist(req.body);
+      res.status(201).json(watchlist);
+    } catch (error) {
+      console.error('Error creating watchlist:', error);
+      res.status(500).json({ message: 'Failed to create watchlist' });
+    }
+  });
+  
+  app.get('/api/watchlists/:id/items', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const items = await storage.getWatchlistItems(id);
+      res.json(items);
+    } catch (error) {
+      console.error('Error fetching watchlist items:', error);
+      res.status(500).json({ message: 'Failed to fetch watchlist items' });
+    }
+  });
+  
+  app.post('/api/watchlists/:id/items', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const item = await storage.addToWatchlist({ ...req.body, watchlistId: id });
+      res.status(201).json(item);
+    } catch (error) {
+      console.error('Error adding to watchlist:', error);
+      res.status(500).json({ message: 'Failed to add to watchlist' });
+    }
+  });
+  
+  app.delete('/api/watchlists/:id/items/:ticker', async (req, res) => {
+    try {
+      const { id, ticker } = req.params;
+      const success = await storage.removeFromWatchlist(id, ticker);
+      
+      if (success) {
+        res.json({ message: 'Item removed from watchlist' });
+      } else {
+        res.status(404).json({ message: 'Item not found in watchlist' });
+      }
+    } catch (error) {
+      console.error('Error removing from watchlist:', error);
+      res.status(500).json({ message: 'Failed to remove from watchlist' });
+    }
+  });
+  
+  // Price alerts endpoints
+  app.get('/api/price-alerts', async (req, res) => {
+    try {
+      const alerts = await storage.getPriceAlerts();
+      res.json(alerts);
+    } catch (error) {
+      console.error('Error fetching price alerts:', error);
+      res.status(500).json({ message: 'Failed to fetch price alerts' });
+    }
+  });
+  
+  app.post('/api/price-alerts', async (req, res) => {
+    try {
+      const alert = await storage.createPriceAlert(req.body);
+      res.status(201).json(alert);
+    } catch (error) {
+      console.error('Error creating price alert:', error);
+      res.status(500).json({ message: 'Failed to create price alert' });
+    }
+  });
+  
+  app.patch('/api/price-alerts/:id', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const alert = await storage.updatePriceAlert(id, req.body);
+      
+      if (alert) {
+        res.json(alert);
+      } else {
+        res.status(404).json({ message: 'Price alert not found' });
+      }
+    } catch (error) {
+      console.error('Error updating price alert:', error);
+      res.status(500).json({ message: 'Failed to update price alert' });
+    }
+  });
+
   // Sector performance endpoint
   app.get('/api/sector-performance', async (req, res) => {
     try {

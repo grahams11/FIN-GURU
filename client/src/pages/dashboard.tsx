@@ -1,6 +1,8 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { MarketOverview } from "@/components/MarketOverview";
 import { OptionsTraderAI } from "@/components/OptionsTraderAI";
+import { PortfolioTracker } from "@/components/PortfolioTracker";
 import { Card, CardContent } from "@/components/ui/card";
 import { 
   PieChart, 
@@ -12,29 +14,36 @@ import {
 import type { MarketOverviewData, AiInsights, OptionsTrade, PortfolioSummary, SectorData } from "@shared/schema";
 
 export default function Dashboard() {
+  const [activeView, setActiveView] = useState<'dashboard' | 'portfolio' | 'analytics'>('dashboard');
+
   const { data: marketData, isLoading: marketLoading } = useQuery<MarketOverviewData>({
     queryKey: ["/api/market-overview"],
     refetchInterval: 30000, // Refresh every 30 seconds
+    enabled: activeView === 'dashboard',
   });
 
   const { data: aiInsights, isLoading: aiLoading } = useQuery<AiInsights>({
     queryKey: ["/api/ai-insights"],
     refetchInterval: 60000, // Refresh every minute
+    enabled: activeView === 'dashboard',
   });
 
   const { data: topTrades, isLoading: tradesLoading } = useQuery<OptionsTrade[]>({
     queryKey: ["/api/top-trades"],
     refetchInterval: 180000, // Refresh every 3 minutes
+    enabled: activeView === 'dashboard',
   });
 
   const { data: portfolioData } = useQuery<PortfolioSummary>({
     queryKey: ["/api/portfolio-summary"],
     refetchInterval: 30000,
+    enabled: activeView === 'dashboard',
   });
 
   const { data: sectorData } = useQuery<SectorData[]>({
     queryKey: ["/api/sector-performance"],
     refetchInterval: 60000,
+    enabled: activeView === 'dashboard',
   });
 
   return (
@@ -52,27 +61,39 @@ export default function Dashboard() {
               </div>
               <div className="hidden md:block">
                 <nav className="flex space-x-8">
-                  <a 
-                    href="#" 
-                    className="text-primary font-medium border-b-2 border-primary pb-2"
+                  <button 
+                    onClick={() => setActiveView('dashboard')}
+                    className={`${
+                      activeView === 'dashboard' 
+                        ? 'text-primary font-medium border-b-2 border-primary pb-2' 
+                        : 'text-muted-foreground hover:text-foreground transition-colors'
+                    }`}
                     data-testid="nav-dashboard"
                   >
                     Dashboard
-                  </a>
-                  <a 
-                    href="#" 
-                    className="text-muted-foreground hover:text-foreground transition-colors"
+                  </button>
+                  <button 
+                    onClick={() => setActiveView('portfolio')}
+                    className={`${
+                      activeView === 'portfolio' 
+                        ? 'text-primary font-medium border-b-2 border-primary pb-2' 
+                        : 'text-muted-foreground hover:text-foreground transition-colors'
+                    }`}
                     data-testid="nav-portfolio"
                   >
                     Portfolio
-                  </a>
-                  <a 
-                    href="#" 
-                    className="text-muted-foreground hover:text-foreground transition-colors"
+                  </button>
+                  <button 
+                    onClick={() => setActiveView('analytics')}
+                    className={`${
+                      activeView === 'analytics' 
+                        ? 'text-primary font-medium border-b-2 border-primary pb-2' 
+                        : 'text-muted-foreground hover:text-foreground transition-colors'
+                    }`}
                     data-testid="nav-analytics"
                   >
                     Analytics
-                  </a>
+                  </button>
                   <a 
                     href="#" 
                     className="text-muted-foreground hover:text-foreground transition-colors"
@@ -101,19 +122,21 @@ export default function Dashboard() {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Market Overview */}
-        <MarketOverview data={marketData} isLoading={marketLoading} />
+        {activeView === 'dashboard' && (
+          <>
+            {/* Market Overview */}
+            <MarketOverview data={marketData} isLoading={marketLoading} />
 
-        {/* Options Trader AI */}
-        <OptionsTraderAI 
-          insights={aiInsights} 
-          trades={topTrades} 
-          isLoading={aiLoading || tradesLoading}
-        />
+            {/* Options Trader AI */}
+            <OptionsTraderAI 
+              insights={aiInsights} 
+              trades={topTrades} 
+              isLoading={aiLoading || tradesLoading}
+            />
 
-        {/* Additional Dashboard Widgets */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Portfolio Summary */}
+            {/* Additional Dashboard Widgets */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Portfolio Summary */}
           <Card className="bg-card border-border">
             <CardContent className="p-6">
               <div className="flex items-center justify-between mb-4">
@@ -127,7 +150,7 @@ export default function Dashboard() {
                     className="font-semibold" 
                     data-testid="text-total-value"
                   >
-                    {portfolioData?.totalValue ? `$${portfolioData.totalValue.toLocaleString()}` : 'Loading...'}
+                    {portfolioData?.totalValue !== undefined ? `$${portfolioData.totalValue.toLocaleString()}` : 'Loading...'}
                   </span>
                 </div>
                 <div className="flex justify-between items-center">
@@ -136,7 +159,7 @@ export default function Dashboard() {
                     className={`font-semibold ${(portfolioData?.dailyPnL ?? 0) >= 0 ? 'text-primary' : 'text-destructive'}`}
                     data-testid="text-daily-pnl"
                   >
-                    {portfolioData?.dailyPnL ? 
+                    {portfolioData?.dailyPnL !== undefined ? 
                       `${portfolioData.dailyPnL >= 0 ? '+' : ''}$${portfolioData.dailyPnL.toLocaleString()}` : 
                       'Loading...'
                     }
@@ -157,7 +180,7 @@ export default function Dashboard() {
                     className="font-semibold" 
                     data-testid="text-buying-power"
                   >
-                    {portfolioData?.buyingPower ? `$${portfolioData.buyingPower.toLocaleString()}` : 'Loading...'}
+                    {portfolioData?.buyingPower !== undefined ? `$${portfolioData.buyingPower.toLocaleString()}` : 'Loading...'}
                   </span>
                 </div>
               </div>
@@ -245,6 +268,19 @@ export default function Dashboard() {
             </CardContent>
           </Card>
         </div>
+          </>
+        )}
+        
+        {activeView === 'portfolio' && (
+          <PortfolioTracker />
+        )}
+        
+        {activeView === 'analytics' && (
+          <div className="text-center py-12">
+            <h2 className="text-2xl font-bold text-muted-foreground">Analytics Coming Soon</h2>
+            <p className="text-muted-foreground mt-2">Advanced analytics and reporting features will be available in future updates.</p>
+          </div>
+        )}
       </main>
     </div>
   );
