@@ -42,6 +42,313 @@ export class WebScraperService {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
   };
 
+  // Company name cache with TTL (7 days)
+  private static companyNameCache = new Map<string, {value: {name: string, exchange?: string, type?: string} | null, timestamp: number}>();
+  private static readonly CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days in milliseconds
+
+  /**
+   * Sanitize company names to filter out generic site titles and improve quality
+   */
+  private static sanitizeName(name: string, symbol: string): string | null {
+    if (!name || typeof name !== 'string') return null;
+    
+    const cleaned = name.trim();
+    
+    // Filter out generic site titles and unwanted content
+    const blacklistedTerms = [
+      'yahoo finance',
+      'yahoo',
+      'marketwatch', 
+      'google finance',
+      'google',
+      'stock price',
+      'quote',
+      'news',
+      'history',
+      'stock chart',
+      'real time',
+      'real-time',
+      'live',
+      'finance',
+      'investing',
+      'nasdaq',
+      'nyse',
+      'stock market',
+      'share price'
+    ];
+    
+    const lowerName = cleaned.toLowerCase();
+    
+    // Reject if it contains blacklisted terms as the main content
+    for (const term of blacklistedTerms) {
+      if (lowerName === term || lowerName.includes(term + ' -') || lowerName.includes('- ' + term)) {
+        return null;
+      }
+    }
+    
+    // Reject if it's just the ticker symbol
+    if (lowerName === symbol.toLowerCase() || lowerName === symbol.toLowerCase() + '.') {
+      return null;
+    }
+    
+    // Reject if too short or doesn't contain letters
+    if (cleaned.length < 3 || !/[a-zA-Z]/.test(cleaned)) {
+      return null;
+    }
+    
+    // Clean up common suffixes and prefixes from scraped titles
+    let result = cleaned
+      .replace(/\s*-\s*(stock price|quote|news|history|yahoo finance|marketwatch|google finance).*$/i, '')
+      .replace(/^(stock price|quote|news|history|yahoo finance|marketwatch|google finance)\s*-\s*/i, '')
+      .replace(/\s*\|\s*(yahoo finance|marketwatch|google finance).*$/i, '')
+      .replace(/\s*[\(\[].*?[\)\]]$/, '') // Remove trailing parentheses/brackets
+      .replace(/\s*stock$/, '')
+      .replace(/\s*inc\.?$/i, ' Inc.')
+      .replace(/\s*corp\.?$/i, ' Corp.')
+      .replace(/\s*ltd\.?$/i, ' Ltd.')
+      .replace(/\s*llc$/i, ' LLC')
+      .trim();
+    
+    // Final validation
+    if (result.length < 3 || result.toLowerCase() === symbol.toLowerCase()) {
+      return null;
+    }
+    
+    return result;
+  }
+
+  /**
+   * Generate a reasonable fallback company name when web scraping fails
+   */
+  private static generateFallbackName(symbol: string): string {
+    // For short symbols, generate reasonable company names
+    const symbolLower = symbol.toLowerCase();
+    
+    // Common patterns for company names
+    const commonPatterns = [
+      { symbol: 'amd', name: 'Advanced Micro Devices Inc.' },
+      { symbol: 'ibm', name: 'International Business Machines Corp.' },
+      { symbol: 'att', name: 'AT&T Inc.' },
+      { symbol: 'ge', name: 'General Electric Company' },
+      { symbol: 'hp', name: 'HP Inc.' },
+      { symbol: 'ups', name: 'United Parcel Service Inc.' },
+      { symbol: 'ups', name: 'United Parcel Service Inc.' },
+      { symbol: 'cat', name: 'Caterpillar Inc.' },
+      { symbol: 'mmm', name: '3M Company' },
+      { symbol: 'dd', name: 'DuPont de Nemours Inc.' }
+    ];
+    
+    const pattern = commonPatterns.find(p => p.symbol === symbolLower);
+    if (pattern) {
+      return pattern.name;
+    }
+    
+    // For single letter symbols, try to make reasonable names
+    if (symbol.length === 1) {
+      switch (symbol.toUpperCase()) {
+        case 'F': return 'Ford Motor Company';
+        case 'T': return 'AT&T Inc.';
+        case 'C': return 'Citigroup Inc.';
+        case 'X': return 'United States Steel Corp.';
+        default: return `${symbol} Corporation`;
+      }
+    }
+    
+    // For 2-3 letter symbols, add Inc./Corp.
+    if (symbol.length <= 3) {
+      return `${symbol.toUpperCase()} Inc.`;
+    }
+    
+    // For longer symbols, create a title case version
+    const titleCase = symbol.charAt(0).toUpperCase() + symbol.slice(1).toLowerCase();
+    return `${titleCase} Corporation`;
+  }
+
+  /**
+   * Resolve company identity using multiple web scraping sources with caching
+   */
+  private static async resolveCompanyIdentity(symbol: string): Promise<{name: string, exchange?: string, type?: string} | null> {
+    const upperSymbol = symbol.toUpperCase();
+    
+    // Check cache first
+    const cached = this.companyNameCache.get(upperSymbol);
+    if (cached && (Date.now() - cached.timestamp) < this.CACHE_TTL) {
+      console.log(`${upperSymbol}: Using cached company data`);
+      return cached.value;
+    }
+    
+    console.log(`${upperSymbol}: Resolving company identity via web scraping`);
+    
+    // Try multiple web scraping sources in order of preference
+    const scrapingSources = [
+      () => this.scrapeYahooFinanceCompany(upperSymbol),
+      () => this.scrapeGoogleFinanceCompany(upperSymbol),
+      () => this.scrapeMarketWatchCompany(upperSymbol)
+    ];
+    
+    for (const source of scrapingSources) {
+      try {
+        const result = await source();
+        if (result) {
+          console.log(`${upperSymbol}: Found company name via web scraping: ${result.name}`);
+          // Cache the result
+          this.companyNameCache.set(upperSymbol, { value: result, timestamp: Date.now() });
+          return result;
+        }
+      } catch (error) {
+        console.log(`${upperSymbol}: Web scraping source failed:`, (error as Error).message);
+      }
+    }
+    
+    // Cache null result to avoid repeated failed scraping
+    this.companyNameCache.set(upperSymbol, { value: null, timestamp: Date.now() });
+    console.log(`${upperSymbol}: No company name found via web scraping, using fallback`);
+    return null;
+  }
+
+  /**
+   * Scrape company name from Yahoo Finance using web scraping
+   */
+  private static async scrapeYahooFinanceCompany(symbol: string): Promise<{name: string, exchange?: string, type?: string} | null> {
+    try {
+      const response = await axios.get(`https://finance.yahoo.com/quote/${symbol}`, {
+        headers: this.HEADERS,
+        timeout: 5000
+      });
+      
+      const $ = cheerio.load(response.data);
+      
+      // Try multiple selectors for company name
+      const selectors = [
+        'h1[data-test="quote-header"]',
+        '[data-testid="quote-header"] h1',
+        'h1.D\\(ib\\)',
+        '.quote-header-info h1',
+        'h1'
+      ];
+      
+      for (const selector of selectors) {
+        const nameElement = $(selector).first();
+        if (nameElement.length > 0) {
+          const rawName = nameElement.text().trim();
+          const cleanName = this.sanitizeName(rawName, symbol);
+          if (cleanName) {
+            return { name: cleanName, exchange: 'Unknown', type: 'Stock' };
+          }
+        }
+      }
+      
+      // Try page title as fallback
+      const title = $('title').text();
+      if (title) {
+        const cleanName = this.sanitizeName(title, symbol);
+        if (cleanName) {
+          return { name: cleanName, exchange: 'Unknown', type: 'Stock' };
+        }
+      }
+      
+      return null;
+    } catch (error) {
+      console.log(`Yahoo Finance company scraping failed for ${symbol}:`, (error as Error).message);
+      return null;
+    }
+  }
+
+  /**
+   * Scrape company name from Google Finance using web scraping
+   */
+  private static async scrapeGoogleFinanceCompany(symbol: string): Promise<{name: string, exchange?: string, type?: string} | null> {
+    try {
+      const response = await axios.get(`https://www.google.com/finance/quote/${symbol}:NASDAQ`, {
+        headers: this.HEADERS,
+        timeout: 5000
+      });
+      
+      const $ = cheerio.load(response.data);
+      
+      // Try multiple selectors for company name
+      const selectors = [
+        '[data-attrid="title"]',
+        '.AXNJhd',
+        'h1',
+        '.zzDege'
+      ];
+      
+      for (const selector of selectors) {
+        const nameElement = $(selector).first();
+        if (nameElement.length > 0) {
+          const rawName = nameElement.text().trim();
+          const cleanName = this.sanitizeName(rawName, symbol);
+          if (cleanName) {
+            return { name: cleanName, exchange: 'NASDAQ', type: 'Stock' };
+          }
+        }
+      }
+      
+      // Try page title as fallback
+      const title = $('title').text();
+      if (title) {
+        const cleanName = this.sanitizeName(title, symbol);
+        if (cleanName) {
+          return { name: cleanName, exchange: 'NASDAQ', type: 'Stock' };
+        }
+      }
+      
+      return null;
+    } catch (error) {
+      console.log(`Google Finance company scraping failed for ${symbol}:`, (error as Error).message);
+      return null;
+    }
+  }
+
+  /**
+   * Scrape company name from MarketWatch using web scraping
+   */
+  private static async scrapeMarketWatchCompany(symbol: string): Promise<{name: string, exchange?: string, type?: string} | null> {
+    try {
+      const response = await axios.get(`https://www.marketwatch.com/investing/stock/${symbol}`, {
+        headers: this.HEADERS,
+        timeout: 5000
+      });
+      
+      const $ = cheerio.load(response.data);
+      
+      // Try multiple selectors for company name
+      const selectors = [
+        'h1.company__name',
+        '.instrumentname h1',
+        'h1.symbol__name',
+        '.company-header h1',
+        'h1'
+      ];
+      
+      for (const selector of selectors) {
+        const nameElement = $(selector).first();
+        if (nameElement.length > 0) {
+          const rawName = nameElement.text().trim();
+          const cleanName = this.sanitizeName(rawName, symbol);
+          if (cleanName) {
+            return { name: cleanName, exchange: 'Unknown', type: 'Stock' };
+          }
+        }
+      }
+      
+      // Try page title as fallback
+      const title = $('title').text();
+      if (title) {
+        const cleanName = this.sanitizeName(title, symbol);
+        if (cleanName) {
+          return { name: cleanName, exchange: 'Unknown', type: 'Stock' };
+        }
+      }
+      
+      return null;
+    } catch (error) {
+      console.log(`MarketWatch company scraping failed for ${symbol}:`, (error as Error).message);
+      return null;
+    }
+  }
+
   static async scrapeMarketIndices(): Promise<MarketIndices> {
     try {
       const symbols = ['%5EGSPC', '%5EIXIC', '%5EVIX']; // S&P 500, NASDAQ, VIX
@@ -913,7 +1220,24 @@ export class WebScraperService {
       'SHOP': { name: 'Shopify Inc.', exchange: 'NYSE' },
       'ZM': { name: 'Zoom Video Communications', exchange: 'NASDAQ' },
       'SPOT': { name: 'Spotify Technology S.A.', exchange: 'NYSE' },
-      'RR': { name: 'Richtech Robotics Inc.', exchange: 'NASDAQ' }
+      'RR': { name: 'Richtech Robotics Inc.', exchange: 'NASDAQ' },
+      'SPCE': { name: 'Virgin Galactic Holdings Inc.', exchange: 'NYSE' },
+      'F': { name: 'Ford Motor Company', exchange: 'NYSE' },
+      'GM': { name: 'General Motors Company', exchange: 'NYSE' },
+      'T': { name: 'AT&T Inc.', exchange: 'NYSE' },
+      'VZ': { name: 'Verizon Communications Inc.', exchange: 'NYSE' },
+      'WMT': { name: 'Walmart Inc.', exchange: 'NYSE' },
+      'XOM': { name: 'Exxon Mobil Corporation', exchange: 'NYSE' },
+      'CVX': { name: 'Chevron Corporation', exchange: 'NYSE' },
+      'PFE': { name: 'Pfizer Inc.', exchange: 'NYSE' },
+      'JNJ': { name: 'Johnson & Johnson', exchange: 'NYSE' },
+      'UNH': { name: 'UnitedHealth Group Inc.', exchange: 'NYSE' },
+      'HD': { name: 'Home Depot Inc.', exchange: 'NYSE' },
+      'COST': { name: 'Costco Wholesale Corp.', exchange: 'NASDAQ' },
+      'BRK.B': { name: 'Berkshire Hathaway Inc.', exchange: 'NYSE' },
+      'LLY': { name: 'Eli Lilly and Company', exchange: 'NYSE' },
+      'AVGO': { name: 'Broadcom Inc.', exchange: 'NASDAQ' },
+      'TMO': { name: 'Thermo Fisher Scientific Inc.', exchange: 'NYSE' }
     };
 
     for (const candidate of candidates) {
@@ -976,14 +1300,82 @@ export class WebScraperService {
       if (priceData.price > 0) {
         console.log(`Exact symbol ${query} validated with price: $${priceData.price}`);
         
-        // Try to get actual company name
-        const companyName = await this.scrapeCompanyName(query);
+        // Check knownCompanies first to prevent overriding good names
+        const knownCompanies: Record<string, {name: string, exchange: string}> = {
+          'AAPL': { name: 'Apple Inc.', exchange: 'NASDAQ' },
+          'GOOGL': { name: 'Alphabet Inc.', exchange: 'NASDAQ' },
+          'MSFT': { name: 'Microsoft Corporation', exchange: 'NASDAQ' },
+          'AMZN': { name: 'Amazon.com Inc.', exchange: 'NASDAQ' },
+          'TSLA': { name: 'Tesla Inc.', exchange: 'NASDAQ' },
+          'META': { name: 'Meta Platforms Inc.', exchange: 'NASDAQ' },
+          'NVDA': { name: 'NVIDIA Corporation', exchange: 'NASDAQ' },
+          'NFLX': { name: 'Netflix Inc.', exchange: 'NASDAQ' },
+          'INTC': { name: 'Intel Corporation', exchange: 'NASDAQ' },
+          'AMD': { name: 'Advanced Micro Devices', exchange: 'NASDAQ' },
+          'PLTR': { name: 'Palantir Technologies Inc.', exchange: 'NYSE' },
+          'SOFI': { name: 'SoFi Technologies Inc.', exchange: 'NASDAQ' },
+          'UBER': { name: 'Uber Technologies Inc.', exchange: 'NYSE' },
+          'LYFT': { name: 'Lyft Inc.', exchange: 'NASDAQ' },
+          'COIN': { name: 'Coinbase Global Inc.', exchange: 'NASDAQ' },
+          'SQ': { name: 'Block Inc.', exchange: 'NYSE' },
+          'PYPL': { name: 'PayPal Holdings Inc.', exchange: 'NASDAQ' },
+          'BA': { name: 'Boeing Company', exchange: 'NYSE' },
+          'JPM': { name: 'JPMorgan Chase & Co.', exchange: 'NYSE' },
+          'GS': { name: 'Goldman Sachs Group Inc.', exchange: 'NYSE' },
+          'V': { name: 'Visa Inc.', exchange: 'NYSE' },
+          'MA': { name: 'Mastercard Inc.', exchange: 'NYSE' },
+          'DIS': { name: 'Walt Disney Company', exchange: 'NYSE' },
+          'KO': { name: 'Coca-Cola Company', exchange: 'NYSE' },
+          'PEP': { name: 'PepsiCo Inc.', exchange: 'NASDAQ' },
+          'NKE': { name: 'Nike Inc.', exchange: 'NYSE' },
+          'ADBE': { name: 'Adobe Inc.', exchange: 'NASDAQ' },
+          'CRM': { name: 'Salesforce Inc.', exchange: 'NYSE' },
+          'ORCL': { name: 'Oracle Corporation', exchange: 'NYSE' },
+          'BABA': { name: 'Alibaba Group Holding', exchange: 'NYSE' },
+          'JD': { name: 'JD.com Inc.', exchange: 'NASDAQ' },
+          'PDD': { name: 'PDD Holdings Inc.', exchange: 'NASDAQ' },
+          'SHOP': { name: 'Shopify Inc.', exchange: 'NYSE' },
+          'ZM': { name: 'Zoom Video Communications', exchange: 'NASDAQ' },
+          'SPOT': { name: 'Spotify Technology S.A.', exchange: 'NYSE' },
+          'RR': { name: 'Richtech Robotics Inc.', exchange: 'NASDAQ' },
+          'SPCE': { name: 'Virgin Galactic Holdings Inc.', exchange: 'NYSE' },
+          'F': { name: 'Ford Motor Company', exchange: 'NYSE' },
+          'GM': { name: 'General Motors Company', exchange: 'NYSE' },
+          'T': { name: 'AT&T Inc.', exchange: 'NYSE' },
+          'VZ': { name: 'Verizon Communications Inc.', exchange: 'NYSE' },
+          'WMT': { name: 'Walmart Inc.', exchange: 'NYSE' },
+          'XOM': { name: 'Exxon Mobil Corporation', exchange: 'NYSE' },
+          'CVX': { name: 'Chevron Corporation', exchange: 'NYSE' },
+          'PFE': { name: 'Pfizer Inc.', exchange: 'NYSE' },
+          'JNJ': { name: 'Johnson & Johnson', exchange: 'NYSE' },
+          'UNH': { name: 'UnitedHealth Group Inc.', exchange: 'NYSE' },
+          'HD': { name: 'Home Depot Inc.', exchange: 'NYSE' },
+          'COST': { name: 'Costco Wholesale Corp.', exchange: 'NASDAQ' },
+          'BRK.B': { name: 'Berkshire Hathaway Inc.', exchange: 'NYSE' },
+          'LLY': { name: 'Eli Lilly and Company', exchange: 'NYSE' },
+          'AVGO': { name: 'Broadcom Inc.', exchange: 'NASDAQ' },
+          'TMO': { name: 'Thermo Fisher Scientific Inc.', exchange: 'NYSE' }
+        };
+        
+        if (knownCompanies[query]) {
+          const company = knownCompanies[query];
+          console.log(`${query}: Using known company data: ${company.name}`);
+          return [{
+            symbol: query,
+            name: company.name,
+            exchange: company.exchange,
+            type: 'Stock'
+          }];
+        }
+        
+        // Use robust company name resolution for unknown tickers
+        const companyData = await this.resolveCompanyIdentity(query);
         
         return [{
           symbol: query,
-          name: companyName || `${query} Inc.`, // Use scraped name or generic fallback
-          exchange: undefined,
-          type: 'Stock'
+          name: companyData?.name || this.generateFallbackName(query), // Use resolved name or generate fallback
+          exchange: companyData?.exchange,
+          type: companyData?.type || 'Stock'
         }];
       }
     } catch (error) {
