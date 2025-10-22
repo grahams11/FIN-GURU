@@ -79,7 +79,7 @@ export function TradeCard({ trade, rank }: TradeCardProps) {
           </div>
         </div>
         
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-4 mb-4">
           <div>
             <p className="text-xs text-muted-foreground uppercase tracking-wide">Current Price</p>
             <p className="text-sm font-medium text-primary" data-testid={`current-${trade.ticker}`}>
@@ -99,9 +99,18 @@ export function TradeCard({ trade, rank }: TradeCardProps) {
             </p>
           </div>
           <div>
-            <p className="text-xs text-muted-foreground uppercase tracking-wide">Entry Price</p>
-            <p className="text-sm font-medium" data-testid={`entry-${trade.ticker}`}>
-              ${trade.entryPrice.toFixed(2)}
+            <div className="flex items-center gap-1 mb-1">
+              <p className="text-xs text-muted-foreground uppercase tracking-wide">Stock Entry</p>
+              <span className="text-[10px] px-1.5 py-0.5 bg-primary/20 text-primary rounded-md font-medium">Fib 0.707</span>
+            </div>
+            <p className="text-sm font-medium text-green-500" data-testid={`stock-entry-${trade.ticker}`}>
+              ${(trade as any).stockEntryPrice?.toFixed(2) || 'N/A'}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground uppercase tracking-wide">Premium</p>
+            <p className="text-sm font-medium text-accent" data-testid={`premium-${trade.ticker}`}>
+              ${(trade as any).premium?.toFixed(2) || trade.entryPrice.toFixed(2)}
             </p>
           </div>
           <div>

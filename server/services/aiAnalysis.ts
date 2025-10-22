@@ -291,7 +291,8 @@ export class AIAnalysisService {
         currentPrice: stockData.price,
         strikePrice: optionsStrategy.strikePrice,
         expiry: optionsStrategy.expiry,
-        entryPrice: optionsStrategy.entryPrice,
+        stockEntryPrice: optionsStrategy.stockEntryPrice, // Fibonacci 0.707 entry price
+        premium: optionsStrategy.premium, // Actual option premium
         exitPrice: optionsStrategy.exitPrice,
         contracts: optionsStrategy.contracts,
         projectedROI,
@@ -400,8 +401,9 @@ export class AIAnalysisService {
         return null;
       }
       
-      // Calculate optimal contracts using FINAL entry price to stay within $5000 budget
-      const maxTradeAmount = 5000;
+      // Calculate optimal contracts using FINAL entry price to stay within $1000 budget
+      // Lower premiums will naturally get more contracts allocated
+      const maxTradeAmount = 1000;
       const costPerContract = finalEntryPrice * 100; // Options are sold in contracts of 100 shares
       const optimalContracts = Math.floor(maxTradeAmount / costPerContract);
       const contracts = Math.max(1, Math.min(50, optimalContracts)); // Cap at 50 contracts for risk management
@@ -420,6 +422,9 @@ export class AIAnalysisService {
       // Calculate hold days
       const holdDays = Math.min(targetDays, sentiment.confidence > 0.7 ? 7 : 14);
       
+      // Calculate Fibonacci 0.707 entry price for underlying stock
+      const stockEntryPrice = currentPrice * 0.707;
+      
       // Validate all values
       if (!isFinite(strikePrice) || !strikePrice || strikePrice <= 0) {
         console.warn(`Invalid strike price ${strikePrice} for ${ticker}`);
@@ -434,7 +439,9 @@ export class AIAnalysisService {
       return {
         strikePrice: Math.round(strikePrice * 100) / 100,
         expiry: this.formatExpiry(expiryDate.toISOString()),
-        entryPrice: Math.round(finalEntryPrice * 100) / 100,
+        stockEntryPrice: Math.round(stockEntryPrice * 100) / 100, // Fibonacci 0.707 entry price
+        premium: Math.round(finalEntryPrice * 100) / 100, // Actual option premium
+        entryPrice: Math.round(finalEntryPrice * 100) / 100, // Keep for backward compatibility
         exitPrice: Math.round(exitPrice * 100) / 100,
         contracts: Math.max(1, contracts),
         holdDays: Math.max(1, holdDays),
@@ -487,8 +494,9 @@ export class AIAnalysisService {
         return null;
       }
       
-      // Calculate optimal contracts using FINAL entry price to stay within $5000 budget
-      const maxTradeAmount = 5000;
+      // Calculate optimal contracts using FINAL entry price to stay within $1000 budget
+      // Lower premiums will naturally get more contracts allocated
+      const maxTradeAmount = 1000;
       const costPerContract = finalEntryPrice * 100; // Options are sold in contracts of 100 shares
       const optimalContracts = Math.floor(maxTradeAmount / costPerContract);
       const contracts = Math.max(1, Math.min(50, optimalContracts)); // Cap at 50 contracts for risk management
@@ -507,6 +515,9 @@ export class AIAnalysisService {
       // Calculate hold days
       const holdDays = Math.min(targetDays, sentiment.confidence > 0.7 ? 7 : 14);
       
+      // Calculate Fibonacci 0.707 entry price for underlying stock
+      const stockEntryPrice = currentPrice * 0.707;
+      
       // Validate all values
       if (!isFinite(strikePrice) || !strikePrice || strikePrice <= 0) {
         console.warn(`Invalid fallback strike price ${strikePrice} for ${ticker}`);
@@ -521,7 +532,9 @@ export class AIAnalysisService {
       return {
         strikePrice: Math.round(strikePrice * 100) / 100,
         expiry: this.formatExpiry(expiryDate.toISOString()),
-        entryPrice: Math.round(finalEntryPrice * 100) / 100,
+        stockEntryPrice: Math.round(stockEntryPrice * 100) / 100, // Fibonacci 0.707 entry price
+        premium: Math.round(finalEntryPrice * 100) / 100, // Actual option premium
+        entryPrice: Math.round(finalEntryPrice * 100) / 100, // Keep for backward compatibility
         exitPrice: Math.round(exitPrice * 100) / 100,
         contracts: Math.max(1, contracts),
         holdDays: Math.max(1, holdDays),
