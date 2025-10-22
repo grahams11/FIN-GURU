@@ -190,7 +190,12 @@ class BlackScholesCalculator {
 }
 
 export class AIAnalysisService {
-  private static readonly TICKERS = ['NVDA', 'TSLA', 'PLTR', 'SOFI', 'AMD', 'MSFT', 'AAPL', 'GOOGL'];
+  private static readonly TICKERS = [
+    'NVDA', 'TSLA', 'PLTR', 'SOFI', 'AMD', 'MSFT', 'AAPL', 'GOOGL', 
+    'META', 'NFLX', 'INTC', 'COIN', 'SNAP', 'UBER', 'LYFT', 'RIVN',
+    'LCID', 'PINS', 'RBLX', 'ROKU', 'SQ', 'SHOP', 'SPOT', 'TWLO',
+    'ZM', 'DOCU', 'CRWD', 'DDOG', 'NET', 'SNOW'
+  ];
   private static readonly RISK_FREE_RATE = 0.045;
 
   static async generateTradeRecommendations(): Promise<TradeRecommendation[]> {

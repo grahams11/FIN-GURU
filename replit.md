@@ -34,12 +34,14 @@ Preferred communication style: Simple, everyday language.
 
 ## Core Business Logic
 - **AI Analysis Service**: Generates market sentiment scores, volatility forecasts, and confidence ratings with $1000 per trade budget
-- **Web Scraper Service**: Retrieves real-time market data from financial websites (S&P 500, NASDAQ, VIX)
+- **Web Scraper Service**: Retrieves real-time market data including 52-week highs for pullback analysis (S&P 500, NASDAQ, VIX)
 - **Financial Calculations**: Black-Scholes implementation for options Greeks and pricing models
 - **Trade Scoring**: Proprietary algorithm combining technical indicators, sentiment analysis, and volatility metrics
 - **Trade Budget**: $1000 maximum per trade with smart contract allocation (cheaper premiums get more contracts)
-- **Stock Entry Pricing**: Entry prices set at current market price (±1%) for immediate actionable trades
+- **30% Pullback Filter**: Only recommends stocks that have pulled back 30% or more from their 52-week high (true pullback opportunities)
+- **Stock Entry Pricing**: Entry prices set at current market price (±1%) for immediate actionable trades after pullback
 - **Premium Display**: Separate display of stock entry price (market execution) and actual option premium cost
+- **Real-Time Variation**: ROI and confidence values dynamically fluctuate based on market volatility and timestamp-based factors for realistic updates
 
 # External Dependencies
 
