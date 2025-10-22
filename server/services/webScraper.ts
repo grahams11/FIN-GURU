@@ -7,6 +7,8 @@ export interface StockData {
   change: number;
   changePercent: number;
   volume?: number;
+  fiftyTwoWeekHigh?: number;
+  fiftyTwoWeekLow?: number;
 }
 
 export interface MarketIndices {
@@ -611,6 +613,70 @@ export class WebScraperService {
       throw new Error('No valid price found');
     } catch (error) {
       throw new Error(`MarketWatch scraping failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Scrape 52-week high and low data for pullback analysis
+   */
+  static async scrape52WeekRange(symbol: string): Promise<{ fiftyTwoWeekHigh: number; fiftyTwoWeekLow: number } | null> {
+    try {
+      // Try Yahoo Finance API first (most reliable for 52-week data)
+      const apiUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}`;
+      const response = await axios.get(apiUrl, {
+        headers: {
+          ...this.HEADERS,
+          'Accept': 'application/json'
+        },
+        timeout: 8000
+      });
+      
+      if (response.data?.chart?.result?.[0]?.meta) {
+        const meta = response.data.chart.result[0].meta;
+        const fiftyTwoWeekHigh = meta.fiftyTwoWeekHigh;
+        const fiftyTwoWeekLow = meta.fiftyTwoWeekLow;
+        
+        if (fiftyTwoWeekHigh && fiftyTwoWeekLow && fiftyTwoWeekHigh > 0 && fiftyTwoWeekLow > 0) {
+          console.log(`${symbol}: 52-week range: $${fiftyTwoWeekLow.toFixed(2)} - $${fiftyTwoWeekHigh.toFixed(2)}`);
+          return { fiftyTwoWeekHigh, fiftyTwoWeekLow };
+        }
+      }
+      
+      // Fallback: scrape from Yahoo Finance HTML
+      const htmlUrl = `https://finance.yahoo.com/quote/${symbol}`;
+      const htmlResponse = await axios.get(htmlUrl, {
+        headers: this.HEADERS,
+        timeout: 8000
+      });
+      
+      const $ = cheerio.load(htmlResponse.data);
+      
+      // Look for 52-week range in summary table
+      let fiftyTwoWeekHigh: number | undefined;
+      let fiftyTwoWeekLow: number | undefined;
+      
+      $('tr').each((_, row) => {
+        const label = $(row).find('td').first().text().trim();
+        if (label.includes('52') && label.includes('Week') && label.includes('Range')) {
+          const value = $(row).find('td').last().text().trim();
+          // Format is typically "123.45 - 234.56"
+          const match = value.match(/([\d,]+\.?\d*)\s*-\s*([\d,]+\.?\d*)/);
+          if (match) {
+            fiftyTwoWeekLow = parseFloat(match[1].replace(/,/g, ''));
+            fiftyTwoWeekHigh = parseFloat(match[2].replace(/,/g, ''));
+          }
+        }
+      });
+      
+      if (fiftyTwoWeekHigh && fiftyTwoWeekLow && fiftyTwoWeekHigh > 0 && fiftyTwoWeekLow > 0) {
+        console.log(`${symbol}: 52-week range (HTML): $${fiftyTwoWeekLow.toFixed(2)} - $${fiftyTwoWeekHigh.toFixed(2)}`);
+        return { fiftyTwoWeekHigh, fiftyTwoWeekLow };
+      }
+      
+      return null;
+    } catch (error) {
+      console.warn(`Failed to scrape 52-week range for ${symbol}:`, error instanceof Error ? error.message : 'Unknown error');
+      return null;
     }
   }
   
