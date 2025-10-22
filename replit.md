@@ -33,10 +33,13 @@ Preferred communication style: Simple, everyday language.
 - **Planned**: User authentication with session management using connect-pg-simple for PostgreSQL session storage
 
 ## Core Business Logic
-- **AI Analysis Service**: Generates market sentiment scores, volatility forecasts, and confidence ratings
+- **AI Analysis Service**: Generates market sentiment scores, volatility forecasts, and confidence ratings with $1000 per trade budget
 - **Web Scraper Service**: Retrieves real-time market data from financial websites (S&P 500, NASDAQ, VIX)
 - **Financial Calculations**: Black-Scholes implementation for options Greeks and pricing models
 - **Trade Scoring**: Proprietary algorithm combining technical indicators, sentiment analysis, and volatility metrics
+- **Trade Budget**: $1000 maximum per trade with smart contract allocation (cheaper premiums get more contracts)
+- **Fibonacci Entry Price**: Stock entry price calculated at 0.707 (Fibonacci retracement) of current price
+- **Premium Display**: Separate display of stock entry price (Fib 0.707) and actual option premium cost
 
 # External Dependencies
 
