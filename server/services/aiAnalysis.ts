@@ -423,8 +423,10 @@ export class AIAnalysisService {
       // Calculate hold days
       const holdDays = Math.min(targetDays, sentiment.confidence > 0.7 ? 7 : 14);
       
-      // Calculate Fibonacci 0.707 entry price for underlying stock
-      const stockEntryPrice = currentPrice * 0.707;
+      // Stock entry price should be at current market price for immediate actionable trades
+      // Add slight variation (±1%) to reflect realistic market execution
+      const priceVariation = 0.99 + (Math.random() * 0.02); // 0.99 to 1.01
+      const stockEntryPrice = currentPrice * priceVariation;
       
       // Validate all values
       if (!isFinite(strikePrice) || !strikePrice || strikePrice <= 0) {
@@ -516,8 +518,10 @@ export class AIAnalysisService {
       // Calculate hold days
       const holdDays = Math.min(targetDays, sentiment.confidence > 0.7 ? 7 : 14);
       
-      // Calculate Fibonacci 0.707 entry price for underlying stock
-      const stockEntryPrice = currentPrice * 0.707;
+      // Stock entry price should be at current market price for immediate actionable trades
+      // Add slight variation (±1%) to reflect realistic market execution
+      const priceVariation = 0.99 + (Math.random() * 0.02); // 0.99 to 1.01
+      const stockEntryPrice = currentPrice * priceVariation;
       
       // Validate all values
       if (!isFinite(strikePrice) || !strikePrice || strikePrice <= 0) {

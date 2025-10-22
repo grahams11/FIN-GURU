@@ -99,10 +99,7 @@ export function TradeCard({ trade, rank }: TradeCardProps) {
             </p>
           </div>
           <div>
-            <div className="flex items-center gap-1 mb-1">
-              <p className="text-xs text-muted-foreground uppercase tracking-wide">Stock Entry</p>
-              <span className="text-[10px] px-1.5 py-0.5 bg-primary/20 text-primary rounded-md font-medium">Fib 0.707</span>
-            </div>
+            <p className="text-xs text-muted-foreground uppercase tracking-wide">Stock Entry</p>
             <p className="text-sm font-medium text-green-500" data-testid={`stock-entry-${trade.ticker}`}>
               ${(trade as any).stockEntryPrice?.toFixed(2) || 'N/A'}
             </p>

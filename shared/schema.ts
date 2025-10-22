@@ -25,8 +25,8 @@ export const optionsTrade = pgTable("options_trades", {
   currentPrice: real("current_price").notNull(),
   strikePrice: real("strike_price").notNull(),
   expiry: text("expiry").notNull(),
-  stockEntryPrice: real("stock_entry_price"), // Fibonacci 0.707 entry price (optional for backward compatibility)
-  premium: real("premium"), // Actual option premium (optional for backward compatibility)
+  stockEntryPrice: real("stock_entry_price"), // Stock purchase price at market execution (optional for backward compatibility)
+  premium: real("premium"), // Actual option premium cost (optional for backward compatibility)
   entryPrice: real("entry_price").notNull(), // Kept for backward compatibility
   exitPrice: real("exit_price"),
   contracts: integer("contracts").notNull(),
@@ -187,7 +187,7 @@ export interface TradeRecommendation {
   currentPrice: number;
   strikePrice: number;
   expiry: string;
-  stockEntryPrice: number; // Fibonacci 0.707 entry price for underlying stock
+  stockEntryPrice: number; // Stock purchase price at market execution
   premium: number; // Actual option premium cost
   entryPrice: number; // Backward compatibility - same value as premium
   exitPrice: number;
