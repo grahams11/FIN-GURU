@@ -189,6 +189,7 @@ export interface TradeRecommendation {
   expiry: string;
   stockEntryPrice: number; // Fibonacci 0.707 entry price for underlying stock
   premium: number; // Actual option premium cost
+  entryPrice: number; // Backward compatibility - same value as premium
   exitPrice: number;
   contracts: number;
   projectedROI: number;
