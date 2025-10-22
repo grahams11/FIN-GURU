@@ -293,6 +293,7 @@ export class AIAnalysisService {
         expiry: optionsStrategy.expiry,
         stockEntryPrice: optionsStrategy.stockEntryPrice, // Fibonacci 0.707 entry price
         premium: optionsStrategy.premium, // Actual option premium
+        entryPrice: optionsStrategy.entryPrice, // Keep for backward compatibility
         exitPrice: optionsStrategy.exitPrice,
         contracts: optionsStrategy.contracts,
         projectedROI,
