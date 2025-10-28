@@ -22,6 +22,7 @@ export const marketData = pgTable("market_data", {
 export const optionsTrade = pgTable("options_trades", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   ticker: text("ticker").notNull(),
+  optionType: text("option_type"), // 'call' | 'put'
   currentPrice: real("current_price").notNull(),
   strikePrice: real("strike_price").notNull(),
   expiry: text("expiry").notNull(),
@@ -184,6 +185,7 @@ export interface Greeks {
 
 export interface TradeRecommendation {
   ticker: string;
+  optionType: 'call' | 'put';
   currentPrice: number;
   strikePrice: number;
   expiry: string;
