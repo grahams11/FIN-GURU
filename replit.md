@@ -33,15 +33,20 @@ Preferred communication style: Simple, everyday language.
 - **Planned**: User authentication with session management using connect-pg-simple for PostgreSQL session storage
 
 ## Core Business Logic
-- **AI Analysis Service**: Generates market sentiment scores, volatility forecasts, and confidence ratings with $1000 per trade budget
-- **Web Scraper Service**: Retrieves real-time market data including 52-week highs for pullback analysis (S&P 500, NASDAQ, VIX)
-- **Financial Calculations**: Black-Scholes implementation for options Greeks and pricing models
-- **Trade Scoring**: Proprietary algorithm combining technical indicators, sentiment analysis, and volatility metrics
+- **Elite Dual-Strategy Scanner**: Advanced algorithm generating both CALL and PUT options opportunities based on market positioning
+  - **CALL Strategy**: Identifies stocks 30%+ off 52-week highs with bullish reversal signals (deep pullback plays)
+  - **PUT Strategy**: Identifies stocks within 5% of 52-week highs showing bearish weakness (overbought reversal plays)
+- **Dynamic Sentiment Engine**: Position-aware sentiment analysis that adjusts bullishness based on price location
+  - Stocks in deep pullbacks get bullish bias (+15% sentiment boost)
+  - Stocks near highs get bearish bias (-15% sentiment reduction)
+  - Enables realistic detection of both bullish and bearish opportunities
+- **Web Scraper Service**: Retrieves real-time market data including 52-week ranges, current prices, and market indices (S&P 500, NASDAQ, VIX)
+- **Financial Calculations**: Black-Scholes implementation for options Greeks and pricing models (delta, gamma, theta, vega, rho)
+- **Elite ROI Targeting**: All recommendations target minimum 100% ROI with most achieving 200-300% projected returns
 - **Trade Budget**: $1000 maximum per trade with smart contract allocation (cheaper premiums get more contracts)
-- **30% Pullback Filter**: Only recommends stocks that have pulled back 30% or more from their 52-week high (true pullback opportunities)
-- **Stock Entry Pricing**: Entry prices set at current market price (±1%) for immediate actionable trades after pullback
+- **Stock Entry Pricing**: Entry prices set at current market price (±1%) for immediate actionable trades
 - **Premium Display**: Separate display of stock entry price (market execution) and actual option premium cost
-- **Real-Time Variation**: ROI and confidence values dynamically fluctuate based on market volatility and timestamp-based factors for realistic updates
+- **Real-Time Variation**: ROI and confidence values dynamically fluctuate based on market volatility and timestamp-based factors
 
 # External Dependencies
 

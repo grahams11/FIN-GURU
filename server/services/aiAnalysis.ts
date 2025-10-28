@@ -265,8 +265,14 @@ export class AIAnalysisService {
       const rsi = await this.calculateRSI(ticker);
       const volumeRatio = stockData.volume ? stockData.volume / 1000000 : 1;
       
-      // Analyze sentiment for both bullish and bearish signals
-      const sentiment = this.analyzeSentimentWithRules(newsHeadlines, stockData.changePercent, marketContext);
+      // Analyze sentiment for both bullish and bearish signals, incorporating price positioning
+      const sentiment = this.analyzeSentimentWithRules(
+        newsHeadlines, 
+        stockData.changePercent, 
+        marketContext,
+        weekRange,
+        stockData.price
+      );
       
       // ELITE SCANNER: Determine strategy type based on market positioning
       const pullbackPercent = ((weekRange.fiftyTwoWeekHigh - stockData.price) / weekRange.fiftyTwoWeekHigh) * 100;
@@ -274,23 +280,28 @@ export class AIAnalysisService {
       
       let strategyType: 'call' | 'put' | null = null;
       
-      // CALL STRATEGY: Stocks 30%+ off highs with bullish reversal signals
-      const pullbackThreshold = weekRange.fiftyTwoWeekHigh * 0.70;
-      if (stockData.price <= pullbackThreshold && sentiment.bullishness >= 0.50 && rsi < 50) {
-        strategyType = 'call';
-        console.log(`${ticker}: ✓ CALL OPPORTUNITY - ${pullbackPercent.toFixed(1)}% off high, RSI ${rsi.toFixed(0)}, bullish sentiment`);
-      }
+      // CALL STRATEGY: Stocks 30%+ off highs (elite pullback plays)
+      const pullbackThreshold = weekRange.fiftyTwoWeekHigh * 0.70; // 30% off high
+      const isDeepPullback = stockData.price <= pullbackThreshold;
+      const hasBullishSentiment = sentiment.bullishness >= 0.45;
       
-      // PUT STRATEGY: Stocks near 52-week high (within 10%) with bearish signals
-      const nearHighThreshold = weekRange.fiftyTwoWeekLow + (weekRange.fiftyTwoWeekHigh - weekRange.fiftyTwoWeekLow) * 0.90;
-      if (stockData.price >= nearHighThreshold && sentiment.bullishness < 0.50 && rsi > 60) {
+      // PUT STRATEGY: Stocks near 52-week high (within 5%) showing weakness
+      const nearHighThreshold = weekRange.fiftyTwoWeekHigh * 0.95; // Within 5% of high
+      const isNearHigh = stockData.price >= nearHighThreshold;
+      const hasBearishSentiment = sentiment.bullishness <= 0.55; // More permissive
+      
+      // Prioritize the stronger signal
+      if (isDeepPullback && hasBullishSentiment) {
+        strategyType = 'call';
+        console.log(`${ticker}: ✓ CALL OPPORTUNITY - ${pullbackPercent.toFixed(1)}% off high, RSI ${rsi.toFixed(0)}, bullishness ${(sentiment.bullishness * 100).toFixed(0)}%`);
+      } else if (isNearHigh && hasBearishSentiment) {
         strategyType = 'put';
-        console.log(`${ticker}: ✓ PUT OPPORTUNITY - ${nearHighPercent.toFixed(1)}% of range, RSI ${rsi.toFixed(0)}, bearish signals`);
+        console.log(`${ticker}: ✓ PUT OPPORTUNITY - ${nearHighPercent.toFixed(1)}% of range (${(100 - pullbackPercent).toFixed(1)}% of high), RSI ${rsi.toFixed(0)}, bearishness ${((1 - sentiment.bullishness) * 100).toFixed(0)}%`);
       }
       
       // Skip if no clear opportunity
       if (!strategyType) {
-        console.log(`${ticker}: No elite opportunity - ${pullbackPercent.toFixed(1)}% off high, RSI ${rsi.toFixed(0)} - skipping`);
+        console.log(`${ticker}: No elite opportunity - ${pullbackPercent.toFixed(1)}% off high, ${nearHighPercent.toFixed(1)}% of range, RSI ${rsi.toFixed(0)}, bullishness ${(sentiment.bullishness * 100).toFixed(0)}% - skipping`);
         return null;
       }
       
@@ -659,10 +670,34 @@ export class AIAnalysisService {
     return targetDate;
   }
 
-  private static analyzeSentimentWithRules(headlines: string[], priceChange: number, marketContext: any): any {
+  private static analyzeSentimentWithRules(
+    headlines: string[], 
+    priceChange: number, 
+    marketContext: any,
+    weekRange?: any,
+    currentPrice?: number
+  ): any {
     try {
+      // Calculate price positioning for dynamic sentiment
+      let positioningBias = 0;
+      if (weekRange && currentPrice) {
+        const pullbackPercent = ((weekRange.fiftyTwoWeekHigh - currentPrice) / weekRange.fiftyTwoWeekHigh) * 100;
+        // Stocks deep in pullback get bullish bias, stocks near highs get bearish bias
+        if (pullbackPercent >= 30) {
+          positioningBias = 0.15; // More bullish for deep pullbacks
+        } else if (pullbackPercent <= 5) {
+          positioningBias = -0.15; // More bearish near highs
+        }
+      }
+      
       if (headlines.length === 0) {
-        return { score: 0.5, bullishness: 0.7, confidence: 0.3 };
+        // Dynamic default based on price positioning
+        const baseBullishness = 0.5 + positioningBias;
+        return { 
+          score: 0.5, 
+          bullishness: Math.max(0.3, Math.min(0.7, baseBullishness)), 
+          confidence: 0.3 
+        };
       }
 
       // Define sentiment keywords
@@ -712,8 +747,9 @@ export class AIAnalysisService {
         (marketContext.marketData.sp500?.changePercent || 0) > 0 ? 0.1 : -0.1 : 0;
       sentimentScore = Math.max(0, Math.min(1, sentimentScore + marketSentiment));
 
-      // Calculate bullishness probability
-      const bullishness = Math.max(0.2, Math.min(0.95, sentimentScore + 0.2));
+      // Calculate bullishness probability with positioning bias
+      let bullishness = Math.max(0.2, Math.min(0.95, sentimentScore + 0.2));
+      bullishness = Math.max(0.2, Math.min(0.95, bullishness + positioningBias));
 
       // Calculate confidence based on data quality
       const confidence = Math.min(1, headlines.length / 10) * 

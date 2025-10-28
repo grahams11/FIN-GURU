@@ -4,7 +4,7 @@ import { storage } from "./storage";
 import { WebScraperService } from "./services/webScraper";
 import { AIAnalysisService } from "./services/aiAnalysis";
 import { PositionAnalysisService } from "./services/positionAnalysis";
-import { insertMarketDataSchema, insertOptionsTradeSchema, insertAiInsightsSchema, insertPortfolioPositionSchema } from "@shared/schema";
+import { insertMarketDataSchema, insertOptionsTradeSchema, insertAiInsightsSchema, insertPortfolioPositionSchema, type OptionsTrade } from "@shared/schema";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Market Overview endpoint
@@ -71,76 +71,60 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Top Trades endpoint
+  // Top Trades endpoint - Returns existing trades from database (auto-refreshes if empty)
   app.get('/api/top-trades', async (req, res) => {
     try {
-      console.log('Generating top trade recommendations...');
+      // Check if we have existing trades
+      let trades = await storage.getTopTrades();
       
-      // Clear existing trades for fresh scan
-      await storage.clearTrades();
+      // If no trades exist, automatically generate fresh ones
+      if (trades.length === 0) {
+        console.log('No trades in cache, automatically refreshing...');
+        const recommendations = await AIAnalysisService.generateTradeRecommendations();
+        
+        const validRecommendations = recommendations.filter(rec => {
+          return rec && rec.ticker && isFinite(rec.strikePrice) && rec.strikePrice > 0 &&
+                 isFinite(rec.entryPrice) && rec.entryPrice > 0 &&
+                 isFinite(rec.exitPrice) && rec.exitPrice > 0 &&
+                 isFinite(rec.currentPrice) && rec.currentPrice > 0;
+        });
+        
+        // Store the valid recommendations
+        const storedTrades = await Promise.all(
+          validRecommendations.map(async (rec) => {
+            try {
+              return await storage.createOptionsTrade({
+                ticker: rec.ticker,
+                optionType: rec.optionType,
+                currentPrice: rec.currentPrice,
+                strikePrice: rec.strikePrice,
+                expiry: rec.expiry,
+                stockEntryPrice: rec.stockEntryPrice || 0,
+                premium: rec.premium || 0,
+                entryPrice: rec.entryPrice,
+                exitPrice: rec.exitPrice,
+                contracts: rec.contracts,
+                projectedROI: rec.projectedROI,
+                aiConfidence: rec.aiConfidence,
+                greeks: rec.greeks,
+                sentiment: rec.sentiment,
+                score: rec.score,
+                isExecuted: false
+              });
+            } catch (error) {
+              console.error(`Error storing trade for ${rec.ticker}:`, error);
+              return null;
+            }
+          })
+        );
+        
+        trades = storedTrades.filter(trade => trade !== null) as OptionsTrade[];
+      }
       
-      const recommendations = await AIAnalysisService.generateTradeRecommendations();
-      
-      // Filter out invalid recommendations and add validation
-      const validRecommendations = recommendations.filter(rec => {
-        if (!rec || !rec.ticker) {
-          console.warn('Skipping recommendation with missing ticker');
-          return false;
-        }
-        if (!isFinite(rec.strikePrice) || !rec.strikePrice || rec.strikePrice <= 0) {
-          console.warn(`Skipping ${rec.ticker}: invalid strike price ${rec.strikePrice}`);
-          return false;
-        }
-        if (!isFinite(rec.entryPrice) || !rec.entryPrice || rec.entryPrice <= 0) {
-          console.warn(`Skipping ${rec.ticker}: invalid entry price ${rec.entryPrice}`);
-          return false;
-        }
-        if (!isFinite(rec.exitPrice) || !rec.exitPrice || rec.exitPrice <= 0) {
-          console.warn(`Skipping ${rec.ticker}: invalid exit price ${rec.exitPrice}`);
-          return false;
-        }
-        if (!isFinite(rec.currentPrice) || !rec.currentPrice || rec.currentPrice <= 0) {
-          console.warn(`Skipping ${rec.ticker}: invalid current price ${rec.currentPrice}`);
-          return false;
-        }
-        return true;
-      });
-      
-      console.log(`Storing ${validRecommendations.length} valid trades (filtered from ${recommendations.length})`);
-      
-      // Store only valid recommendations in storage
-      const trades = await Promise.all(
-        validRecommendations.map(async (rec) => {
-          try {
-            return await storage.createOptionsTrade({
-              ticker: rec.ticker,
-              currentPrice: rec.currentPrice,
-              strikePrice: rec.strikePrice,
-              expiry: rec.expiry,
-              stockEntryPrice: rec.stockEntryPrice || 0,
-              premium: rec.premium || 0,
-              entryPrice: rec.entryPrice,
-              exitPrice: rec.exitPrice,
-              contracts: rec.contracts,
-              projectedROI: rec.projectedROI,
-              aiConfidence: rec.aiConfidence,
-              greeks: rec.greeks,
-              sentiment: rec.sentiment,
-              score: rec.score,
-              isExecuted: false
-            });
-          } catch (error) {
-            console.error(`Error storing trade for ${rec.ticker}:`, error);
-            return null;
-          }
-        })
-      );
-      
-      const validTrades = trades.filter(trade => trade !== null);
-      res.json(validTrades);
+      res.json(trades);
     } catch (error) {
-      console.error('Error generating top trades:', error);
-      res.status(500).json({ message: 'Failed to generate trade recommendations' });
+      console.error('Error fetching top trades:', error);
+      res.status(500).json({ message: 'Failed to fetch trade recommendations' });
     }
   });
 
@@ -188,6 +172,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           try {
             return await storage.createOptionsTrade({
               ticker: rec.ticker,
+              optionType: rec.optionType,
               currentPrice: rec.currentPrice,
               strikePrice: rec.strikePrice,
               expiry: rec.expiry,
