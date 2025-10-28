@@ -202,12 +202,16 @@ export class AIAnalysisService {
     try {
       console.log('Starting AI trade analysis...');
       
+      // Randomize ticker order for fresh market scans on each run
+      const shuffledTickers = [...this.TICKERS].sort(() => Math.random() - 0.5);
+      console.log(`Scanning ${shuffledTickers.length} stocks in randomized order for pullback opportunities...`);
+      
       // Scrape current market data
       const marketData = await this.scrapeMarketDataForAnalysis();
       
       // Analyze each ticker
       const tradeAnalyses = await Promise.allSettled(
-        this.TICKERS.map(ticker => this.analyzeTicker(ticker, marketData))
+        shuffledTickers.map(ticker => this.analyzeTicker(ticker, marketData))
       );
 
       const validTrades: TradeRecommendation[] = [];

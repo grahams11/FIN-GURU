@@ -75,6 +75,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/top-trades', async (req, res) => {
     try {
       console.log('Generating top trade recommendations...');
+      
+      // Clear existing trades for fresh scan
+      await storage.clearTrades();
+      
       const recommendations = await AIAnalysisService.generateTradeRecommendations();
       
       // Filter out invalid recommendations and add validation

@@ -376,11 +376,11 @@ export class WebScraperService {
   }
 
   static async scrapeStockPrice(symbol: string): Promise<StockData> {
-    // Try multiple sources for freshest data
+    // WEB SCRAPING ONLY - Google Finance as primary source
     const sources = [
       () => this.scrapeGoogleFinance(symbol),
-      () => this.scrapeMarketWatch(symbol), 
-      () => this.scrapeYahooFinance(symbol)
+      () => this.scrapeYahooFinanceHTML(symbol), // HTML scraping only, no API
+      () => this.scrapeMarketWatch(symbol)
     ];
 
     for (const scraper of sources) {
@@ -400,44 +400,15 @@ export class WebScraperService {
     return this.getDefaultData(symbol);
   }
 
-  private static async scrapeYahooFinance(symbol: string): Promise<StockData> {
-    // Try multiple Yahoo Finance URLs with cache-busting
+  private static async scrapeYahooFinanceHTML(symbol: string): Promise<StockData> {
+    // WEB SCRAPING ONLY - No API calls
     const urls = [
       `${this.YAHOO_FINANCE_BASE}/quote/${symbol}?t=${Date.now()}`,
-      `${this.YAHOO_FINANCE_BASE}/quote/${symbol}`,
-      `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}`
+      `${this.YAHOO_FINANCE_BASE}/quote/${symbol}`
     ];
     
     for (const url of urls) {
       try {
-        if (url.includes('query1.finance.yahoo.com')) {
-          // Try Yahoo Finance API directly
-          const response = await axios.get(url, {
-            headers: {
-              ...this.HEADERS,
-              'Accept': 'application/json'
-            },
-            timeout: 8000
-          });
-          
-          if (response.data?.chart?.result?.[0]?.meta) {
-            const meta = response.data.chart.result[0].meta;
-            const currentPrice = meta.regularMarketPrice || meta.previousClose;
-            const previousClose = meta.previousClose;
-            const change = currentPrice - previousClose;
-            const changePercent = (change / previousClose) * 100;
-            
-            console.log(`${symbol}: Got live price ${currentPrice} from Yahoo API`);
-            
-            return {
-              symbol: symbol.replace('%5E', '^'),
-              price: currentPrice,
-              change: change,
-              changePercent: changePercent,
-              volume: meta.regularMarketVolume
-            };
-          }
-        } else {
           // Try HTML scraping with improved selectors
           const response = await axios.get(url, {
             headers: {
@@ -504,7 +475,6 @@ export class WebScraperService {
               volume: undefined
             };
           }
-        }
       } catch (error) {
         console.warn(`Failed to scrape ${url} for ${symbol}:`, error instanceof Error ? error.message : 'Unknown error');
         continue;
@@ -617,29 +587,36 @@ export class WebScraperService {
   }
 
   /**
-   * Scrape 52-week high and low data for pullback analysis
+   * Scrape 52-week high and low data for pullback analysis - WEB SCRAPING ONLY
    */
   static async scrape52WeekRange(symbol: string): Promise<{ fiftyTwoWeekHigh: number; fiftyTwoWeekLow: number } | null> {
     try {
-      // Try Yahoo Finance API first (most reliable for 52-week data)
-      const apiUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}`;
-      const response = await axios.get(apiUrl, {
-        headers: {
-          ...this.HEADERS,
-          'Accept': 'application/json'
-        },
-        timeout: 8000
-      });
-      
-      if (response.data?.chart?.result?.[0]?.meta) {
-        const meta = response.data.chart.result[0].meta;
-        const fiftyTwoWeekHigh = meta.fiftyTwoWeekHigh;
-        const fiftyTwoWeekLow = meta.fiftyTwoWeekLow;
+      // WEB SCRAPING ONLY - No APIs
+      // Try Google Finance first for 52-week data
+      try {
+        const googleUrl = `https://www.google.com/finance/quote/${symbol}:NASDAQ`;
+        const googleResponse = await axios.get(googleUrl, {
+          headers: this.HEADERS,
+          timeout: 8000
+        });
         
-        if (fiftyTwoWeekHigh && fiftyTwoWeekLow && fiftyTwoWeekHigh > 0 && fiftyTwoWeekLow > 0) {
-          console.log(`${symbol}: 52-week range: $${fiftyTwoWeekLow.toFixed(2)} - $${fiftyTwoWeekHigh.toFixed(2)}`);
-          return { fiftyTwoWeekHigh, fiftyTwoWeekLow };
+        const $g = cheerio.load(googleResponse.data);
+        
+        // Google Finance 52-week range
+        const rangeText = $g('div:contains("52-week")').parent().find('div[class*="YMlKec"]').text();
+        if (rangeText) {
+          const match = rangeText.match(/([\d,]+\.?\d*)\s*-\s*([\d,]+\.?\d*)/);
+          if (match) {
+            const fiftyTwoWeekLow = parseFloat(match[1].replace(/,/g, ''));
+            const fiftyTwoWeekHigh = parseFloat(match[2].replace(/,/g, ''));
+            if (fiftyTwoWeekHigh > 0 && fiftyTwoWeekLow > 0) {
+              console.log(`${symbol}: 52-week range (Google): $${fiftyTwoWeekLow.toFixed(2)} - $${fiftyTwoWeekHigh.toFixed(2)}`);
+              return { fiftyTwoWeekHigh, fiftyTwoWeekLow };
+            }
+          }
         }
+      } catch (error) {
+        console.warn(`Google Finance 52-week scraping failed for ${symbol}`);
       }
       
       // Fallback: scrape from Yahoo Finance HTML
