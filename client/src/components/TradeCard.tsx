@@ -62,20 +62,33 @@ export function TradeCard({ trade, rank }: TradeCardProps) {
               </span>
             </div>
             <div>
-              <h3 className="text-lg font-bold" data-testid={`ticker-${trade.ticker}`}>
-                {trade.ticker}
-              </h3>
+              <div className="flex items-center space-x-2">
+                <h3 className="text-lg font-bold" data-testid={`ticker-${trade.ticker}`}>
+                  {trade.ticker}
+                </h3>
+                <span 
+                  className={`text-xs font-bold px-2 py-1 rounded ${
+                    (trade as any).optionType === 'put' 
+                      ? 'bg-red-500/20 text-red-400 border border-red-500/40' 
+                      : 'bg-green-500/20 text-green-400 border border-green-500/40'
+                  }`}
+                  data-testid={`option-type-${trade.ticker}`}
+                >
+                  {((trade as any).optionType?.toUpperCase() || 'CALL')}
+                </span>
+              </div>
               <p className="text-sm text-muted-foreground">
-                {/* Company name would be fetched from market data */}
-                Options Contract
+                {(trade as any).optionType === 'put' ? 'Bearish Elite Play' : 'Bullish Elite Play'}
               </p>
             </div>
           </div>
           <div className="text-right">
-            <p className={`text-lg font-bold ${trade.projectedROI >= 0 ? 'text-green-500' : 'text-red-500'}`} data-testid={`roi-${trade.ticker}`}>
-              {trade.projectedROI > 0 ? '+' : ''}{trade.projectedROI.toFixed(1)}%
+            <p className={`text-lg font-bold ${trade.projectedROI >= 100 ? 'text-green-500 animate-pulse' : trade.projectedROI >= 0 ? 'text-green-500' : 'text-red-500'}`} data-testid={`roi-${trade.ticker}`}>
+              {trade.projectedROI > 0 ? '+' : ''}{trade.projectedROI.toFixed(0)}%
             </p>
-            <p className="text-sm text-muted-foreground">Projected ROI</p>
+            <p className="text-sm text-muted-foreground">
+              {trade.projectedROI >= 100 ? '✨ Elite ROI ✨' : 'Projected ROI'}
+            </p>
           </div>
         </div>
         
