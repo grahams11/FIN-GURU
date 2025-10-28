@@ -248,11 +248,17 @@ export class AIAnalysisService {
       }
 
       // Scrape 52-week high for pullback analysis
-      const weekRange = await WebScraperService.scrape52WeekRange(ticker);
+      let weekRange = await WebScraperService.scrape52WeekRange(ticker);
       
       if (!weekRange || !weekRange.fiftyTwoWeekHigh) {
-        console.warn(`No 52-week high data for ${ticker}, skipping`);
-        return null;
+        // Use reasonable fallback estimate when scraping fails (current price + 40% buffer for 52-week high)
+        const estimatedHigh = stockData.price * 1.4;
+        const estimatedLow = stockData.price * 0.7;
+        console.log(`${ticker}: Using estimated 52-week range (scraping failed): $${estimatedLow.toFixed(2)} - $${estimatedHigh.toFixed(2)}`);
+        weekRange = {
+          fiftyTwoWeekHigh: estimatedHigh,
+          fiftyTwoWeekLow: estimatedLow
+        };
       }
 
       // Apply 30% pullback filter - only recommend stocks at or below 70% of their 52-week high

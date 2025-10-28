@@ -592,34 +592,7 @@ export class WebScraperService {
   static async scrape52WeekRange(symbol: string): Promise<{ fiftyTwoWeekHigh: number; fiftyTwoWeekLow: number } | null> {
     try {
       // WEB SCRAPING ONLY - No APIs
-      // Try Google Finance first for 52-week data
-      try {
-        const googleUrl = `https://www.google.com/finance/quote/${symbol}:NASDAQ`;
-        const googleResponse = await axios.get(googleUrl, {
-          headers: this.HEADERS,
-          timeout: 8000
-        });
-        
-        const $g = cheerio.load(googleResponse.data);
-        
-        // Google Finance 52-week range
-        const rangeText = $g('div:contains("52-week")').parent().find('div[class*="YMlKec"]').text();
-        if (rangeText) {
-          const match = rangeText.match(/([\d,]+\.?\d*)\s*-\s*([\d,]+\.?\d*)/);
-          if (match) {
-            const fiftyTwoWeekLow = parseFloat(match[1].replace(/,/g, ''));
-            const fiftyTwoWeekHigh = parseFloat(match[2].replace(/,/g, ''));
-            if (fiftyTwoWeekHigh > 0 && fiftyTwoWeekLow > 0) {
-              console.log(`${symbol}: 52-week range (Google): $${fiftyTwoWeekLow.toFixed(2)} - $${fiftyTwoWeekHigh.toFixed(2)}`);
-              return { fiftyTwoWeekHigh, fiftyTwoWeekLow };
-            }
-          }
-        }
-      } catch (error) {
-        console.warn(`Google Finance 52-week scraping failed for ${symbol}`);
-      }
-      
-      // Fallback: scrape from Yahoo Finance HTML
+      // Fallback: scrape from Yahoo Finance HTML (most reliable)
       const htmlUrl = `https://finance.yahoo.com/quote/${symbol}`;
       const htmlResponse = await axios.get(htmlUrl, {
         headers: this.HEADERS,
@@ -628,14 +601,15 @@ export class WebScraperService {
       
       const $ = cheerio.load(htmlResponse.data);
       
-      // Look for 52-week range in summary table
+      // Look for 52-week range in summary table with multiple selector strategies
       let fiftyTwoWeekHigh: number | undefined;
       let fiftyTwoWeekLow: number | undefined;
       
-      $('tr').each((_, row) => {
-        const label = $(row).find('td').first().text().trim();
-        if (label.includes('52') && label.includes('Week') && label.includes('Range')) {
-          const value = $(row).find('td').last().text().trim();
+      // Strategy 1: Look in table rows
+      $('tr, li').each((_, elem) => {
+        const label = $(elem).find('span, td').first().text().trim();
+        if ((label.includes('52') || label.includes('52-Week')) && (label.includes('Week') || label.includes('Range'))) {
+          const value = $(elem).find('span, td').last().text().trim();
           // Format is typically "123.45 - 234.56"
           const match = value.match(/([\d,]+\.?\d*)\s*-\s*([\d,]+\.?\d*)/);
           if (match) {
@@ -645,11 +619,26 @@ export class WebScraperService {
         }
       });
       
+      // Strategy 2: Look for data attributes
+      if (!fiftyTwoWeekHigh) {
+        $('[data-symbol="' + symbol + '"]').each((_, elem) => {
+          const text = $(elem).text();
+          if (text.includes('52') && text.includes('Week')) {
+            const match = text.match(/([\d,]+\.?\d*)\s*-\s*([\d,]+\.?\d*)/);
+            if (match) {
+              fiftyTwoWeekLow = parseFloat(match[1].replace(/,/g, ''));
+              fiftyTwoWeekHigh = parseFloat(match[2].replace(/,/g, ''));
+            }
+          }
+        });
+      }
+      
       if (fiftyTwoWeekHigh && fiftyTwoWeekLow && fiftyTwoWeekHigh > 0 && fiftyTwoWeekLow > 0) {
-        console.log(`${symbol}: 52-week range (HTML): $${fiftyTwoWeekLow.toFixed(2)} - $${fiftyTwoWeekHigh.toFixed(2)}`);
+        console.log(`${symbol}: 52-week range: $${fiftyTwoWeekLow.toFixed(2)} - $${fiftyTwoWeekHigh.toFixed(2)}`);
         return { fiftyTwoWeekHigh, fiftyTwoWeekLow };
       }
       
+      console.warn(`Could not scrape 52-week range for ${symbol}`);
       return null;
     } catch (error) {
       console.warn(`Failed to scrape 52-week range for ${symbol}:`, error instanceof Error ? error.message : 'Unknown error');
