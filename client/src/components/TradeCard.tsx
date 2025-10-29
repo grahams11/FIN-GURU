@@ -107,9 +107,14 @@ export function TradeCard({ trade, rank }: TradeCardProps) {
           </div>
           <div>
             <p className="text-xs text-muted-foreground uppercase tracking-wide">Premium/Contract</p>
-            <p className="text-sm font-medium text-accent" data-testid={`premium-${trade.ticker}`}>
-              ${(trade as any).premium?.toFixed(2) || trade.entryPrice.toFixed(2)}
-            </p>
+            <div className="flex items-center space-x-1">
+              <p className="text-sm font-medium text-accent" data-testid={`premium-${trade.ticker}`}>
+                ${(trade as any).premium?.toFixed(2) || trade.entryPrice.toFixed(2)}
+              </p>
+              <span className="text-[10px] text-muted-foreground bg-muted px-1 rounded" title="Estimated using Black-Scholes model. Verify with your broker before trading.">
+                EST
+              </span>
+            </div>
           </div>
           <div>
             <p className="text-xs text-muted-foreground uppercase tracking-wide">Contracts</p>

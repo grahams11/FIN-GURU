@@ -646,161 +646,27 @@ export class WebScraperService {
     }
   }
   
-  // Get real options chain data from Polygon.io API
+  // Get real options chain data using web scraping (Yahoo Finance JSON API primary)
   static async scrapeOptionsChain(ticker: string): Promise<OptionsChain> {
-    const apiKey = process.env.POLYGON_API_KEY;
-    
-    if (!apiKey) {
-      console.warn(`${ticker}: No POLYGON_API_KEY found, falling back to web scraping`);
-      return this.fallbackWebScrapeOptions(ticker);
-    }
-    
+    // Try Yahoo Finance JSON API first (most reliable)
     try {
-      // Step 1: Get available expiration dates from Polygon
-      const contractsUrl = `https://api.polygon.io/v3/reference/options/contracts?underlying_ticker=${ticker}&limit=1000&apiKey=${apiKey}`;
-      
-      const response = await axios.get(contractsUrl, {
-        timeout: 10000,
-        headers: {
-          'Accept': 'application/json'
-        }
-      });
-      
-      if (!response.data || !response.data.results) {
-        throw new Error('No options contracts found');
+      const chain = await this.scrapeYahooFinanceOptions(ticker);
+      if (chain.expirations.length > 0 && Object.keys(chain.byExpiration).length > 0) {
+        console.log(`✅ ${ticker}: Got options data from Yahoo Finance API`);
+        return chain;
       }
-      
-      const contracts = response.data.results;
-      
-      // Extract unique expiration dates
-      const expirationSet = new Set<string>();
-      const contractsByExpiration: { [key: string]: any[] } = {};
-      
-      for (const contract of contracts) {
-        const expDate = contract.expiration_date;
-        if (expDate) {
-          expirationSet.add(expDate);
-          if (!contractsByExpiration[expDate]) {
-            contractsByExpiration[expDate] = [];
-          }
-          contractsByExpiration[expDate].push(contract);
-        }
-      }
-      
-      const expirations = Array.from(expirationSet).sort();
-      
-      if (expirations.length === 0) {
-        throw new Error('No expirations found');
-      }
-      
-      // Step 2: Get quotes for the nearest expiration
-      const nearestExpiration = expirations[0];
-      const expirationContracts = contractsByExpiration[nearestExpiration];
-      
-      const byExpiration: { [key: string]: { calls: OptionContract[], puts: OptionContract[] } } = {};
-      const calls: OptionContract[] = [];
-      const puts: OptionContract[] = [];
-      
-      // Get quotes for each contract (batch if possible, or sample)
-      // For free tier, we'll sample key strikes to avoid rate limits
-      const sampleContracts = this.sampleKeyStrikes(expirationContracts);
-      
-      for (const contract of sampleContracts) {
-        try {
-          // Get last quote for this contract
-          const quoteUrl = `https://api.polygon.io/v3/quotes/${contract.ticker}?limit=1&apiKey=${apiKey}`;
-          const quoteResponse = await axios.get(quoteUrl, { timeout: 5000 });
-          
-          if (quoteResponse.data && quoteResponse.data.results && quoteResponse.data.results.length > 0) {
-            const quote = quoteResponse.data.results[0];
-            
-            const optionContract: OptionContract = {
-              strike: contract.strike_price,
-              bid: quote.bid_price || 0,
-              ask: quote.ask_price || 0,
-              last: quote.last_price || ((quote.bid_price + quote.ask_price) / 2),
-              iv: contract.implied_volatility,
-              oi: quote.open_interest,
-              volume: quote.volume
-            };
-            
-            if (contract.contract_type === 'call') {
-              calls.push(optionContract);
-            } else {
-              puts.push(optionContract);
-            }
-          }
-          
-          // Rate limiting: 5 calls/minute for free tier
-          await new Promise(resolve => setTimeout(resolve, 300));
-          
-        } catch (error) {
-          // Skip individual contract errors
-          continue;
-        }
-      }
-      
-      if (calls.length > 0 || puts.length > 0) {
-        byExpiration[nearestExpiration] = { calls, puts };
-        console.log(`✅ Polygon.io: ${ticker} - ${calls.length} calls, ${puts.length} puts for ${nearestExpiration}`);
-      }
-      
-      return {
-        ticker,
-        expirations,
-        byExpiration
-      };
-      
     } catch (error) {
-      console.warn(`Polygon.io failed for ${ticker}: ${error instanceof Error ? error.message : 'Unknown error'}`);
-      console.log(`${ticker}: Falling back to web scraping...`);
-      return this.fallbackWebScrapeOptions(ticker);
+      console.warn(`Yahoo Finance failed for ${ticker}, trying other sources...`);
     }
+    
+    // Fallback to other sources
+    return this.fallbackWebScrapeOptions(ticker);
   }
   
-  // Sample key strikes around the current price to reduce API calls
-  private static sampleKeyStrikes(contracts: any[]): any[] {
-    if (contracts.length === 0) return [];
-    
-    // Group by strike price
-    const strikeMap = new Map<number, any>();
-    for (const contract of contracts) {
-      const strike = contract.strike_price;
-      if (!strikeMap.has(strike) || contract.contract_type === 'call') {
-        strikeMap.set(strike, contract);
-      }
-    }
-    
-    // Get unique strikes sorted
-    const strikes = Array.from(strikeMap.keys()).sort((a, b) => a - b);
-    
-    // Sample every other strike, or max 10 strikes
-    const sampledStrikes: number[] = [];
-    const step = Math.max(1, Math.floor(strikes.length / 10));
-    
-    for (let i = 0; i < strikes.length; i += step) {
-      sampledStrikes.push(strikes[i]);
-      if (sampledStrikes.length >= 10) break;
-    }
-    
-    // Get both call and put for each sampled strike
-    const sampled: any[] = [];
-    for (const strike of sampledStrikes) {
-      const callContract = contracts.find(c => c.strike_price === strike && c.contract_type === 'call');
-      const putContract = contracts.find(c => c.strike_price === strike && c.contract_type === 'put');
-      
-      if (callContract) sampled.push(callContract);
-      if (putContract) sampled.push(putContract);
-    }
-    
-    return sampled;
-  }
-  
-  // Fallback to web scraping if Polygon fails or no API key
+  // Fallback to other web scraping sources
   private static async fallbackWebScrapeOptions(ticker: string): Promise<OptionsChain> {
     const sources = [
       () => this.scrapeCboeOptions(ticker),
-      () => this.scrapeYahooFinanceOptions(ticker),
       () => this.scrapeMarketWatchOptions(ticker)
     ];
     
