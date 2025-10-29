@@ -92,21 +92,21 @@ export function TradeCard({ trade, rank }: TradeCardProps) {
           </div>
         </div>
         
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
           <div>
-            <p className="text-xs text-muted-foreground uppercase tracking-wide">Current Price</p>
+            <p className="text-xs text-muted-foreground uppercase tracking-wide">Stock Price</p>
             <p className="text-sm font-medium text-primary" data-testid={`current-${trade.ticker}`}>
               ${trade.currentPrice.toFixed(2)}
             </p>
           </div>
           <div>
-            <p className="text-xs text-muted-foreground uppercase tracking-wide">Strike Price</p>
+            <p className="text-xs text-muted-foreground uppercase tracking-wide">Strike</p>
             <p className="text-sm font-medium" data-testid={`strike-${trade.ticker}`}>
               ${trade.strikePrice.toFixed(2)}
             </p>
           </div>
           <div>
-            <p className="text-xs text-muted-foreground uppercase tracking-wide">Premium</p>
+            <p className="text-xs text-muted-foreground uppercase tracking-wide">Premium/Contract</p>
             <p className="text-sm font-medium text-accent" data-testid={`premium-${trade.ticker}`}>
               ${(trade as any).premium?.toFixed(2) || trade.entryPrice.toFixed(2)}
             </p>
@@ -117,29 +117,35 @@ export function TradeCard({ trade, rank }: TradeCardProps) {
               {trade.contracts}
             </p>
           </div>
+          <div className="bg-primary/10 rounded-md p-2 border border-primary/20">
+            <p className="text-xs text-muted-foreground uppercase tracking-wide">💰 Total Cost</p>
+            <p className="text-base font-bold text-primary" data-testid={`total-cost-${trade.ticker}`}>
+              ${(trade as any).totalCost?.toFixed(2) || (trade.contracts * trade.entryPrice * 100).toFixed(2)}
+            </p>
+          </div>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4 bg-muted/30 rounded-lg p-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4 bg-gradient-to-r from-green-500/10 to-accent/10 rounded-lg p-4 border border-green-500/20">
           <div>
-            <p className="text-xs text-muted-foreground uppercase tracking-wide">Exit Price Target</p>
-            <p className="text-base font-bold text-green-500" data-testid={`exit-target-${trade.ticker}`}>
+            <p className="text-xs text-muted-foreground uppercase tracking-wide">💵 Exit Premium Target</p>
+            <p className="text-lg font-bold text-green-500" data-testid={`exit-target-${trade.ticker}`}>
               ${trade.exitPrice?.toFixed(2) || 'N/A'}
             </p>
-            <p className="text-xs text-muted-foreground">to hit {trade.projectedROI.toFixed(0)}% ROI</p>
+            <p className="text-xs text-muted-foreground">sell each contract at this price</p>
           </div>
           <div>
-            <p className="text-xs text-muted-foreground uppercase tracking-wide">Projected Hold</p>
-            <p className="text-base font-bold text-accent" data-testid={`hold-days-${trade.ticker}`}>
+            <p className="text-xs text-muted-foreground uppercase tracking-wide">⏰ Projected Hold</p>
+            <p className="text-lg font-bold text-accent" data-testid={`hold-days-${trade.ticker}`}>
               {(trade as any).holdDays || 'N/A'} days
             </p>
-            <p className="text-xs text-muted-foreground">target exit window</p>
+            <p className="text-xs text-muted-foreground">optimal exit window</p>
           </div>
           <div>
-            <p className="text-xs text-muted-foreground uppercase tracking-wide">Expiry</p>
-            <p className="text-base font-bold" data-testid={`expiry-${trade.ticker}`}>
+            <p className="text-xs text-muted-foreground uppercase tracking-wide">📅 Expiration</p>
+            <p className="text-lg font-bold" data-testid={`expiry-${trade.ticker}`}>
               {trade.expiry}
             </p>
-            <p className="text-xs text-muted-foreground">contract expiration</p>
+            <p className="text-xs text-muted-foreground">must exit by this date</p>
           </div>
         </div>
 

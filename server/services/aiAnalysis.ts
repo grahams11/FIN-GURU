@@ -324,15 +324,11 @@ export class AIAnalysisService {
         strategyType
       );
 
-      // Calculate elite ROI targeting minimum 100% returns
-      const projectedROI = this.calculateEliteROI(
-        stockData.price,
-        optionsStrategy.strikePrice,
-        optionsStrategy.entryPrice,
-        strategyType,
-        sentiment.bullishness,
-        pullbackPercent
-      );
+      // Calculate ROI based on actual total cost and exit price
+      const totalCost = optionsStrategy.totalCost;
+      const totalExitValue = optionsStrategy.contracts * optionsStrategy.exitPrice * 100;
+      const profit = totalExitValue - totalCost;
+      const projectedROI = (profit / totalCost) * 100;
 
       const aiConfidence = this.calculateEliteConfidence(
         sentiment,
@@ -364,6 +360,7 @@ export class AIAnalysisService {
         premium: optionsStrategy.premium,
         entryPrice: optionsStrategy.entryPrice,
         exitPrice: optionsStrategy.exitPrice,
+        totalCost: optionsStrategy.totalCost,
         contracts: optionsStrategy.contracts,
         projectedROI,
         aiConfidence,
@@ -992,16 +989,26 @@ export class AIAnalysisService {
       const optimalContracts = Math.floor(maxTradeAmount / costPerContract);
       const contracts = Math.max(1, Math.min(50, optimalContracts));
       
+      // Calculate total trade cost
+      const totalTradeCost = contracts * finalEntryPrice * 100;
+      
       // Verify budget compliance
-      const totalCost = contracts * finalEntryPrice * 100;
-      if (totalCost > maxTradeAmount) {
-        console.warn(`Elite trade cost ${totalCost} exceeds budget for ${ticker}`);
+      if (totalTradeCost > maxTradeAmount) {
+        console.warn(`Elite trade cost ${totalTradeCost.toFixed(2)} exceeds budget for ${ticker}`);
         return null;
       }
       
-      // Elite exit targeting: 100%+ gains (2x-3x multiplier)
-      const eliteGainTarget = 2.0 + (sentiment.confidence * 1.0); // 2x-3x target
-      const exitPrice = finalEntryPrice * eliteGainTarget;
+      // Elite ROI targeting: 100-300% returns
+      const targetROI = 100 + (sentiment.confidence * 200); // 100% to 300% based on confidence
+      
+      // Calculate required profit to achieve target ROI
+      const requiredProfit = totalTradeCost * (targetROI / 100);
+      
+      // Calculate total exit value needed
+      const totalExitValue = totalTradeCost + requiredProfit;
+      
+      // Calculate exit premium per contract
+      const exitPrice = totalExitValue / (contracts * 100);
       
       // Aggressive hold period for elite momentum plays
       const holdDays = Math.min(targetDays, sentiment.confidence > 0.75 ? 5 : 10);
@@ -1019,6 +1026,7 @@ export class AIAnalysisService {
         premium: Math.round(finalEntryPrice * 100) / 100,
         entryPrice: Math.round(finalEntryPrice * 100) / 100,
         exitPrice: Math.round(exitPrice * 100) / 100,
+        totalCost: Math.round(totalTradeCost * 100) / 100,
         contracts: Math.max(1, contracts),
         holdDays: Math.max(1, holdDays),
         impliedVolatility: Math.round(impliedVolatility * 10000) / 10000
