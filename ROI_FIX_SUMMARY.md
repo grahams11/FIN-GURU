@@ -84,6 +84,18 @@ Math Verification:
    - Contract sizing optimized for max leverage
    - More contracts when premiums are cheaper
 
+## ⚠️ Important: Premium Accuracy Notice
+
+**Premium prices are estimated using the Black-Scholes options pricing model.**
+
+- These estimates may differ from actual broker prices (e.g., Robinhood, TD Ameritrade)
+- Real-world premiums depend on live market conditions, bid-ask spreads, and liquidity
+- **Always verify premium costs with your broker before executing any trade**
+- The ROI calculations are mathematically correct but based on estimated premiums
+- See PREMIUM_DATA_STATUS.md for technical details on why we use Black-Scholes
+
+The scanner provides directional guidance and identifies opportunities, but you must confirm actual costs before trading.
+
 ## 🔍 Complete Transparency
 
 ### What You See Now:
@@ -120,17 +132,25 @@ Your ROI: 159.81%
 
 ## 🚀 Bottom Line
 
-**Are the plays legitimate and accurate?** ✅ **YES!**
+**Are the ROI calculations mathematically correct?** ✅ **YES!**
 
-- Real market data ✓
 - Correct options math ✓  
 - Transparent ROI calculations ✓
 - Total costs clearly shown ✓
 - Exit targets based on actual cost ✓
 - All numbers verify correctly ✓
 
-**Should you trust these numbers?** ✅ **YES!**
+**How should you use these numbers?**
 
-The scanner now shows **exactly how much you need to invest**, **exactly what price to exit at**, and **exactly what return you'll get**. No assumptions, no hidden calculations - just transparent, verified math.
+The scanner shows:
+- **Directional opportunities**: Stocks identified for potential CALL/PUT plays
+- **Estimated costs**: Black-Scholes premium calculations as starting points
+- **Target ROI**: What returns are possible if premiums move as projected
 
-The 159% average ROI is aggressive but realistic for short-term options plays with proper market timing!
+**Before trading:**
+- ✅ Verify actual premium prices with your broker
+- ✅ Confirm the entry cost matches your budget
+- ✅ Adjust contract quantities based on real premiums
+- ✅ Re-calculate ROI using actual broker prices
+
+The 159% average ROI is aggressive but realistic for short-term options plays with proper market timing - **when using actual market premiums**!

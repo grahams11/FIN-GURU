@@ -36,9 +36,11 @@ Jul 18, Aug 15, Sep 19, Oct 17, Nov 21, Dec 19
 ```
 
 ### Contract Pricing
+- **Premium Calculation**: Black-Scholes model (estimated)
 - **Minimum Premium**: $0.10 (industry standard minimum)
 - **Contract Sizing**: Maximum $1000 per trade budget
 - **Cost Formula**: `contracts × premium × 100`
+- ⚠️ **Important**: Premiums are estimates and may differ from broker prices
 
 ## ✅ Elite Dual-Strategy Scanner Logic
 
@@ -83,12 +85,15 @@ Implied Volatility: 35-90% (dynamically adjusted)
 ```typescript
 Target Calculation:
 1. Strike selection for 5% OTM leverage
-2. Premium pricing via Black-Scholes
+2. Premium pricing via Black-Scholes (estimated)
 3. Exit target: 2x-3x premium multiplier
 4. Minimum 100% ROI threshold enforcement
 
 Formula: ROI = ((exitPrice - entryPrice) / entryPrice) × 100
 All trades filtered to meet 100%+ ROI minimum
+
+⚠️ Note: ROI is mathematically accurate but based on estimated premiums.
+Verify actual broker prices before trading.
 ```
 
 ## ✅ NEW ADDITIONS (Your Request)
@@ -145,11 +150,17 @@ Based on: Optimal theta/vega balance for maximum profit
 
 ## 🎯 Bottom Line
 
-**Are the plays legitimate?** YES
+**Are the calculations mathematically legitimate?** YES
 - Real market data via web scraping ✓
 - Proper options market standards ✓
 - Accurate mathematical calculations ✓
 - Industry-standard Greeks formulas ✓
+
+**Are the premium prices accurate?** ⚠️ ESTIMATED
+- Premiums calculated using Black-Scholes model
+- May differ significantly from actual broker prices
+- **ALWAYS verify with your broker before trading**
+- See PREMIUM_DATA_STATUS.md for technical details
 
 **Are they guaranteed to work?** NO
 - Options trading carries significant risk
@@ -157,7 +168,9 @@ Based on: Optimal theta/vega balance for maximum profit
 - Market conditions change rapidly
 - Use proper risk management
 
-**Should you trust the exit targets and hold days?** YES, with caution
-- Exit prices are mathematically accurate for projected ROI
-- Hold days are optimal windows, not guarantees
-- Always monitor positions and adjust based on actual market movement
+**How to use these recommendations:**
+1. Use as directional guidance for potential opportunities
+2. Verify actual premium costs with your broker
+3. Re-calculate ROI using real broker prices
+4. Adjust contract quantities based on actual costs
+5. Monitor positions and adjust based on market movement
