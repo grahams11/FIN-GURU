@@ -92,7 +92,7 @@ export function TradeCard({ trade, rank }: TradeCardProps) {
           </div>
         </div>
         
-        <div className="grid grid-cols-2 md:grid-cols-6 gap-4 mb-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
           <div>
             <p className="text-xs text-muted-foreground uppercase tracking-wide">Current Price</p>
             <p className="text-sm font-medium text-primary" data-testid={`current-${trade.ticker}`}>
@@ -106,18 +106,6 @@ export function TradeCard({ trade, rank }: TradeCardProps) {
             </p>
           </div>
           <div>
-            <p className="text-xs text-muted-foreground uppercase tracking-wide">Expiry</p>
-            <p className="text-sm font-medium" data-testid={`expiry-${trade.ticker}`}>
-              {trade.expiry}
-            </p>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground uppercase tracking-wide">Stock Entry</p>
-            <p className="text-sm font-medium text-green-500" data-testid={`stock-entry-${trade.ticker}`}>
-              ${(trade as any).stockEntryPrice?.toFixed(2) || 'N/A'}
-            </p>
-          </div>
-          <div>
             <p className="text-xs text-muted-foreground uppercase tracking-wide">Premium</p>
             <p className="text-sm font-medium text-accent" data-testid={`premium-${trade.ticker}`}>
               ${(trade as any).premium?.toFixed(2) || trade.entryPrice.toFixed(2)}
@@ -128,6 +116,30 @@ export function TradeCard({ trade, rank }: TradeCardProps) {
             <p className="text-sm font-medium" data-testid={`contracts-${trade.ticker}`}>
               {trade.contracts}
             </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4 bg-muted/30 rounded-lg p-4">
+          <div>
+            <p className="text-xs text-muted-foreground uppercase tracking-wide">Exit Price Target</p>
+            <p className="text-base font-bold text-green-500" data-testid={`exit-target-${trade.ticker}`}>
+              ${trade.exitPrice?.toFixed(2) || 'N/A'}
+            </p>
+            <p className="text-xs text-muted-foreground">to hit {trade.projectedROI.toFixed(0)}% ROI</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground uppercase tracking-wide">Projected Hold</p>
+            <p className="text-base font-bold text-accent" data-testid={`hold-days-${trade.ticker}`}>
+              {(trade as any).holdDays || 'N/A'} days
+            </p>
+            <p className="text-xs text-muted-foreground">target exit window</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground uppercase tracking-wide">Expiry</p>
+            <p className="text-base font-bold" data-testid={`expiry-${trade.ticker}`}>
+              {trade.expiry}
+            </p>
+            <p className="text-xs text-muted-foreground">contract expiration</p>
           </div>
         </div>
 

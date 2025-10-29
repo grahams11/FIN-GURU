@@ -30,6 +30,7 @@ export const optionsTrade = pgTable("options_trades", {
   premium: real("premium"), // Actual option premium cost (optional for backward compatibility)
   entryPrice: real("entry_price").notNull(), // Kept for backward compatibility
   exitPrice: real("exit_price"),
+  holdDays: integer("hold_days"), // Projected hold period in days
   contracts: integer("contracts").notNull(),
   projectedROI: real("projected_roi").notNull(),
   aiConfidence: real("ai_confidence").notNull(),
