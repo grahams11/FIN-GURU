@@ -768,9 +768,9 @@ export class WebScraperService {
     }
   }
   
-  // Secondary: Yahoo Finance Options
+  // Secondary: Yahoo Finance JSON API (more reliable than HTML scraping)
   private static async scrapeYahooFinanceOptions(ticker: string): Promise<OptionsChain> {
-    const url = `https://finance.yahoo.com/quote/${ticker}/options`;
+    const url = `https://query2.finance.yahoo.com/v7/finance/options/${ticker}`;
     
     try {
       const response = await axios.get(url, {
@@ -782,71 +782,69 @@ export class WebScraperService {
         timeout: 10000
       });
       
-      const $ = cheerio.load(response.data);
+      const data = response.data;
       
-      // Extract expiration dates from dropdown/links
+      if (!data.optionChain || !data.optionChain.result || data.optionChain.result.length === 0) {
+        throw new Error('No options data available');
+      }
+      
+      const optionsData = data.optionChain.result[0];
+      
+      // Extract all expiration dates and convert to ISO format
       const expirations: string[] = [];
-      $('a[href*="/options?date="], select.expiration option').each((_, elem) => {
-        const href = $(elem).attr('href');
-        const dateParam = href?.match(/date=(\d+)/);
-        
-        if (dateParam) {
-          const timestamp = parseInt(dateParam[1]);
+      if (optionsData.expirationDates) {
+        for (const timestamp of optionsData.expirationDates) {
           const date = new Date(timestamp * 1000);
           expirations.push(date.toISOString().split('T')[0]);
         }
-      });
+      }
       
-      // Extract options data
+      // Extract options data for the current expiration
       const byExpiration: { [key: string]: { calls: OptionContract[], puts: OptionContract[] } } = {};
       
-      if (expirations.length > 0) {
-        const firstExpiration = expirations[0];
+      if (optionsData.options && optionsData.options.length > 0) {
+        const firstOptions = optionsData.options[0];
+        const firstExpiration = expirations[0] || new Date().toISOString().split('T')[0];
+        
         const calls: OptionContract[] = [];
         const puts: OptionContract[] = [];
         
-        // Parse calls table
-        $('table[data-testid*="calls"] tbody tr').each((_, row) => {
-          const cells = $(row).find('td');
-          if (cells.length >= 5) {
-            const strike = parseFloat($(cells[2]).text().replace(/[,$]/g, ''));
-            const last = parseFloat($(cells[3]).text().replace(/[,$]/g, ''));
-            const bid = parseFloat($(cells[4]).text().replace(/[,$]/g, ''));
-            const ask = parseFloat($(cells[5]).text().replace(/[,$]/g, ''));
-            // Yahoo Finance typically has IV in column 10 (index 9)
-            const iv = cells.length > 9 ? parseFloat($(cells[9]).text().replace(/[%,$]/g, '')) : undefined;
-            const volume = cells.length > 8 ? parseInt($(cells[8]).text().replace(/[,$]/g, '')) : undefined;
-            const oi = cells.length > 7 ? parseInt($(cells[7]).text().replace(/[,$]/g, '')) : undefined;
-            
-            if (!isNaN(strike) && strike > 0) {
-              calls.push({ strike, bid, ask, last, iv: iv && !isNaN(iv) ? iv / 100 : undefined, oi, volume });
-            }
+        // Parse call contracts
+        if (firstOptions.calls) {
+          for (const call of firstOptions.calls) {
+            calls.push({
+              strike: call.strike,
+              bid: call.bid || 0,
+              ask: call.ask || 0,
+              last: call.lastPrice || call.bid || 0,
+              iv: call.impliedVolatility,
+              oi: call.openInterest,
+              volume: call.volume
+            });
           }
-        });
+        }
         
-        // Parse puts table
-        $('table[data-testid*="puts"] tbody tr').each((_, row) => {
-          const cells = $(row).find('td');
-          if (cells.length >= 5) {
-            const strike = parseFloat($(cells[2]).text().replace(/[,$]/g, ''));
-            const last = parseFloat($(cells[3]).text().replace(/[,$]/g, ''));
-            const bid = parseFloat($(cells[4]).text().replace(/[,$]/g, ''));
-            const ask = parseFloat($(cells[5]).text().replace(/[,$]/g, ''));
-            // Yahoo Finance typically has IV in column 10 (index 9)
-            const iv = cells.length > 9 ? parseFloat($(cells[9]).text().replace(/[%,$]/g, '')) : undefined;
-            const volume = cells.length > 8 ? parseInt($(cells[8]).text().replace(/[,$]/g, '')) : undefined;
-            const oi = cells.length > 7 ? parseInt($(cells[7]).text().replace(/[,$]/g, '')) : undefined;
-            
-            if (!isNaN(strike) && strike > 0) {
-              puts.push({ strike, bid, ask, last, iv: iv && !isNaN(iv) ? iv / 100 : undefined, oi, volume });
-            }
+        // Parse put contracts
+        if (firstOptions.puts) {
+          for (const put of firstOptions.puts) {
+            puts.push({
+              strike: put.strike,
+              bid: put.bid || 0,
+              ask: put.ask || 0,
+              last: put.lastPrice || put.bid || 0,
+              iv: put.impliedVolatility,
+              oi: put.openInterest,
+              volume: put.volume
+            });
           }
-        });
+        }
         
         if (calls.length > 0 || puts.length > 0) {
           byExpiration[firstExpiration] = { calls, puts };
         }
       }
+      
+      console.log(`✅ Yahoo Finance JSON API: Found ${expirations.length} expirations for ${ticker}`);
       
       return {
         ticker,
@@ -855,7 +853,7 @@ export class WebScraperService {
       };
       
     } catch (error) {
-      throw new Error(`Yahoo Finance options scraping failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      throw new Error(`Yahoo Finance JSON API scraping failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
   
