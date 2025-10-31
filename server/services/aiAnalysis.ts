@@ -202,6 +202,32 @@ export class AIAnalysisService {
     };
     return symbolMap[ticker] || ticker;
   }
+
+  // Get the next Friday expiration for SPX/MNQ weekly options
+  // Returns both the date and the number of days until expiration
+  private static getNextFridayExpiration(): { date: Date; daysUntil: number } {
+    const today = new Date();
+    const dayOfWeek = today.getDay(); // 0 = Sunday, 5 = Friday
+    
+    // Calculate days until next Friday
+    let daysUntilFriday;
+    if (dayOfWeek === 5) {
+      // If today is Friday, use next Friday (7 days)
+      daysUntilFriday = 7;
+    } else if (dayOfWeek < 5) {
+      // Monday-Thursday: use this Friday
+      daysUntilFriday = 5 - dayOfWeek;
+    } else {
+      // Saturday-Sunday: use next Friday
+      daysUntilFriday = 5 + (7 - dayOfWeek);
+    }
+    
+    const fridayDate = new Date(today);
+    fridayDate.setDate(today.getDate() + daysUntilFriday);
+    fridayDate.setHours(16, 0, 0, 0); // Options expire at 4:00 PM ET
+    
+    return { date: fridayDate, daysUntil: daysUntilFriday };
+  }
   
   // SWING TRADING TICKERS (Regular scanner)
   private static readonly TICKERS = [
@@ -1218,9 +1244,12 @@ export class AIAnalysisService {
       const targetStrike = currentPrice * (1 + strikeVariance);
       const strikePrice = this.getValidStrike(currentPrice, targetStrike);
       
-      // Day trading timeframe: 1-7 days (very short-term)
-      const targetDays = vixValue > 20 ? 1 : (rsi > 70 || rsi < 30 ? 3 : 7);
-      const expiryDate = this.getNextValidExpiration(targetDays);
+      // SPX/MNQ weekly options expire every Friday
+      const fridayExpiration = this.getNextFridayExpiration();
+      const expiryDate = fridayExpiration.date;
+      const targetDays = fridayExpiration.daysUntil;
+      
+      console.log(`${ticker}: Next Friday expiration: ${expiryDate.toLocaleDateString()} (${targetDays} days away)`);
       
       // Higher IV for day trading (more volatile, shorter timeframe)
       const baseIV = 0.40; // Base 40% for day trading volatility

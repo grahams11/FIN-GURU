@@ -40,7 +40,10 @@ Preferred communication style: Simple, everyday language.
   - **SELL Signal (PUT)**: VIX > 18 AND RSI > 70 (overbought) → Bearish day trade
   - **BUY Signal (CALL)**: VIX ≤ 18 OR RSI < 30 (oversold) → Bullish day trade
   - **Moderate Signals**: VIX > 18 but RSI < 70 → Elevated volatility bearish bias
-- **Timeframe**: 1-7 day holds (true day trading to short-term swing)
+- **Expiration Dates**: Weekly Friday expirations only (SPX/MNQ have weekly options that expire every Friday at 4:00 PM ET)
+  - Monday-Thursday trades → Expire this Friday
+  - Friday-Sunday trades → Expire next Friday
+- **Timeframe**: 1-7 days until Friday expiration (dynamic based on current day of week)
 - **Strike Selection**: ATM or very close (0.5% OTM) for maximum delta exposure
 - **ROI Targets**: 50-150% returns based on VIX+RSI signal strength
 - **Confidence Scoring**: Higher confidence for strong VIX+RSI alignment (extreme readings)
