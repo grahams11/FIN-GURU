@@ -228,6 +228,43 @@ export class AIAnalysisService {
     
     return { date: fridayDate, daysUntil: daysUntilFriday };
   }
+
+  // Get contract multiplier for different instruments
+  private static getContractMultiplier(ticker: string): number {
+    // SPX options: Standard 100 multiplier
+    // MNQ (Micro E-mini NASDAQ): Micro contract multiplier of 2
+    // Standard equity options: 100 multiplier
+    const multipliers: Record<string, number> = {
+      'SPX': 100,  // S&P 500 Index options
+      'MNQ': 2,    // Micro E-mini NASDAQ-100 Futures options
+    };
+    
+    return multipliers[ticker] || 100; // Default to 100 for equity options
+  }
+
+  // Calculate Fibonacci 0.707 entry price from 52-week range
+  private static calculateFibonacciEntry(
+    high52Week: number,
+    low52Week: number,
+    currentPrice: number,
+    strategyType: 'call' | 'put'
+  ): number {
+    const range = high52Week - low52Week;
+    
+    let fibEntry: number;
+    if (strategyType === 'call') {
+      // For CALL: Entry at exact 0.707 retracement from high (buying the dip)
+      fibEntry = high52Week - (range * 0.707);
+    } else {
+      // For PUT: Entry at exact 0.707 extension from low (selling near resistance)
+      fibEntry = low52Week + (range * 0.707);
+    }
+    
+    // Clamp to 52-week range to ensure valid entry price
+    fibEntry = Math.max(low52Week, Math.min(high52Week, fibEntry));
+    
+    return fibEntry;
+  }
   
   // SWING TRADING TICKERS (Regular scanner)
   private static readonly TICKERS = [
@@ -380,9 +417,10 @@ export class AIAnalysisService {
         strategyType
       );
 
-      // Calculate ROI based on actual total cost and exit price
+      // Calculate ROI based on actual total cost and exit price using correct multiplier
       const totalCost = optionsStrategy.totalCost;
-      const totalExitValue = optionsStrategy.contracts * optionsStrategy.exitPrice * 100;
+      const contractMultiplier = this.getContractMultiplier(ticker);
+      const totalExitValue = optionsStrategy.contracts * optionsStrategy.exitPrice * contractMultiplier;
       const profit = totalExitValue - totalCost;
       const projectedROI = (profit / totalCost) * 100;
 
@@ -484,6 +522,9 @@ export class AIAnalysisService {
       
       console.log(`${ticker}: ${signal} → ${strategyType.toUpperCase()}`);
       
+      // Scrape 52-week range for Fibonacci entry calculation
+      const weekRange = await WebScraperService.scrape52WeekRange(yahooSymbol);
+      
       // Generate day trading options strategy (shorter timeframe)
       const optionsStrategy = await this.generateDayTradingOptionsStrategy(
         ticker,
@@ -491,7 +532,8 @@ export class AIAnalysisService {
         strategyType,
         vixValue,
         rsi,
-        marketContext
+        marketContext,
+        weekRange
       );
       
       if (!optionsStrategy) {
@@ -510,9 +552,10 @@ export class AIAnalysisService {
         strategyType
       );
       
-      // Calculate ROI
+      // Calculate ROI using correct contract multiplier
       const totalCost = optionsStrategy.totalCost;
-      const totalExitValue = optionsStrategy.contracts * optionsStrategy.exitPrice * 100;
+      const contractMultiplier = this.getContractMultiplier(ticker);
+      const totalExitValue = optionsStrategy.contracts * optionsStrategy.exitPrice * contractMultiplier;
       const profit = totalExitValue - totalCost;
       const projectedROI = (profit / totalCost) * 100;
       
@@ -730,7 +773,8 @@ export class AIAnalysisService {
       const strikePrice = this.getValidStrike(currentPrice, targetStrike);
       
       // Calculate expiry date using real options expiration schedule
-      const targetDays = Math.max(14, Math.min(56, 21 + Math.round(sentiment.confidence * 21)));
+      // Cap at 30 days for swing trades (5-10 day holds)
+      const targetDays = Math.max(14, Math.min(30, 21 + Math.round(sentiment.confidence * 9)));
       const expiryDate = this.getNextValidExpiration(targetDays);
       
       // Estimate implied volatility based on VIX and stock volatility
@@ -827,6 +871,10 @@ export class AIAnalysisService {
     const targetDate = new Date(today);
     targetDate.setDate(today.getDate() + targetDays);
     
+    // Calculate the absolute maximum date (30 days for swing trades)
+    const maxDate = new Date(today);
+    maxDate.setDate(today.getDate() + Math.min(targetDays, 30));
+    
     // Find next third Friday (monthly expiration)
     const year = targetDate.getFullYear();
     const month = targetDate.getMonth();
@@ -835,22 +883,24 @@ export class AIAnalysisService {
     for (let day = 15; day <= 21; day++) {
       const candidate = new Date(year, month, day);
       if (candidate.getDay() === 5) { // Friday
-        if (candidate >= targetDate) {
+        if (candidate >= targetDate && candidate <= maxDate) {
           return candidate;
         }
       }
     }
     
-    // If no suitable date in current month, try next month
+    // If no suitable date in current month within max limit, try next month BUT enforce 30-day cap
     for (let day = 15; day <= 21; day++) {
       const candidate = new Date(year, month + 1, day);
       if (candidate.getDay() === 5) { // Friday
-        return candidate;
+        if (candidate <= maxDate) {
+          return candidate;
+        }
       }
     }
     
-    // Fallback: just add target days
-    return targetDate;
+    // Fallback: use max date (capped at 30 days)
+    return maxDate;
   }
 
   private static analyzeSentimentWithRules(
@@ -1154,8 +1204,8 @@ export class AIAnalysisService {
       const targetStrike = currentPrice * (1 + strikeVariance);
       const strikePrice = this.getValidStrike(currentPrice, targetStrike);
       
-      // Optimal timeframe: 2-6 weeks for maximum theta/vega balance
-      const targetDays = Math.max(14, Math.min(42, 21 + Math.round(sentiment.confidence * 14)));
+      // Optimal timeframe: 2-4 weeks for swing trades (capped at 30 days)
+      const targetDays = Math.max(14, Math.min(30, 21 + Math.round(sentiment.confidence * 9)));
       const expiryDate = this.getNextValidExpiration(targetDays);
       
       // Calculate implied volatility with elite opportunity boost
@@ -1171,12 +1221,13 @@ export class AIAnalysisService {
       
       // Elite contract sizing: maximize leverage within $1000 budget
       const maxTradeAmount = 1000;
-      const costPerContract = finalEntryPrice * 100;
+      const contractMultiplier = this.getContractMultiplier(ticker);
+      const costPerContract = finalEntryPrice * contractMultiplier;
       const optimalContracts = Math.floor(maxTradeAmount / costPerContract);
       const contracts = Math.max(1, Math.min(50, optimalContracts));
       
       // Calculate total trade cost
-      const totalTradeCost = contracts * finalEntryPrice * 100;
+      const totalTradeCost = contracts * finalEntryPrice * contractMultiplier;
       
       // Verify budget compliance
       if (totalTradeCost > maxTradeAmount) {
@@ -1194,16 +1245,20 @@ export class AIAnalysisService {
       const totalExitValue = totalTradeCost + requiredProfit;
       
       // Calculate exit premium per contract
-      const exitPrice = totalExitValue / (contracts * 100);
+      const exitPrice = totalExitValue / (contracts * contractMultiplier);
       
       // Aggressive hold period for elite momentum plays
       const holdDays = Math.min(targetDays, sentiment.confidence > 0.75 ? 5 : 10);
       
-      // Stock entry at current market with minimal slippage
-      const priceVariation = 0.995 + (Math.random() * 0.01); // 0.995 to 1.005 (±0.5%)
-      const stockEntryPrice = currentPrice * priceVariation;
+      // Calculate Fibonacci 0.707 entry price
+      const stockEntryPrice = this.calculateFibonacciEntry(
+        weekRange.fiftyTwoWeekHigh,
+        weekRange.fiftyTwoWeekLow,
+        currentPrice,
+        strategyType
+      );
       
-      console.log(`${ticker}: Elite ${strategyType.toUpperCase()} - Strike $${strikePrice.toFixed(2)}, Premium $${finalEntryPrice.toFixed(2)}, ${contracts} contracts, Target exit $${exitPrice.toFixed(2)}`);
+      console.log(`${ticker}: Elite ${strategyType.toUpperCase()} - Strike $${strikePrice.toFixed(2)}, Premium $${finalEntryPrice.toFixed(2)}, ${contracts} contracts, Fib Entry $${stockEntryPrice.toFixed(2)}, Target exit $${exitPrice.toFixed(2)}`);
       
       return {
         strikePrice: Math.round(strikePrice * 100) / 100,
@@ -1234,7 +1289,8 @@ export class AIAnalysisService {
     strategyType: 'call' | 'put',
     vixValue: number,
     rsi: number,
-    marketContext: any
+    marketContext: any,
+    weekRange?: { fiftyTwoWeekHigh: number; fiftyTwoWeekLow: number } | null
   ): Promise<any> {
     try {
       const currentPrice = stockData.price;
@@ -1265,18 +1321,22 @@ export class AIAnalysisService {
       const finalEntryPrice = Math.max(0.25, estimatedPrice); // Day trading minimum $0.25 premium
       
       // Contract sizing for day trading ($2000 budget for high-priced instruments like SPX/MNQ)
-      // ALWAYS generate at least 1 contract for day trading instruments (even if expensive)
+      // Use instrument-specific contract multipliers and enforce budget
       const maxTradeAmount = 2000;
-      const costPerContract = finalEntryPrice * 100;
+      const contractMultiplier = this.getContractMultiplier(ticker);
+      const costPerContract = finalEntryPrice * contractMultiplier;
       const optimalContracts = Math.floor(maxTradeAmount / costPerContract);
-      const contracts = Math.max(1, Math.min(25, optimalContracts)); // Always at least 1, cap at 25
       
-      const totalTradeCost = contracts * finalEntryPrice * 100;
-      
-      // Allow day trades to slightly exceed budget if necessary (ensures SPX/MNQ always appear)
-      if (totalTradeCost > maxTradeAmount * 1.5) {
-        console.warn(`Day trade cost ${totalTradeCost.toFixed(2)} significantly exceeds budget for ${ticker}, but allowing it for day trading priority`);
+      // Enforce budget strictly - if even 1 contract exceeds budget, skip this trade
+      if (optimalContracts < 1) {
+        console.warn(`${ticker}: Cost per contract $${costPerContract.toFixed(2)} exceeds budget $${maxTradeAmount} - skipping day trade`);
+        return null;
       }
+      
+      const contracts = Math.min(25, optimalContracts); // Cap at 25 contracts max
+      const totalTradeCost = contracts * finalEntryPrice * contractMultiplier;
+      
+      console.log(`${ticker}: Multiplier ${contractMultiplier}, Premium $${finalEntryPrice.toFixed(2)}, Cost/Contract $${costPerContract.toFixed(2)}, ${contracts} contracts, Total $${totalTradeCost.toFixed(2)}`);
       
       // Day trading ROI targeting: 50-150% (more conservative, faster moves)
       const signalStrength = Math.abs(vixValue - 18) / 5 + Math.abs(rsi - 50) / 20;
@@ -1284,14 +1344,27 @@ export class AIAnalysisService {
       
       const requiredProfit = totalTradeCost * (targetROI / 100);
       const totalExitValue = totalTradeCost + requiredProfit;
-      const exitPrice = totalExitValue / (contracts * 100);
+      const exitPrice = totalExitValue / (contracts * contractMultiplier);
       
       // Day trading hold period: 0-3 days typically
       const holdDays = targetDays;
       
-      // Stock entry at current market
-      const priceVariation = 0.998 + (Math.random() * 0.004); // ±0.2% for tight day trading spreads
-      const stockEntryPrice = currentPrice * priceVariation;
+      // Calculate stock entry price using Fibonacci 0.707 if available
+      let stockEntryPrice: number;
+      if (weekRange && weekRange.fiftyTwoWeekHigh && weekRange.fiftyTwoWeekLow) {
+        stockEntryPrice = this.calculateFibonacciEntry(
+          weekRange.fiftyTwoWeekHigh,
+          weekRange.fiftyTwoWeekLow,
+          currentPrice,
+          strategyType
+        );
+        console.log(`${ticker}: Using Fibonacci 0.707 entry $${stockEntryPrice.toFixed(2)} (52w range: $${weekRange.fiftyTwoWeekLow.toFixed(2)}-$${weekRange.fiftyTwoWeekHigh.toFixed(2)})`);
+      } else {
+        // Fallback to current market price
+        const priceVariation = 0.998 + (Math.random() * 0.004);
+        stockEntryPrice = currentPrice * priceVariation;
+        console.log(`${ticker}: Using current market entry $${stockEntryPrice.toFixed(2)} (no 52w range available)`);
+      }
       
       console.log(`${ticker}: Day Trade ${strategyType.toUpperCase()} - Strike $${strikePrice.toFixed(2)}, Premium $${finalEntryPrice.toFixed(2)}, ${contracts} contracts, ${holdDays}d hold, Exit $${exitPrice.toFixed(2)}`);
       
