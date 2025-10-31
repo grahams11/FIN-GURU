@@ -33,20 +33,37 @@ Preferred communication style: Simple, everyday language.
 - **Planned**: User authentication with session management using connect-pg-simple for PostgreSQL session storage
 
 ## Core Business Logic
-- **Elite Dual-Strategy Scanner**: Advanced algorithm generating both CALL and PUT options opportunities based on market positioning
-  - **CALL Strategy**: Identifies stocks 30%+ off 52-week highs with bullish reversal signals (deep pullback plays)
-  - **PUT Strategy**: Identifies stocks within 5% of 52-week highs showing bearish weakness (overbought reversal plays)
+
+### Day Trading System (Always Top 2 Plays)
+- **Instruments**: SPX (S&P 500 Index) and MNQ (Micro E-mini NASDAQ-100)
+- **VIX + RSI Formula**: 
+  - **SELL Signal (PUT)**: VIX > 18 AND RSI > 70 (overbought) → Bearish day trade
+  - **BUY Signal (CALL)**: VIX ≤ 18 OR RSI < 30 (oversold) → Bullish day trade
+  - **Moderate Signals**: VIX > 18 but RSI < 70 → Elevated volatility bearish bias
+- **Timeframe**: 1-7 day holds (true day trading to short-term swing)
+- **Strike Selection**: ATM or very close (0.5% OTM) for maximum delta exposure
+- **ROI Targets**: 50-150% returns based on VIX+RSI signal strength
+- **Confidence Scoring**: Higher confidence for strong VIX+RSI alignment (extreme readings)
+- **Priority**: Day trading plays ALWAYS appear in positions #1 and #2
+
+### Elite Dual-Strategy Scanner (Positions 3-5)
+- **CALL Strategy**: Identifies stocks 30%+ off 52-week highs with bullish reversal signals (deep pullback plays)
+- **PUT Strategy**: Identifies stocks within 5% of 52-week highs showing bearish weakness (overbought reversal plays)
 - **Dynamic Sentiment Engine**: Position-aware sentiment analysis that adjusts bullishness based on price location
   - Stocks in deep pullbacks get bullish bias (+15% sentiment boost)
   - Stocks near highs get bearish bias (-15% sentiment reduction)
   - Enables realistic detection of both bullish and bearish opportunities
+- **Elite ROI Targeting**: Swing trade recommendations target minimum 100% ROI with most achieving 200-300% projected returns
+- **Timeframe**: 5-10 day holds for swing trading
+
+### Shared Features
 - **Web Scraper Service**: Retrieves real-time market data including 52-week ranges, current prices, and market indices (S&P 500, NASDAQ, VIX)
 - **Financial Calculations**: Black-Scholes implementation for options Greeks and pricing models (delta, gamma, theta, vega, rho)
-- **Elite ROI Targeting**: All recommendations target minimum 100% ROI with most achieving 200-300% projected returns
 - **Trade Budget**: $1000 maximum per trade with smart contract allocation (cheaper premiums get more contracts)
 - **Stock Entry Pricing**: Entry prices set at current market price (±1%) for immediate actionable trades
 - **Premium Display**: Separate display of stock entry price (market execution) and actual option premium cost
 - **Real-Time Variation**: ROI and confidence values dynamically fluctuate based on market volatility and timestamp-based factors
+- **Fresh Market Scan**: Every refresh button click triggers complete new analysis of all instruments and stocks
 
 # External Dependencies
 

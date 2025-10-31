@@ -421,23 +421,27 @@ export class AIAnalysisService {
       
       // DAY TRADING FORMULA
       // VIX > 18 AND RSI > 70 (overbought) = SELL signal (PUT)
-      // VIX <= 18 OR RSI < 30 (oversold) = BUY signal (CALL)
+      // Everything else = BUY signal (CALL)
       let strategyType: 'call' | 'put';
       let signal: string;
       
       if (vixValue > 18 && rsi > 70) {
+        // ONLY SELL when BOTH conditions are met
         strategyType = 'put';
         signal = 'SELL - High VIX + Overbought RSI';
-      } else if (rsi < 30) {
-        strategyType = 'call';
-        signal = 'BUY - Oversold RSI';
-      } else if (vixValue <= 18 && rsi < 70) {
-        strategyType = 'call';
-        signal = 'BUY - Low VIX + Normal RSI';
       } else {
-        // VIX > 18 but RSI < 70 (moderate bearish)
-        strategyType = 'put';
-        signal = 'SELL - Elevated VIX';
+        // ALL OTHER CASES = BUY (CALL)
+        strategyType = 'call';
+        
+        if (rsi < 30) {
+          signal = 'BUY - Oversold RSI (Strong)';
+        } else if (vixValue <= 18) {
+          signal = 'BUY - Low VIX';
+        } else if (vixValue > 18 && rsi >= 30 && rsi <= 70) {
+          signal = 'BUY - Elevated VIX, Normal RSI';
+        } else {
+          signal = 'BUY - Default Bullish';
+        }
       }
       
       console.log(`${ticker}: ${signal} → ${strategyType.toUpperCase()}`);
