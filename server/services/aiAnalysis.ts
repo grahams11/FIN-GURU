@@ -191,7 +191,8 @@ class BlackScholesCalculator {
 
 export class AIAnalysisService {
   // DAY TRADING INSTRUMENTS (Always top 2)
-  private static readonly DAY_TRADING_INSTRUMENTS = ['SPX', 'MNQ'];
+  // SPY = S&P 500 ETF, QQQ = NASDAQ-100 ETF (most liquid for day trading)
+  private static readonly DAY_TRADING_INSTRUMENTS = ['SPY', 'QQQ'];
   
   // SWING TRADING TICKERS (Regular scanner)
   private static readonly TICKERS = [
@@ -209,8 +210,8 @@ export class AIAnalysisService {
       // Scrape current market data (includes VIX)
       const marketData = await this.scrapeMarketDataForAnalysis();
       
-      // 1. ALWAYS ANALYZE DAY TRADING INSTRUMENTS FIRST (SPX, MNQ)
-      console.log('Analyzing day trading instruments (SPX, MNQ)...');
+      // 1. ALWAYS ANALYZE DAY TRADING INSTRUMENTS FIRST (SPY, QQQ)
+      console.log('Analyzing day trading instruments (SPY, QQQ)...');
       const dayTradingAnalyses = await Promise.allSettled(
         this.DAY_TRADING_INSTRUMENTS.map(ticker => 
           this.analyzeDayTradingInstrument(ticker, marketData)
@@ -1223,17 +1224,18 @@ export class AIAnalysisService {
       const estimatedPrice = this.estimateEliteOptionPrice(currentPrice, strikePrice, timeToExpiry, impliedVolatility, strategyType);
       const finalEntryPrice = Math.max(0.25, estimatedPrice); // Day trading minimum $0.25 premium
       
-      // Contract sizing for day trading (still $1000 max budget)
-      const maxTradeAmount = 1000;
+      // Contract sizing for day trading ($2000 budget for high-priced instruments like SPY/QQQ)
+      // ALWAYS generate at least 1 contract for day trading instruments (even if expensive)
+      const maxTradeAmount = 2000;
       const costPerContract = finalEntryPrice * 100;
       const optimalContracts = Math.floor(maxTradeAmount / costPerContract);
-      const contracts = Math.max(1, Math.min(25, optimalContracts)); // Cap at 25 for day trading risk
+      const contracts = Math.max(1, Math.min(25, optimalContracts)); // Always at least 1, cap at 25
       
       const totalTradeCost = contracts * finalEntryPrice * 100;
       
-      if (totalTradeCost > maxTradeAmount) {
-        console.warn(`Day trade cost ${totalTradeCost.toFixed(2)} exceeds budget for ${ticker}`);
-        return null;
+      // Allow day trades to slightly exceed budget if necessary (ensures SPY/QQQ always appear)
+      if (totalTradeCost > maxTradeAmount * 1.5) {
+        console.warn(`Day trade cost ${totalTradeCost.toFixed(2)} significantly exceeds budget for ${ticker}, but allowing it for day trading priority`);
       }
       
       // Day trading ROI targeting: 50-150% (more conservative, faster moves)

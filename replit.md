@@ -35,7 +35,7 @@ Preferred communication style: Simple, everyday language.
 ## Core Business Logic
 
 ### Day Trading System (Always Top 2 Plays)
-- **Instruments**: SPX (S&P 500 Index) and MNQ (Micro E-mini NASDAQ-100)
+- **Instruments**: SPY (S&P 500 ETF) and QQQ (NASDAQ-100 ETF) - most liquid for day trading options
 - **VIX + RSI Formula**: 
   - **SELL Signal (PUT)**: VIX > 18 AND RSI > 70 (overbought) → Bearish day trade
   - **BUY Signal (CALL)**: VIX ≤ 18 OR RSI < 30 (oversold) → Bullish day trade
@@ -44,6 +44,7 @@ Preferred communication style: Simple, everyday language.
 - **Strike Selection**: ATM or very close (0.5% OTM) for maximum delta exposure
 - **ROI Targets**: 50-150% returns based on VIX+RSI signal strength
 - **Confidence Scoring**: Higher confidence for strong VIX+RSI alignment (extreme readings)
+- **Trade Budget**: $2000 maximum per day trade (higher budget for expensive SPY/QQQ options)
 - **Priority**: Day trading plays ALWAYS appear in positions #1 and #2
 
 ### Elite Dual-Strategy Scanner (Positions 3-5)
