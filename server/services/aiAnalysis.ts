@@ -191,8 +191,8 @@ class BlackScholesCalculator {
 
 export class AIAnalysisService {
   // DAY TRADING INSTRUMENTS (Always top 2)
-  // SPY = S&P 500 ETF, QQQ = NASDAQ-100 ETF (most liquid for day trading)
-  private static readonly DAY_TRADING_INSTRUMENTS = ['SPY', 'QQQ'];
+  // SPX = S&P 500 Index, MNQ = Micro E-mini NASDAQ-100 Futures (professional day trading instruments)
+  private static readonly DAY_TRADING_INSTRUMENTS = ['SPX', 'MNQ'];
   
   // SWING TRADING TICKERS (Regular scanner)
   private static readonly TICKERS = [
@@ -210,8 +210,8 @@ export class AIAnalysisService {
       // Scrape current market data (includes VIX)
       const marketData = await this.scrapeMarketDataForAnalysis();
       
-      // 1. ALWAYS ANALYZE DAY TRADING INSTRUMENTS FIRST (SPY, QQQ)
-      console.log('Analyzing day trading instruments (SPY, QQQ)...');
+      // 1. ALWAYS ANALYZE DAY TRADING INSTRUMENTS FIRST (SPX, MNQ)
+      console.log('Analyzing day trading instruments (SPX, MNQ)...');
       const dayTradingAnalyses = await Promise.allSettled(
         this.DAY_TRADING_INSTRUMENTS.map(ticker => 
           this.analyzeDayTradingInstrument(ticker, marketData)
@@ -1224,7 +1224,7 @@ export class AIAnalysisService {
       const estimatedPrice = this.estimateEliteOptionPrice(currentPrice, strikePrice, timeToExpiry, impliedVolatility, strategyType);
       const finalEntryPrice = Math.max(0.25, estimatedPrice); // Day trading minimum $0.25 premium
       
-      // Contract sizing for day trading ($2000 budget for high-priced instruments like SPY/QQQ)
+      // Contract sizing for day trading ($2000 budget for high-priced instruments like SPX/MNQ)
       // ALWAYS generate at least 1 contract for day trading instruments (even if expensive)
       const maxTradeAmount = 2000;
       const costPerContract = finalEntryPrice * 100;
@@ -1233,7 +1233,7 @@ export class AIAnalysisService {
       
       const totalTradeCost = contracts * finalEntryPrice * 100;
       
-      // Allow day trades to slightly exceed budget if necessary (ensures SPY/QQQ always appear)
+      // Allow day trades to slightly exceed budget if necessary (ensures SPX/MNQ always appear)
       if (totalTradeCost > maxTradeAmount * 1.5) {
         console.warn(`Day trade cost ${totalTradeCost.toFixed(2)} significantly exceeds budget for ${ticker}, but allowing it for day trading priority`);
       }
