@@ -194,6 +194,15 @@ export class AIAnalysisService {
   // SPX = S&P 500 Index, MNQ = Micro E-mini NASDAQ-100 Futures (professional day trading instruments)
   private static readonly DAY_TRADING_INSTRUMENTS = ['SPX', 'MNQ'];
   
+  // Map day trading tickers to their Yahoo Finance symbols
+  private static getYahooSymbol(ticker: string): string {
+    const symbolMap: Record<string, string> = {
+      'SPX': '^SPX',       // S&P 500 Index
+      'MNQ': 'NQ=F',       // NASDAQ-100 Futures (use full-size for better data availability)
+    };
+    return symbolMap[ticker] || ticker;
+  }
+  
   // SWING TRADING TICKERS (Regular scanner)
   private static readonly TICKERS = [
     'NVDA', 'TSLA', 'PLTR', 'SOFI', 'AMD', 'MSFT', 'AAPL', 'GOOGL', 
@@ -409,8 +418,10 @@ export class AIAnalysisService {
       const vixValue = marketContext.vix?.value || 18; // Default to 18 if not available
       console.log(`VIX: ${vixValue.toFixed(2)}`);
       
-      // Scrape stock/index data
-      const stockData = await WebScraperService.scrapeStockPrice(ticker);
+      // Scrape stock/index data using Yahoo Finance symbol
+      const yahooSymbol = this.getYahooSymbol(ticker);
+      console.log(`Scraping ${ticker} using Yahoo symbol: ${yahooSymbol}`);
+      const stockData = await WebScraperService.scrapeStockPrice(yahooSymbol);
       if (!stockData.price || stockData.price === 0) {
         console.warn(`Invalid price data for ${ticker}`);
         return null;
