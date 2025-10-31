@@ -190,6 +190,10 @@ class BlackScholesCalculator {
 }
 
 export class AIAnalysisService {
+  // DAY TRADING INSTRUMENTS (Always top 2)
+  private static readonly DAY_TRADING_INSTRUMENTS = ['SPX', 'MNQ'];
+  
+  // SWING TRADING TICKERS (Regular scanner)
   private static readonly TICKERS = [
     'NVDA', 'TSLA', 'PLTR', 'SOFI', 'AMD', 'MSFT', 'AAPL', 'GOOGL', 
     'META', 'NFLX', 'INTC', 'COIN', 'SNAP', 'UBER', 'LYFT', 'RIVN',
@@ -200,35 +204,51 @@ export class AIAnalysisService {
 
   static async generateTradeRecommendations(): Promise<TradeRecommendation[]> {
     try {
-      console.log('Starting AI trade analysis...');
+      console.log('Starting AI trade analysis with day trading instruments...');
       
-      // Randomize ticker order for fresh market scans on each run
+      // Scrape current market data (includes VIX)
+      const marketData = await this.scrapeMarketDataForAnalysis();
+      
+      // 1. ALWAYS ANALYZE DAY TRADING INSTRUMENTS FIRST (SPX, MNQ)
+      console.log('Analyzing day trading instruments (SPX, MNQ)...');
+      const dayTradingAnalyses = await Promise.allSettled(
+        this.DAY_TRADING_INSTRUMENTS.map(ticker => 
+          this.analyzeDayTradingInstrument(ticker, marketData)
+        )
+      );
+      
+      const dayTradingTrades: TradeRecommendation[] = [];
+      dayTradingAnalyses.forEach((result, index) => {
+        if (result.status === 'fulfilled' && result.value) {
+          dayTradingTrades.push(result.value);
+        } else if (result.status === 'rejected') {
+          console.error(`Failed to analyze day trading instrument ${this.DAY_TRADING_INSTRUMENTS[index]}:`, result.reason);
+        }
+      });
+      
+      // 2. SCAN REGULAR TICKERS FOR SWING TRADES
       const shuffledTickers = [...this.TICKERS].sort(() => Math.random() - 0.5);
       console.log(`Scanning ${shuffledTickers.length} stocks in randomized order for pullback opportunities...`);
       
-      // Scrape current market data
-      const marketData = await this.scrapeMarketDataForAnalysis();
-      
-      // Analyze each ticker
       const tradeAnalyses = await Promise.allSettled(
         shuffledTickers.map(ticker => this.analyzeTicker(ticker, marketData))
       );
 
-      const validTrades: TradeRecommendation[] = [];
-      
+      const swingTrades: TradeRecommendation[] = [];
       tradeAnalyses.forEach((result, index) => {
         if (result.status === 'fulfilled' && result.value) {
-          validTrades.push(result.value);
+          swingTrades.push(result.value);
         } else if (result.status === 'rejected') {
-          console.error(`Failed to analyze ${this.TICKERS[index]}:`, result.reason);
+          console.error(`Failed to analyze ${shuffledTickers[index]}:`, result.reason);
         }
       });
 
-      // Sort by AI score and return top trades
-      const sortedTrades = validTrades.sort((a, b) => b.score - a.score);
+      // 3. COMBINE: Day trading plays ALWAYS in positions 1-2, then best swing trades
+      const sortedSwingTrades = swingTrades.sort((a, b) => b.score - a.score).slice(0, 3);
+      const finalTrades = [...dayTradingTrades, ...sortedSwingTrades].slice(0, 5);
       
-      console.log(`Generated ${sortedTrades.length} trade recommendations`);
-      return sortedTrades.slice(0, 5);
+      console.log(`Generated ${finalTrades.length} trade recommendations (${dayTradingTrades.length} day trading, ${sortedSwingTrades.length} swing trading)`);
+      return finalTrades;
       
     } catch (error) {
       console.error('Error generating trade recommendations:', error);
@@ -372,6 +392,130 @@ export class AIAnalysisService {
 
     } catch (error) {
       console.error(`Error analyzing ticker ${ticker}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Day Trading Analysis for SPX and MNQ
+   * Formula: VIX > 18 + RSI > 70 = SELL (PUT), opposite = BUY (CALL)
+   */
+  private static async analyzeDayTradingInstrument(ticker: string, marketContext: any): Promise<TradeRecommendation | null> {
+    try {
+      console.log(`\n🎯 DAY TRADING ANALYSIS: ${ticker}`);
+      
+      // Get current VIX value from market context
+      const vixValue = marketContext.vix?.value || 18; // Default to 18 if not available
+      console.log(`VIX: ${vixValue.toFixed(2)}`);
+      
+      // Scrape stock/index data
+      const stockData = await WebScraperService.scrapeStockPrice(ticker);
+      if (!stockData.price || stockData.price === 0) {
+        console.warn(`Invalid price data for ${ticker}`);
+        return null;
+      }
+      
+      // Calculate RSI (get real RSI data)
+      const rsi = await this.calculateRSI(ticker);
+      console.log(`RSI: ${rsi.toFixed(2)}`);
+      
+      // DAY TRADING FORMULA
+      // VIX > 18 AND RSI > 70 (overbought) = SELL signal (PUT)
+      // VIX <= 18 OR RSI < 30 (oversold) = BUY signal (CALL)
+      let strategyType: 'call' | 'put';
+      let signal: string;
+      
+      if (vixValue > 18 && rsi > 70) {
+        strategyType = 'put';
+        signal = 'SELL - High VIX + Overbought RSI';
+      } else if (rsi < 30) {
+        strategyType = 'call';
+        signal = 'BUY - Oversold RSI';
+      } else if (vixValue <= 18 && rsi < 70) {
+        strategyType = 'call';
+        signal = 'BUY - Low VIX + Normal RSI';
+      } else {
+        // VIX > 18 but RSI < 70 (moderate bearish)
+        strategyType = 'put';
+        signal = 'SELL - Elevated VIX';
+      }
+      
+      console.log(`${ticker}: ${signal} → ${strategyType.toUpperCase()}`);
+      
+      // Generate day trading options strategy (shorter timeframe)
+      const optionsStrategy = await this.generateDayTradingOptionsStrategy(
+        ticker,
+        stockData,
+        strategyType,
+        vixValue,
+        rsi,
+        marketContext
+      );
+      
+      if (!optionsStrategy) {
+        console.warn(`Failed to generate day trading strategy for ${ticker}`);
+        return null;
+      }
+      
+      // Calculate Greeks
+      const timeToExpiry = this.calculateTimeToExpiry(optionsStrategy.expiry);
+      const greeks = BlackScholesCalculator.calculateGreeks(
+        stockData.price,
+        optionsStrategy.strikePrice,
+        timeToExpiry,
+        this.RISK_FREE_RATE,
+        optionsStrategy.impliedVolatility || 0.4, // Higher IV for day trading
+        strategyType
+      );
+      
+      // Calculate ROI
+      const totalCost = optionsStrategy.totalCost;
+      const totalExitValue = optionsStrategy.contracts * optionsStrategy.exitPrice * 100;
+      const profit = totalExitValue - totalCost;
+      const projectedROI = (profit / totalCost) * 100;
+      
+      // Day trading confidence (higher for strong VIX+RSI signals)
+      let confidence = 0.70; // Base day trading confidence
+      
+      // VIX signal strength
+      if (vixValue > 20) confidence += 0.10;
+      else if (vixValue < 15) confidence += 0.08;
+      
+      // RSI signal strength
+      if (strategyType === 'put' && rsi > 75) confidence += 0.12;
+      else if (strategyType === 'put' && rsi > 70) confidence += 0.08;
+      else if (strategyType === 'call' && rsi < 25) confidence += 0.12;
+      else if (strategyType === 'call' && rsi < 30) confidence += 0.08;
+      
+      confidence = Math.min(0.95, confidence);
+      
+      // Day trading gets higher score priority (always top 2)
+      const score = 1000 + (projectedROI * confidence); // 1000+ ensures always top
+      
+      console.log(`${ticker}: ✅ DAY TRADE ${strategyType.toUpperCase()} - VIX ${vixValue.toFixed(1)}, RSI ${rsi.toFixed(0)}, ROI ${projectedROI.toFixed(0)}%, Confidence ${(confidence * 100).toFixed(0)}%`);
+      
+      return {
+        ticker,
+        optionType: strategyType,
+        currentPrice: stockData.price,
+        strikePrice: optionsStrategy.strikePrice,
+        expiry: optionsStrategy.expiry,
+        stockEntryPrice: optionsStrategy.stockEntryPrice,
+        premium: optionsStrategy.premium,
+        entryPrice: optionsStrategy.entryPrice,
+        exitPrice: optionsStrategy.exitPrice,
+        totalCost: optionsStrategy.totalCost,
+        contracts: optionsStrategy.contracts,
+        projectedROI,
+        aiConfidence: confidence,
+        greeks,
+        sentiment: vixValue / 100, // Use VIX as sentiment proxy for day trading
+        score,
+        holdDays: optionsStrategy.holdDays
+      };
+      
+    } catch (error) {
+      console.error(`Error analyzing day trading instrument ${ticker}:`, error);
       return null;
     }
   }
@@ -1034,6 +1178,92 @@ export class AIAnalysisService {
       
     } catch (error) {
       console.error(`Error generating elite strategy for ${ticker}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Generate day trading options strategy (0-3 day holds)
+   * Optimized for SPX and MNQ with VIX+RSI signals
+   */
+  private static async generateDayTradingOptionsStrategy(
+    ticker: string,
+    stockData: any,
+    strategyType: 'call' | 'put',
+    vixValue: number,
+    rsi: number,
+    marketContext: any
+  ): Promise<any> {
+    try {
+      const currentPrice = stockData.price;
+      
+      // Day trading uses ATM or very close to ATM strikes for maximum delta
+      const strikeVariance = strategyType === 'call' ? 0.005 : -0.005; // 0.5% OTM for day trading
+      const targetStrike = currentPrice * (1 + strikeVariance);
+      const strikePrice = this.getValidStrike(currentPrice, targetStrike);
+      
+      // Day trading timeframe: 1-7 days (very short-term)
+      const targetDays = vixValue > 20 ? 1 : (rsi > 70 || rsi < 30 ? 3 : 7);
+      const expiryDate = this.getNextValidExpiration(targetDays);
+      
+      // Higher IV for day trading (more volatile, shorter timeframe)
+      const baseIV = 0.40; // Base 40% for day trading volatility
+      const vixIVBoost = (vixValue - 15) * 0.02; // Add 2% IV for each VIX point above 15
+      const rsiIVBoost = (Math.abs(rsi - 50) / 50) * 0.10; // Up to 10% boost for extreme RSI
+      const impliedVolatility = Math.min(0.95, Math.max(0.30, baseIV + vixIVBoost + rsiIVBoost));
+      
+      console.log(`${ticker}: Day trading IV: ${(impliedVolatility * 100).toFixed(1)}% (VIX ${vixValue.toFixed(1)}, RSI ${rsi.toFixed(0)})`);
+      
+      // Calculate option price for day trading
+      const timeToExpiry = targetDays / 365;
+      const estimatedPrice = this.estimateEliteOptionPrice(currentPrice, strikePrice, timeToExpiry, impliedVolatility, strategyType);
+      const finalEntryPrice = Math.max(0.25, estimatedPrice); // Day trading minimum $0.25 premium
+      
+      // Contract sizing for day trading (still $1000 max budget)
+      const maxTradeAmount = 1000;
+      const costPerContract = finalEntryPrice * 100;
+      const optimalContracts = Math.floor(maxTradeAmount / costPerContract);
+      const contracts = Math.max(1, Math.min(25, optimalContracts)); // Cap at 25 for day trading risk
+      
+      const totalTradeCost = contracts * finalEntryPrice * 100;
+      
+      if (totalTradeCost > maxTradeAmount) {
+        console.warn(`Day trade cost ${totalTradeCost.toFixed(2)} exceeds budget for ${ticker}`);
+        return null;
+      }
+      
+      // Day trading ROI targeting: 50-150% (more conservative, faster moves)
+      const signalStrength = Math.abs(vixValue - 18) / 5 + Math.abs(rsi - 50) / 20;
+      const targetROI = 50 + (signalStrength * 100); // 50% to 150% based on signal strength
+      
+      const requiredProfit = totalTradeCost * (targetROI / 100);
+      const totalExitValue = totalTradeCost + requiredProfit;
+      const exitPrice = totalExitValue / (contracts * 100);
+      
+      // Day trading hold period: 0-3 days typically
+      const holdDays = targetDays;
+      
+      // Stock entry at current market
+      const priceVariation = 0.998 + (Math.random() * 0.004); // ±0.2% for tight day trading spreads
+      const stockEntryPrice = currentPrice * priceVariation;
+      
+      console.log(`${ticker}: Day Trade ${strategyType.toUpperCase()} - Strike $${strikePrice.toFixed(2)}, Premium $${finalEntryPrice.toFixed(2)}, ${contracts} contracts, ${holdDays}d hold, Exit $${exitPrice.toFixed(2)}`);
+      
+      return {
+        strikePrice: Math.round(strikePrice * 100) / 100,
+        expiry: this.formatExpiry(expiryDate.toISOString()),
+        stockEntryPrice: Math.round(stockEntryPrice * 100) / 100,
+        premium: Math.round(finalEntryPrice * 100) / 100,
+        entryPrice: Math.round(finalEntryPrice * 100) / 100,
+        exitPrice: Math.round(exitPrice * 100) / 100,
+        totalCost: Math.round(totalTradeCost * 100) / 100,
+        contracts: Math.max(1, contracts),
+        holdDays: Math.max(1, holdDays),
+        impliedVolatility: Math.round(impliedVolatility * 10000) / 10000
+      };
+      
+    } catch (error) {
+      console.error(`Error generating day trading strategy for ${ticker}:`, error);
       return null;
     }
   }
