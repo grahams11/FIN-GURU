@@ -55,16 +55,37 @@ export class AlphaVantageService {
   }
 
   /**
+   * Map index symbols to Alpha Vantage compatible symbols
+   */
+  private static mapSymbol(symbol: string): string {
+    const symbolMap: Record<string, string> = {
+      '^GSPC': 'SPY',     // S&P 500 → SPY ETF
+      '^SPX': 'SPY',      // S&P 500 Index → SPY ETF
+      'SPX': 'SPY',       // S&P 500 Index → SPY ETF
+      '^IXIC': 'QQQ',     // NASDAQ → QQQ ETF
+      '^VIX': 'VIX',      // VIX Index
+      'VIX': 'VIX',       // VIX Index
+      'MNQ': 'NQ=F',      // Micro NASDAQ futures
+      '^MNQ': 'NQ=F'      // Micro NASDAQ futures
+    };
+    
+    return symbolMap[symbol] || symbol;
+  }
+
+  /**
    * Get real-time quote for a stock
    */
   static async getQuote(symbol: string): Promise<AlphaVantageQuote | null> {
     try {
       await this.rateLimit();
       
+      // Map index symbols to Alpha Vantage compatible symbols
+      const mappedSymbol = this.mapSymbol(symbol);
+      
       const response = await axios.get(BASE_URL, {
         params: {
           function: 'GLOBAL_QUOTE',
-          symbol: symbol,
+          symbol: mappedSymbol,
           apikey: API_KEY
         },
         timeout: 10000
@@ -73,7 +94,7 @@ export class AlphaVantageService {
       const quote = response.data['Global Quote'];
       
       if (!quote || !quote['05. price']) {
-        console.warn(`Alpha Vantage: No quote data for ${symbol}`);
+        console.warn(`Alpha Vantage: No quote data for ${mappedSymbol} (original: ${symbol})`);
         return null;
       }
 
@@ -110,10 +131,13 @@ export class AlphaVantageService {
     try {
       await this.rateLimit();
       
+      // Map index symbols to Alpha Vantage compatible symbols
+      const mappedSymbol = this.mapSymbol(symbol);
+      
       const response = await axios.get(BASE_URL, {
         params: {
           function: 'RSI',
-          symbol: symbol,
+          symbol: mappedSymbol,
           interval: 'daily',
           time_period: timePeriod,
           series_type: 'close',
@@ -125,7 +149,7 @@ export class AlphaVantageService {
       const technicalAnalysis = response.data['Technical Analysis: RSI'];
       
       if (!technicalAnalysis) {
-        console.warn(`Alpha Vantage: No RSI data for ${symbol}`);
+        console.warn(`Alpha Vantage: No RSI data for ${mappedSymbol} (original: ${symbol})`);
         return null;
       }
 
@@ -148,10 +172,13 @@ export class AlphaVantageService {
     try {
       await this.rateLimit();
       
+      // Map index symbols to Alpha Vantage compatible symbols
+      const mappedSymbol = this.mapSymbol(symbol);
+      
       const response = await axios.get(BASE_URL, {
         params: {
           function: 'TIME_SERIES_DAILY',
-          symbol: symbol,
+          symbol: mappedSymbol,
           outputsize: 'full', // Get full history
           apikey: API_KEY
         },
@@ -161,7 +188,7 @@ export class AlphaVantageService {
       const timeSeries = response.data['Time Series (Daily)'];
       
       if (!timeSeries) {
-        console.warn(`Alpha Vantage: No time series data for ${symbol}`);
+        console.warn(`Alpha Vantage: No time series data for ${mappedSymbol} (original: ${symbol})`);
         return null;
       }
 
@@ -193,20 +220,30 @@ export class AlphaVantageService {
 
   /**
    * Get market overview (S&P 500, NASDAQ, VIX)
+   * 
+   * NOTE: Alpha Vantage does NOT support market indexes like VIX (discontinued).
+   * Only stocks and ETFs are supported. Use ETF proxies for indices:
+   * - SPY for S&P 500
+   * - QQQ for NASDAQ
+   * - VIX is NOT available (returns null, must use web scraping fallback)
    */
   static async getMarketIndices(): Promise<{
     sp500: AlphaVantageQuote | null;
     nasdaq: AlphaVantageQuote | null;
     vix: AlphaVantageQuote | null;
   }> {
-    // Alpha Vantage uses these symbols for indices
-    const [sp500, nasdaq, vix] = await Promise.all([
+    // Alpha Vantage uses ETF proxies for indices
+    // VIX is not supported and will return null (app will fall back to web scraping)
+    const [sp500, nasdaq] = await Promise.all([
       this.getQuote('SPY'), // S&P 500 ETF as proxy
-      this.getQuote('QQQ'), // NASDAQ 100 ETF as proxy
-      this.getQuote('VIX')  // VIX index
+      this.getQuote('QQQ')  // NASDAQ 100 ETF as proxy
     ]);
 
-    return { sp500, nasdaq, vix };
+    return { 
+      sp500, 
+      nasdaq, 
+      vix: null  // VIX not supported by Alpha Vantage - falls back to web scraping
+    };
   }
 
   /**

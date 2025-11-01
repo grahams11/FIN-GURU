@@ -78,8 +78,15 @@ Preferred communication style: Simple, everyday language.
 - **Drizzle ORM**: Type-safe database toolkit with PostgreSQL dialect support
 
 ## Financial Data Sources
-- **Yahoo Finance**: Primary source for market indices and stock price data via web scraping
-- **Market Data APIs**: Configured for real-time price feeds and historical data analysis
+- **Alpha Vantage API**: Primary data source for stock quotes, 52-week ranges, and RSI technical indicators
+  - Free tier: 25 requests/day, 5 requests/minute
+  - Supports: Stocks, ETFs (SPY, QQQ), technical indicators (RSI, MACD, etc.)
+  - Does NOT support: Market indexes (VIX, ^GSPC, ^IXIC) - discontinued by Alpha Vantage
+  - Symbol mapping: ^GSPC → SPY, ^IXIC → QQQ for S&P 500 and NASDAQ proxies
+  - Rate limiting: Automatic 60-second wait when 5 requests/minute limit reached
+- **Yahoo Finance**: Fallback data source for web scraping when Alpha Vantage fails or for unsupported symbols (VIX, market indexes)
+  - Primary source for VIX (volatility index) data via HTML scraping
+  - Fallback for 52-week ranges and stock prices if Alpha Vantage quota exceeded
 
 ## Development Tools
 - **Replit Integration**: Development environment plugins for cartographer and dev banner
