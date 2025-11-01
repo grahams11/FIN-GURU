@@ -27,6 +27,7 @@ export const optionsTrade = pgTable("options_trades", {
   strikePrice: real("strike_price").notNull(),
   expiry: text("expiry").notNull(),
   stockEntryPrice: real("stock_entry_price"), // Stock purchase price at market execution (optional for backward compatibility)
+  stockExitPrice: real("stock_exit_price"), // Target stock price at exit
   premium: real("premium"), // Actual option premium cost (optional for backward compatibility)
   entryPrice: real("entry_price").notNull(), // Kept for backward compatibility
   exitPrice: real("exit_price"),
@@ -192,6 +193,7 @@ export interface TradeRecommendation {
   strikePrice: number;
   expiry: string;
   stockEntryPrice: number; // Stock purchase price at market execution
+  stockExitPrice?: number; // Target stock price at exit
   premium: number; // Actual option premium cost
   entryPrice: number; // Backward compatibility - same value as premium
   exitPrice: number;

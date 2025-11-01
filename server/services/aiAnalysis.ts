@@ -1258,12 +1258,20 @@ export class AIAnalysisService {
         strategyType
       );
       
+      // Calculate stock exit price target
+      // For CALL: stock needs to be above strike + exitPrice for max profit
+      // For PUT: stock needs to be below strike - exitPrice for max profit
+      const stockExitPrice = strategyType === 'call' 
+        ? strikePrice + (exitPrice * 0.7) // Conservative estimate (70% of premium gain)
+        : strikePrice - (exitPrice * 0.7);
+      
       console.log(`${ticker}: Elite ${strategyType.toUpperCase()} - Strike $${strikePrice.toFixed(2)}, Premium $${finalEntryPrice.toFixed(2)}, ${contracts} contracts, Fib Entry $${stockEntryPrice.toFixed(2)}, Target exit $${exitPrice.toFixed(2)}`);
       
       return {
         strikePrice: Math.round(strikePrice * 100) / 100,
         expiry: this.formatExpiry(expiryDate.toISOString()),
         stockEntryPrice: Math.round(stockEntryPrice * 100) / 100,
+        stockExitPrice: Math.round(stockExitPrice * 100) / 100,
         premium: Math.round(finalEntryPrice * 100) / 100,
         entryPrice: Math.round(finalEntryPrice * 100) / 100,
         exitPrice: Math.round(exitPrice * 100) / 100,
@@ -1366,12 +1374,20 @@ export class AIAnalysisService {
         console.log(`${ticker}: Using current market entry $${stockEntryPrice.toFixed(2)} (no 52w range available)`);
       }
       
+      // Calculate stock exit price target for day trading
+      // For CALL: stock needs to be above strike + exitPrice for max profit
+      // For PUT: stock needs to be below strike - exitPrice for max profit
+      const stockExitPrice = strategyType === 'call' 
+        ? strikePrice + (exitPrice * 0.5) // Day trading: 50% of premium gain
+        : strikePrice - (exitPrice * 0.5);
+      
       console.log(`${ticker}: Day Trade ${strategyType.toUpperCase()} - Strike $${strikePrice.toFixed(2)}, Premium $${finalEntryPrice.toFixed(2)}, ${contracts} contracts, ${holdDays}d hold, Exit $${exitPrice.toFixed(2)}`);
       
       return {
         strikePrice: Math.round(strikePrice * 100) / 100,
         expiry: this.formatExpiry(expiryDate.toISOString()),
         stockEntryPrice: Math.round(stockEntryPrice * 100) / 100,
+        stockExitPrice: Math.round(stockExitPrice * 100) / 100,
         premium: Math.round(finalEntryPrice * 100) / 100,
         entryPrice: Math.round(finalEntryPrice * 100) / 100,
         exitPrice: Math.round(exitPrice * 100) / 100,
