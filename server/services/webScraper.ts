@@ -40,7 +40,6 @@ export interface OptionsChain {
 }
 
 export class WebScraperService {
-  private static readonly YAHOO_FINANCE_BASE = 'https://finance.yahoo.com';
   private static readonly HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
   };
@@ -184,7 +183,6 @@ export class WebScraperService {
     
     // Try multiple web scraping sources in order of preference
     const scrapingSources = [
-      () => this.scrapeYahooFinanceCompany(upperSymbol),
       () => this.scrapeGoogleFinanceCompany(upperSymbol),
       () => this.scrapeMarketWatchCompany(upperSymbol)
     ];
@@ -209,53 +207,6 @@ export class WebScraperService {
     return null;
   }
 
-  /**
-   * Scrape company name from Yahoo Finance using web scraping
-   */
-  private static async scrapeYahooFinanceCompany(symbol: string): Promise<{name: string, exchange?: string, type?: string} | null> {
-    try {
-      const response = await axios.get(`https://finance.yahoo.com/quote/${symbol}`, {
-        headers: this.HEADERS,
-        timeout: 5000
-      });
-      
-      const $ = cheerio.load(response.data);
-      
-      // Try multiple selectors for company name
-      const selectors = [
-        'h1[data-test="quote-header"]',
-        '[data-testid="quote-header"] h1',
-        'h1.D\\(ib\\)',
-        '.quote-header-info h1',
-        'h1'
-      ];
-      
-      for (const selector of selectors) {
-        const nameElement = $(selector).first();
-        if (nameElement.length > 0) {
-          const rawName = nameElement.text().trim();
-          const cleanName = this.sanitizeName(rawName, symbol);
-          if (cleanName) {
-            return { name: cleanName, exchange: 'Unknown', type: 'Stock' };
-          }
-        }
-      }
-      
-      // Try page title as fallback
-      const title = $('title').text();
-      if (title) {
-        const cleanName = this.sanitizeName(title, symbol);
-        if (cleanName) {
-          return { name: cleanName, exchange: 'Unknown', type: 'Stock' };
-        }
-      }
-      
-      return null;
-    } catch (error) {
-      console.log(`Yahoo Finance company scraping failed for ${symbol}:`, (error as Error).message);
-      return null;
-    }
-  }
 
   /**
    * Scrape company name from Google Finance using web scraping
@@ -436,7 +387,6 @@ export class WebScraperService {
     // Fallback to web scraping if Alpha Vantage fails
     const sources = [
       () => this.scrapeGoogleFinance(symbol),
-      () => this.scrapeYahooFinanceHTML(symbol),
       () => this.scrapeMarketWatch(symbol)
     ];
 
@@ -457,92 +407,25 @@ export class WebScraperService {
     return this.getDefaultData(symbol);
   }
 
-  private static async scrapeYahooFinanceHTML(symbol: string): Promise<StockData> {
-    // WEB SCRAPING ONLY - No API calls
-    const urls = [
-      `${this.YAHOO_FINANCE_BASE}/quote/${symbol}?t=${Date.now()}`,
-      `${this.YAHOO_FINANCE_BASE}/quote/${symbol}`
-    ];
-    
-    for (const url of urls) {
-      try {
-          // Try HTML scraping with improved selectors
-          const response = await axios.get(url, {
-            headers: {
-              ...this.HEADERS,
-              'Cache-Control': 'no-cache',
-              'Pragma': 'no-cache'
-            },
-            timeout: 8000
-          });
-          
-          const $ = cheerio.load(response.data);
-          
-          // Enhanced price selectors for 2024/2025 Yahoo Finance
-          let price = 0;
-          const priceSelectors = [
-            `[data-symbol="${symbol}"] [data-field="regularMarketPrice"]`,
-            '[data-testid="qsp-price"] span',
-            '[data-testid="qsp-price"]',
-            'fin-streamer[data-field="regularMarketPrice"]',
-            '.Fw\\(b\\).Fz\\(36px\\)',
-            '.yf-1tejb6',
-            '[class*="price"]'
-          ];
-
-          for (const selector of priceSelectors) {
-            const priceElement = $(selector).first();
-            let priceText = priceElement.attr('value') || priceElement.text();
-            priceText = priceText.replace(/[,$]/g, '').trim();
-            
-            if (priceText && !isNaN(parseFloat(priceText))) {
-              price = parseFloat(priceText);
-              console.log(`${symbol}: Found price ${price} using selector: ${selector}`);
-              break;
-            }
-          }
-
-          if (price > 0) {
-            // Try to get change data
-            let change = 0;
-            let changePercent = 0;
-            const changeSelectors = [
-              `[data-symbol="${symbol}"] [data-field="regularMarketChange"]`,
-              '[data-testid="qsp-price-change"]',
-              'fin-streamer[data-field="regularMarketChange"]',
-              '.Fw\\(500\\).Pstart\\(8px\\)'
-            ];
-
-            for (const selector of changeSelectors) {
-              const changeElement = $(selector).first();
-              const changeText = changeElement.attr('value') || changeElement.text();
-              const match = changeText.match(/([+-]?\d+\.?\d*)\s*\(([+-]?\d+\.?\d*)%\)/);
-              if (match) {
-                change = parseFloat(match[1]);
-                changePercent = parseFloat(match[2]);
-                break;
-              }
-            }
-
-            return {
-              symbol: symbol.replace('%5E', '^'),
-              price,
-              change,
-              changePercent,
-              volume: undefined
-            };
-          }
-      } catch (error) {
-        console.warn(`Failed to scrape ${url} for ${symbol}:`, error instanceof Error ? error.message : 'Unknown error');
-        continue;
-      }
-    }
-    
-    throw new Error(`All data sources failed for ${symbol}`);
-  }
 
   private static async scrapeGoogleFinance(symbol: string): Promise<StockData> {
-    const url = `https://www.google.com/finance/quote/${symbol}:NASDAQ`;
+    // Clean symbol and map to Google Finance format
+    const cleanSymbol = symbol.replace('%5E', '^');
+    
+    // Map market indices to Google Finance format
+    let googleSymbol: string;
+    if (cleanSymbol === '^GSPC') {
+      googleSymbol = '.INX:INDEXSP';
+    } else if (cleanSymbol === '^IXIC') {
+      googleSymbol = '.IXIC:INDEXNASDAQ';
+    } else if (cleanSymbol === '^VIX') {
+      googleSymbol = 'VIX:INDEXCBOE';
+    } else {
+      // For regular stocks, try NASDAQ first
+      googleSymbol = `${cleanSymbol}:NASDAQ`;
+    }
+    
+    const url = `https://www.google.com/finance/quote/${googleSymbol}`;
     
     try {
       const response = await axios.get(url, {
@@ -579,7 +462,7 @@ export class WebScraperService {
 
       if (price > 0) {
         return {
-          symbol,
+          symbol: cleanSymbol,
           price,
           change: 0,
           changePercent: 0
@@ -660,58 +543,12 @@ export class WebScraperService {
       console.warn(`Alpha Vantage failed for 52-week range ${symbol}:`, error instanceof Error ? error.message : 'Unknown error');
     }
     
-    // Fallback to web scraping if Alpha Vantage fails
-    try {
-      const htmlUrl = `https://finance.yahoo.com/quote/${symbol}`;
-      const htmlResponse = await axios.get(htmlUrl, {
-        headers: this.HEADERS,
-        timeout: 8000
-      });
-      
-      const $ = cheerio.load(htmlResponse.data);
-      
-      let fiftyTwoWeekHigh: number | undefined;
-      let fiftyTwoWeekLow: number | undefined;
-      
-      $('tr, li').each((_, elem) => {
-        const label = $(elem).find('span, td').first().text().trim();
-        if ((label.includes('52') || label.includes('52-Week')) && (label.includes('Week') || label.includes('Range'))) {
-          const value = $(elem).find('span, td').last().text().trim();
-          const match = value.match(/([\d,]+\.?\d*)\s*-\s*([\d,]+\.?\d*)/);
-          if (match) {
-            fiftyTwoWeekLow = parseFloat(match[1].replace(/,/g, ''));
-            fiftyTwoWeekHigh = parseFloat(match[2].replace(/,/g, ''));
-          }
-        }
-      });
-      
-      if (fiftyTwoWeekHigh && fiftyTwoWeekLow && fiftyTwoWeekHigh > 0 && fiftyTwoWeekLow > 0) {
-        console.log(`${symbol}: Scraped 52-week range: $${fiftyTwoWeekLow.toFixed(2)} - $${fiftyTwoWeekHigh.toFixed(2)}`);
-        return { fiftyTwoWeekHigh, fiftyTwoWeekLow };
-      }
-      
-      console.warn(`Could not get 52-week range for ${symbol}`);
-      return null;
-    } catch (error) {
-      console.warn(`Failed to get 52-week range for ${symbol}:`, error instanceof Error ? error.message : 'Unknown error');
-      return null;
-    }
+    console.warn(`Could not get 52-week range for ${symbol} - Alpha Vantage unavailable`);
+    return null;
   }
   
-  // Get real options chain data using web scraping (Yahoo Finance JSON API primary)
+  // Get real options chain data using web scraping
   static async scrapeOptionsChain(ticker: string): Promise<OptionsChain> {
-    // Try Yahoo Finance JSON API first (most reliable)
-    try {
-      const chain = await this.scrapeYahooFinanceOptions(ticker);
-      if (chain.expirations.length > 0 && Object.keys(chain.byExpiration).length > 0) {
-        console.log(`✅ ${ticker}: Got options data from Yahoo Finance API`);
-        return chain;
-      }
-    } catch (error) {
-      console.warn(`Yahoo Finance failed for ${ticker}, trying other sources...`);
-    }
-    
-    // Fallback to other sources
     return this.fallbackWebScrapeOptions(ticker);
   }
   
@@ -836,94 +673,6 @@ export class WebScraperService {
     }
   }
   
-  // Secondary: Yahoo Finance JSON API (more reliable than HTML scraping)
-  private static async scrapeYahooFinanceOptions(ticker: string): Promise<OptionsChain> {
-    const url = `https://query2.finance.yahoo.com/v7/finance/options/${ticker}`;
-    
-    try {
-      const response = await axios.get(url, {
-        headers: {
-          ...this.HEADERS,
-          'Cache-Control': 'no-cache',
-          'Pragma': 'no-cache'
-        },
-        timeout: 10000
-      });
-      
-      const data = response.data;
-      
-      if (!data.optionChain || !data.optionChain.result || data.optionChain.result.length === 0) {
-        throw new Error('No options data available');
-      }
-      
-      const optionsData = data.optionChain.result[0];
-      
-      // Extract all expiration dates and convert to ISO format
-      const expirations: string[] = [];
-      if (optionsData.expirationDates) {
-        for (const timestamp of optionsData.expirationDates) {
-          const date = new Date(timestamp * 1000);
-          expirations.push(date.toISOString().split('T')[0]);
-        }
-      }
-      
-      // Extract options data for the current expiration
-      const byExpiration: { [key: string]: { calls: OptionContract[], puts: OptionContract[] } } = {};
-      
-      if (optionsData.options && optionsData.options.length > 0) {
-        const firstOptions = optionsData.options[0];
-        const firstExpiration = expirations[0] || new Date().toISOString().split('T')[0];
-        
-        const calls: OptionContract[] = [];
-        const puts: OptionContract[] = [];
-        
-        // Parse call contracts
-        if (firstOptions.calls) {
-          for (const call of firstOptions.calls) {
-            calls.push({
-              strike: call.strike,
-              bid: call.bid || 0,
-              ask: call.ask || 0,
-              last: call.lastPrice || call.bid || 0,
-              iv: call.impliedVolatility,
-              oi: call.openInterest,
-              volume: call.volume
-            });
-          }
-        }
-        
-        // Parse put contracts
-        if (firstOptions.puts) {
-          for (const put of firstOptions.puts) {
-            puts.push({
-              strike: put.strike,
-              bid: put.bid || 0,
-              ask: put.ask || 0,
-              last: put.lastPrice || put.bid || 0,
-              iv: put.impliedVolatility,
-              oi: put.openInterest,
-              volume: put.volume
-            });
-          }
-        }
-        
-        if (calls.length > 0 || puts.length > 0) {
-          byExpiration[firstExpiration] = { calls, puts };
-        }
-      }
-      
-      console.log(`✅ Yahoo Finance JSON API: Found ${expirations.length} expirations for ${ticker}`);
-      
-      return {
-        ticker,
-        expirations,
-        byExpiration
-      };
-      
-    } catch (error) {
-      throw new Error(`Yahoo Finance JSON API scraping failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
-  }
   
   // Tertiary: MarketWatch Options
   private static async scrapeMarketWatchOptions(ticker: string): Promise<OptionsChain> {
@@ -1031,81 +780,7 @@ export class WebScraperService {
     }
   }
 
-  static async scrapeStockNews(symbol: string): Promise<string[]> {
-    try {
-      const url = `${this.YAHOO_FINANCE_BASE}/quote/${symbol}/news`;
-      const response = await axios.get(url, { 
-        headers: this.HEADERS,
-        timeout: 10000
-      });
-      
-      const $ = cheerio.load(response.data);
-      const headlines: string[] = [];
-      
-      // Extract news headlines
-      $('h3 a, .Fw\\(b\\) a, [data-testid*="headline"]').each((i, element) => {
-        const headline = $(element).text().trim();
-        if (headline && headline.length > 10) {
-          headlines.push(headline);
-        }
-      });
 
-      return headlines.slice(0, 10); // Return top 10 headlines
-    } catch (error) {
-      console.error(`Error scraping news for ${symbol}:`, error);
-      return [];
-    }
-  }
-
-  static async scrapeSectorPerformance(): Promise<Array<{name: string, change: number}>> {
-    try {
-      const url = 'https://finance.yahoo.com/sectors';
-      const response = await axios.get(url, { 
-        headers: this.HEADERS,
-        timeout: 10000
-      });
-      
-      const $ = cheerio.load(response.data);
-      const sectors: Array<{name: string, change: number}> = [];
-      
-      // Extract sector performance data
-      $('tr').each((i, element) => {
-        const name = $(element).find('td:first-child a').text().trim();
-        const changeText = $(element).find('td:nth-child(3)').text().trim();
-        
-        if (name && changeText) {
-          const change = parseFloat(changeText.replace('%', ''));
-          if (!isNaN(change)) {
-            sectors.push({ name, change });
-          }
-        }
-      });
-
-      // Return default sectors if scraping fails
-      if (sectors.length === 0) {
-        return [
-          { name: 'Tech', change: 2.1 },
-          { name: 'Energy', change: -0.8 },
-          { name: 'Finance', change: 0.4 },
-          { name: 'Health', change: 1.2 },
-          { name: 'Retail', change: -0.3 },
-          { name: 'AI/ML', change: 3.4 }
-        ];
-      }
-
-      return sectors.slice(0, 6);
-    } catch (error) {
-      console.error('Error scraping sector performance:', error);
-      return [
-        { name: 'Tech', change: 2.1 },
-        { name: 'Energy', change: -0.8 },
-        { name: 'Finance', change: 0.4 },
-        { name: 'Health', change: 1.2 },
-        { name: 'Retail', change: -0.3 },
-        { name: 'AI/ML', change: 3.4 }
-      ];
-    }
-  }
 
   private static getDefaultData(symbol: string): StockData {
     // Fallback data when scraping fails
@@ -1123,49 +798,6 @@ export class WebScraperService {
     };
   }
 
-  static async scrapeOptionsData(symbol: string): Promise<any> {
-    try {
-      const url = `${this.YAHOO_FINANCE_BASE}/quote/${symbol}/options`;
-      const response = await axios.get(url, { 
-        headers: this.HEADERS,
-        timeout: 10000
-      });
-      
-      const $ = cheerio.load(response.data);
-      
-      // Extract options chain data
-      const options: any[] = [];
-      
-      $('table tr').each((i, element) => {
-        if (i === 0) return; // Skip header
-        
-        const strike = $(element).find('td:nth-child(1)').text().trim();
-        const lastPrice = $(element).find('td:nth-child(2)').text().trim();
-        const bid = $(element).find('td:nth-child(3)').text().trim();
-        const ask = $(element).find('td:nth-child(4)').text().trim();
-        const volume = $(element).find('td:nth-child(5)').text().trim();
-        const openInterest = $(element).find('td:nth-child(6)').text().trim();
-        const impliedVolatility = $(element).find('td:nth-child(7)').text().trim();
-        
-        if (strike && lastPrice) {
-          options.push({
-            strike: parseFloat(strike),
-            lastPrice: parseFloat(lastPrice),
-            bid: parseFloat(bid) || 0,
-            ask: parseFloat(ask) || 0,
-            volume: parseInt(volume) || 0,
-            openInterest: parseInt(openInterest) || 0,
-            impliedVolatility: parseFloat(impliedVolatility.replace('%', '')) || 0
-          });
-        }
-      });
-
-      return options;
-    } catch (error) {
-      console.error(`Error scraping options data for ${symbol}:`, error);
-      return [];
-    }
-  }
 
   /**
    * Search for ticker symbols using web scraping
@@ -1196,46 +828,6 @@ export class WebScraperService {
     }
   }
 
-  private static async scrapeYahooLookup(query: string): Promise<import('@shared/schema').SymbolSuggestion[]> {
-    try {
-      const response = await axios.get(`${this.YAHOO_FINANCE_BASE}/lookup?s=${query}`, {
-        headers: this.HEADERS,
-        timeout: 5000
-      });
-      
-      const $ = cheerio.load(response.data);
-      const suggestions: import('@shared/schema').SymbolSuggestion[] = [];
-      
-      // Look for search results table
-      $('table tbody tr').each((i, element) => {
-        if (i >= 10) return false; // Limit to 10 results
-        
-        const symbolElement = $(element).find('td:nth-child(1) a');
-        const nameElement = $(element).find('td:nth-child(2)');
-        const exchangeElement = $(element).find('td:nth-child(3)');
-        const typeElement = $(element).find('td:nth-child(4)');
-        
-        const symbol = symbolElement.text().trim();
-        const name = nameElement.text().trim();
-        const exchange = exchangeElement.text().trim();
-        const type = typeElement.text().trim();
-        
-        if (symbol && name) {
-          suggestions.push({
-            symbol,
-            name,
-            exchange: exchange || undefined,
-            type: type || undefined
-          });
-        }
-      });
-      
-      return suggestions;
-    } catch (error) {
-      console.error(`Yahoo Finance lookup failed for ${query}:`, error);
-      return [];
-    }
-  }
 
   private static async scrapeGoogleFinanceSearch(query: string): Promise<import('@shared/schema').SymbolSuggestion[]> {
     try {
@@ -1511,22 +1103,6 @@ export class WebScraperService {
         const companyName = companyNameElement.text().trim();
         if (companyName && companyName !== symbol) {
           return companyName;
-        }
-      }
-      
-      // Fallback to Yahoo Finance
-      const yahooResponse = await axios.get(`${this.YAHOO_FINANCE_BASE}/quote/${symbol}`, {
-        headers: this.HEADERS,
-        timeout: 5000
-      });
-      
-      const $yahoo = cheerio.load(yahooResponse.data);
-      const yahooTitle = $yahoo('h1').first().text().trim();
-      if (yahooTitle && yahooTitle !== symbol) {
-        // Clean up the title (remove ticker symbol if present)
-        const cleanTitle = yahooTitle.replace(new RegExp(`\\(${symbol}\\)`, 'gi'), '').trim();
-        if (cleanTitle) {
-          return cleanTitle;
         }
       }
       
