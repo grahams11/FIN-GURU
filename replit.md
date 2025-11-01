@@ -49,8 +49,8 @@ Preferred communication style: Simple, everyday language.
 - **Confidence Scoring**: Higher confidence for strong VIX+RSI alignment (extreme readings)
 - **Trade Budget**: $2000 maximum per day trade (higher budget for expensive SPX/MNQ options)
 - **Contract Multipliers**: SPX=100, MNQ=2 (affects total cost and ROI calculations)
+- **Budget Enforcement**: Day trading instruments always receive at least 1 contract even if cost exceeds $2000 (ensures SPX is included despite ~$16.5k per contract)
 - **Priority**: Day trading plays ALWAYS appear in positions #1 and #2
-- **Known Limitation**: SPX options often exceed $2000 budget (~$165 premium × 100 multiplier = $16,500 per contract), causing SPX to be skipped in favor of only MNQ day trades
 
 ### Elite Dual-Strategy Scanner (Positions 3-5)
 - **CALL Strategy**: Identifies stocks 30%+ off 52-week highs with bullish reversal signals (deep pullback plays)

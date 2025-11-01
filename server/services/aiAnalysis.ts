@@ -1321,20 +1321,20 @@ export class AIAnalysisService {
       const finalEntryPrice = Math.max(0.25, estimatedPrice); // Day trading minimum $0.25 premium
       
       // Contract sizing for day trading ($2000 budget for high-priced instruments like SPX/MNQ)
-      // Use instrument-specific contract multipliers and enforce budget
+      // Use instrument-specific contract multipliers
       const maxTradeAmount = 2000;
       const contractMultiplier = this.getContractMultiplier(ticker);
       const costPerContract = finalEntryPrice * contractMultiplier;
       const optimalContracts = Math.floor(maxTradeAmount / costPerContract);
       
-      // Enforce budget strictly - if even 1 contract exceeds budget, skip this trade
-      if (optimalContracts < 1) {
-        console.warn(`${ticker}: Cost per contract $${costPerContract.toFixed(2)} exceeds budget $${maxTradeAmount} - skipping day trade`);
-        return null;
-      }
-      
-      const contracts = Math.min(25, optimalContracts); // Cap at 25 contracts max
+      // For day trading instruments (SPX/MNQ), always allow at least 1 contract even if budget exceeded
+      // This ensures SPX is included despite ~$16.5k per contract cost
+      const contracts = Math.max(1, Math.min(25, optimalContracts)); // At least 1, cap at 25
       const totalTradeCost = contracts * finalEntryPrice * contractMultiplier;
+      
+      if (contracts === 1 && costPerContract > maxTradeAmount) {
+        console.log(`${ticker}: Budget override - allowing 1 contract at $${costPerContract.toFixed(2)} (exceeds $${maxTradeAmount} budget)`);
+      }
       
       console.log(`${ticker}: Multiplier ${contractMultiplier}, Premium $${finalEntryPrice.toFixed(2)}, Cost/Contract $${costPerContract.toFixed(2)}, ${contracts} contracts, Total $${totalTradeCost.toFixed(2)}`);
       
