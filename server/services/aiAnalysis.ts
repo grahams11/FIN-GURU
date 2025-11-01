@@ -1104,10 +1104,22 @@ export class AIAnalysisService {
   }
 
   private static async calculateRSI(ticker: string): Promise<number> {
-    // Simplified RSI calculation - in production, you'd need historical price data
+    // Use Alpha Vantage's built-in RSI indicator for accurate calculations
+    try {
+      const { AlphaVantageService } = await import('./alphaVantage');
+      const rsi = await AlphaVantageService.getRSI(ticker, 14);
+      
+      if (rsi !== null && rsi >= 0 && rsi <= 100) {
+        console.log(`${ticker}: Real RSI from Alpha Vantage: ${rsi.toFixed(1)}`);
+        return rsi;
+      }
+    } catch (error) {
+      console.warn(`Alpha Vantage RSI failed for ${ticker}, using fallback`);
+    }
+    
+    // Fallback to mock calculation if Alpha Vantage fails
     try {
       const stockData = await WebScraperService.scrapeStockPrice(ticker);
-      // Mock RSI calculation based on recent price change
       const rsi = 50 + (stockData.changePercent * 2);
       return Math.max(0, Math.min(100, rsi));
     } catch (error) {
