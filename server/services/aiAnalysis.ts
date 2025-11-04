@@ -194,11 +194,11 @@ export class AIAnalysisService {
   // SPX = S&P 500 Index, MNQ = Micro E-mini NASDAQ-100 Futures (professional day trading instruments)
   private static readonly DAY_TRADING_INSTRUMENTS = ['SPX', 'MNQ'];
   
-  // Map day trading tickers to their Yahoo Finance symbols
-  private static getYahooSymbol(ticker: string): string {
+  // Map day trading tickers to standard market index symbols
+  private static getMarketIndexSymbol(ticker: string): string {
     const symbolMap: Record<string, string> = {
-      'SPX': '^SPX',       // S&P 500 Index
-      'MNQ': 'NQ=F',       // NASDAQ-100 Futures (use full-size for better data availability)
+      'SPX': '^GSPC',      // S&P 500 Index (Google Finance compatible)
+      'MNQ': '^IXIC',      // NASDAQ-100 proxy via NASDAQ Composite
     };
     return symbolMap[ticker] || ticker;
   }
@@ -482,14 +482,16 @@ export class AIAnalysisService {
       const vixValue = marketContext.vix?.value || 18; // Default to 18 if not available
       console.log(`VIX: ${vixValue.toFixed(2)}`);
       
-      // Scrape stock/index data using Yahoo Finance symbol
-      const yahooSymbol = this.getYahooSymbol(ticker);
-      console.log(`Scraping ${ticker} using Yahoo symbol: ${yahooSymbol}`);
-      const stockData = await WebScraperService.scrapeStockPrice(yahooSymbol);
+      // Scrape stock/index data using market index symbol
+      const marketSymbol = this.getMarketIndexSymbol(ticker);
+      console.log(`Scraping ${ticker} using market symbol: ${marketSymbol}`);
+      const stockData = await WebScraperService.scrapeStockPrice(marketSymbol);
       if (!stockData.price || stockData.price === 0) {
         console.warn(`Invalid price data for ${ticker}`);
         return null;
       }
+      
+      console.log(`${ticker}: Current price ${stockData.price.toLocaleString()}`);
       
       // Calculate RSI (get real RSI data)
       const rsi = await this.calculateRSI(ticker);
@@ -523,7 +525,7 @@ export class AIAnalysisService {
       console.log(`${ticker}: ${signal} → ${strategyType.toUpperCase()}`);
       
       // Scrape 52-week range for Fibonacci entry calculation
-      const weekRange = await WebScraperService.scrape52WeekRange(yahooSymbol);
+      const weekRange = await WebScraperService.scrape52WeekRange(marketSymbol);
       
       // Generate day trading options strategy (shorter timeframe)
       const optionsStrategy = await this.generateDayTradingOptionsStrategy(

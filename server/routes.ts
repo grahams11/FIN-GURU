@@ -77,9 +77,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Check if we have existing trades
       let trades = await storage.getTopTrades();
       
-      // If no trades exist, automatically generate fresh ones
-      if (trades.length === 0) {
-        console.log('No trades in cache, automatically refreshing...');
+      // Auto-regenerate if: (1) no trades exist OR (2) cached trades are older than 5 minutes
+      const shouldRegenerate = trades.length === 0 || (
+        trades.length > 0 && 
+        trades[0].createdAt && 
+        (Date.now() - new Date(trades[0].createdAt).getTime()) > 5 * 60 * 1000
+      );
+      
+      if (shouldRegenerate) {
+        const reason = trades.length === 0 ? 'No trades in cache' : 'Cache expired (>5 min old)';
+        console.log(`${reason}, automatically refreshing with fresh market data...`);
+        
+        // Clear old trades
+        await storage.clearTrades();
+        
+        // Generate fresh recommendations with current market prices
         const recommendations = await AIAnalysisService.generateTradeRecommendations();
         
         const validRecommendations = recommendations.filter(rec => {
@@ -122,6 +134,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
         
         trades = storedTrades.filter(trade => trade !== null) as OptionsTrade[];
+        console.log(`✅ Fresh market scan complete: ${trades.length} trades with latest prices`);
       }
       
       res.json(trades);
