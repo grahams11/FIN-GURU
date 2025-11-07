@@ -27,11 +27,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     }
     
+    // Cache for scraped quotes (refresh every 30 seconds)
+    const scrapedQuotesCache: Record<string, { price: number; timestamp: number }> = {};
+    const scrapedErrors: Record<string, number> = {}; // Track failed scrape attempts
+    const SCRAPER_CACHE_TTL = 30000; // 30 seconds
+    const SCRAPER_ERROR_BACKOFF = 60000; // Wait 60s before retrying failed symbols
+    
     // Send initial quotes immediately
-    const sendQuotes = () => {
+    const sendQuotes = async () => {
       const quotes: Record<string, any> = {};
       
       for (const symbol of symbols) {
+        // Try Tastytrade cache first (real-time data)
         const cached = tastytradeService.getCachedQuote(symbol);
         if (cached && cached.lastPrice > 0) {
           quotes[symbol] = {
@@ -39,8 +46,54 @@ export async function registerRoutes(app: Express): Promise<Server> {
             bid: cached.bidPrice,
             ask: cached.askPrice,
             volume: cached.volume,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            source: 'tastytrade'
           };
+        } else {
+          // Fallback to scraper if not in Tastytrade cache
+          const now = Date.now();
+          const cachedScrape = scrapedQuotesCache[symbol];
+          const lastError = scrapedErrors[symbol] || 0;
+          
+          // Only fetch if cache is missing or stale AND we haven't recently failed
+          if ((!cachedScrape || now - cachedScrape.timestamp > SCRAPER_CACHE_TTL) && now - lastError > SCRAPER_ERROR_BACKOFF) {
+            try {
+              // Use scraper service for fallback data
+              const scraped = await WebScraperService.scrapeStockPrice(symbol);
+              if (scraped && scraped.price > 0) {
+                scrapedQuotesCache[symbol] = {
+                  price: scraped.price,
+                  timestamp: now
+                };
+                quotes[symbol] = {
+                  price: scraped.price,
+                  bid: 0,
+                  ask: 0,
+                  volume: 0,
+                  timestamp: now,
+                  source: 'scraper'
+                };
+                // Clear error on success
+                delete scrapedErrors[symbol];
+              } else {
+                // Mark as failed (no valid price)
+                scrapedErrors[symbol] = now;
+              }
+            } catch (error) {
+              // Track error timestamp to avoid rapid retries
+              scrapedErrors[symbol] = now;
+            }
+          } else if (cachedScrape) {
+            // Use cached scraped data
+            quotes[symbol] = {
+              price: cachedScrape.price,
+              bid: 0,
+              ask: 0,
+              volume: 0,
+              timestamp: cachedScrape.timestamp,
+              source: 'scraper_cached'
+            };
+          }
         }
       }
       
@@ -50,11 +103,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     };
     
     // Send initial quotes
-    sendQuotes();
+    await sendQuotes();
     
     // Stream updates every 1 second
-    const interval = setInterval(() => {
-      sendQuotes();
+    const interval = setInterval(async () => {
+      await sendQuotes();
     }, 1000);
     
     // Cleanup on disconnect

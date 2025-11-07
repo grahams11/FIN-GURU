@@ -20,10 +20,13 @@ Preferred communication style: Simple, everyday language.
 - **Server-Side Flow**: Tastytrade WebSocket → In-memory cache updates → SSE endpoint polls cache every 1 second → Streams to frontend clients
 - **Client-Side Flow**: EventSource connects to `/api/quotes/stream` → `useLiveQuotes` hook consumes stream → Dashboard extracts symbols from trades → TradeCard components display live prices
 - **SSE Endpoint**: `/api/quotes/stream?symbols=AAPL,TSLA,NVDA` streams JSON quote updates with bid/ask/price/volume data
+- **Smart Fallback System**: 
+  - Primary: Tastytrade WebSocket real-time data (sub-second latency)
+  - Fallback: Web scraper for symbols not in Tastytrade cache (30-second cached updates)
+  - Ensures all trade symbols get live updates regardless of Tastytrade support
 - **Visual Indicators**: Green pulsing dot next to stock prices indicates live data active, falls back to stored prices when disconnected
 - **Connection Management**: Automatic SSE reconnection on disconnect, dynamic symbol subscription based on current trades
 - **Performance**: 1-second polling interval provides near real-time updates without overwhelming the frontend
-- **Future Optimization**: Event-driven push architecture planned to replace polling for even lower latency
 
 ## Backend Architecture
 - **Runtime**: Node.js with Express.js server
