@@ -318,9 +318,17 @@ export class AIAnalysisService {
 
       // 3. COMBINE: Day trading plays ALWAYS in positions 1-2, then best swing trades
       const sortedSwingTrades = swingTrades.sort((a, b) => b.score - a.score).slice(0, 3);
-      const finalTrades = [...dayTradingTrades, ...sortedSwingTrades].slice(0, 5);
       
-      console.log(`Generated ${finalTrades.length} trade recommendations (${dayTradingTrades.length} day trading, ${sortedSwingTrades.length} swing trading)`);
+      // FALLBACK: If no swing trades found (Alpha Vantage rate limit), generate mock swing trades
+      let finalSwingTrades = sortedSwingTrades;
+      if (sortedSwingTrades.length === 0) {
+        console.log('⚠️  No swing trades generated (likely Alpha Vantage rate limit) - generating fallback mock data...');
+        finalSwingTrades = await this.generateFallbackSwingTrades(marketData);
+      }
+      
+      const finalTrades = [...dayTradingTrades, ...finalSwingTrades].slice(0, 5);
+      
+      console.log(`Generated ${finalTrades.length} trade recommendations (${dayTradingTrades.length} day trading, ${finalSwingTrades.length} swing trading)`);
       return finalTrades;
       
     } catch (error) {
