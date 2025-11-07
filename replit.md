@@ -53,14 +53,16 @@ Preferred communication style: Simple, everyday language.
 - **Priority**: Day trading plays ALWAYS appear in positions #1 and #2
 
 ### Elite Dual-Strategy Scanner (Positions 3-5)
-- **CALL Strategy**: Identifies stocks 30%+ off 52-week highs with bullish reversal signals (deep pullback plays)
-- **PUT Strategy**: Identifies stocks within 5% of 52-week highs showing bearish weakness (overbought reversal plays)
-- **Dynamic Sentiment Engine**: Position-aware sentiment analysis that adjusts bullishness based on price location
-  - Stocks in deep pullbacks get bullish bias (+15% sentiment boost)
-  - Stocks near highs get bearish bias (-15% sentiment reduction)
-  - Enables realistic detection of both bullish and bearish opportunities
+- **RSI-Only Momentum Scanner**: No longer reliant on 52-week data or changePercent (Google Finance limitation)
+- **CALL Strategy**: RSI < 48 (oversold/pullback) + market not bearish → Bullish reversal plays
+- **PUT Strategy**: RSI > 62 (overbought/reversal) + market not bullish → Bearish reversal plays
+- **Market Sentiment Integration**: VIX + SPX data influences confidence levels
+  - VIX > 20 + SPX down = Bearish market (boosts PUT confidence)
+  - VIX < 18 + SPX up = Bullish market (boosts CALL confidence)
+  - Otherwise = Neutral market (base confidence)
 - **Elite ROI Targeting**: Swing trade recommendations target minimum 100% ROI with most achieving 200-300% projected returns
 - **Timeframe**: 5-10 day holds for swing trading
+- **Works Offline**: Scanner functions even when Google Finance returns 0% for all changePercent values (markets closed/after hours)
 
 ### Shared Features
 - **Web Scraper Service**: Retrieves real-time market data including 52-week ranges, current prices, and market indices (S&P 500, NASDAQ, VIX)
@@ -78,17 +80,13 @@ Preferred communication style: Simple, everyday language.
 - **Drizzle ORM**: Type-safe database toolkit with PostgreSQL dialect support
 
 ## Financial Data Sources
-- **Alpha Vantage API**: Best-effort data source for stock quotes, 52-week ranges, and RSI technical indicators
-  - Free tier: 25 requests/day, 5 requests/minute (very limited)
-  - Supports: Stocks, ETFs (SPY, QQQ), technical indicators (RSI, MACD, etc.)
-  - Does NOT support: Market indexes (VIX, ^GSPC, ^IXIC) - discontinued by Alpha Vantage
-  - Symbol mapping: ^GSPC → SPY, ^IXIC → QQQ for S&P 500 and NASDAQ proxies
-  - Non-blocking fallback: Returns null when quota exceeded, allowing instant fallback to web scraping
-- **Google Finance**: Primary web scraping source for real-time market data
-  - Fast, reliable data for stocks, ETFs, and market indices
-  - Primary source for VIX, S&P 500, and NASDAQ data
-  - Used as fallback when Alpha Vantage quota is exhausted
+- **Google Finance**: ONLY data source for real-time market data (user requirement: NO APIs)
+  - Web scraping for stock prices, ETFs, and market indices
+  - Primary source for VIX (^VIX), S&P 500 (^GSPC), stocks, ETFs
+  - Limitation: changePercent often returns 0% (markets closed/after hours) → Scanner uses RSI-only signals
+  - MNQ proxy: Uses QQQ ETF price * 34.3 conversion factor (QQQ ≈ $611 → MNQ ≈ $21,000)
 - **MarketWatch**: Secondary fallback for web scraping when Google Finance fails
+- **NO API Dependencies**: All Alpha Vantage and Yahoo Finance code removed per user requirement
 
 ## Development Tools
 - **Replit Integration**: Development environment plugins for cartographer and dev banner

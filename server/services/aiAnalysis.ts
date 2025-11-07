@@ -198,7 +198,7 @@ export class AIAnalysisService {
   private static getMarketIndexSymbol(ticker: string): string {
     const symbolMap: Record<string, string> = {
       'SPX': '^GSPC',      // S&P 500 Index (Google Finance compatible)
-      'MNQ': '^IXIC',      // NASDAQ-100 proxy via NASDAQ Composite
+      'MNQ': 'QQQ',        // Use QQQ ETF as NASDAQ-100 proxy (MNQ ≈ 1/10th NQ ≈ QQQ * 50)
     };
     return symbolMap[ticker] || ticker;
   }
@@ -354,43 +354,45 @@ export class AIAnalysisService {
       const isBullishMarket = vixValue < 18 && spxChange > 0;
       
       // MOMENTUM-BASED SWING SCANNER (no 52-week data needed)
-      // Uses: price change %, RSI, market sentiment from VIX+SPX
+      // Uses: RSI + market sentiment from VIX+SPX (changePercent optional)
       let strategyType: 'call' | 'put' | null = null;
       let aiConfidence = 0.65; // Base confidence
       
-      // RELAXED thresholds for real market conditions
-      // CALL STRATEGY: Pullback plays (RSI < 50 = bearish pressure)
-      const isOversold = rsi < 50; // Relaxed from 35
-      const hasNegativeMomentum = stockData.changePercent < 0; // Any daily decline
+      // RSI-ONLY thresholds (works even when changePercent=0)
+      // CALL STRATEGY: Pullback plays (RSI < 48 = bearish pressure)
+      const isOversold = rsi < 48;
       
-      // PUT STRATEGY: Reversal plays (RSI > 60 = bullish pressure)  
-      const isOverbought = rsi > 60; // Relaxed from 65
-      const hasPositiveMomentum = stockData.changePercent > 0; // Any daily gain
+      // PUT STRATEGY: Reversal plays (RSI > 62 = bullish pressure)  
+      const isOverbought = rsi > 62;
       
       // Prioritize based on VIX + SPX market sentiment
-      if (hasNegativeMomentum && isOversold && !isBearishMarket) {
-        // Pullback opportunity: stock down + low RSI + market not bearish
+      if (isOversold && !isBearishMarket) {
+        // Pullback opportunity: low RSI + market not bearish
         strategyType = 'call';
-        aiConfidence = 0.70 + (isBullishMarket ? 0.15 : 0) + (rsi < 45 ? 0.05 : 0);
-        console.log(`${ticker}: ✓ CALL OPPORTUNITY - Down ${Math.abs(stockData.changePercent).toFixed(1)}%, RSI ${rsi.toFixed(0)}, ${isBullishMarket ? 'BULLISH' : 'NEUTRAL'} market`);
-      } else if (hasPositiveMomentum && isOverbought && !isBullishMarket) {
-        // Reversal opportunity: stock up + high RSI + market not bullish
+        aiConfidence = 0.70 + (isBullishMarket ? 0.15 : 0) + (rsi < 40 ? 0.05 : 0);
+        const changeDisplay = stockData.changePercent !== 0 ? `${stockData.changePercent.toFixed(1)}% change, ` : '';
+        console.log(`${ticker}: ✓ CALL OPPORTUNITY - ${changeDisplay}RSI ${rsi.toFixed(0)}, ${isBullishMarket ? 'BULLISH' : 'NEUTRAL'} market`);
+      } else if (isOverbought && !isBullishMarket) {
+        // Reversal opportunity: high RSI + market not bullish
         strategyType = 'put';
-        aiConfidence = 0.70 + (isBearishMarket ? 0.15 : 0) + (rsi > 65 ? 0.05 : 0);
-        console.log(`${ticker}: ✓ PUT OPPORTUNITY - Up ${stockData.changePercent.toFixed(1)}%, RSI ${rsi.toFixed(0)}, ${isBearishMarket ? 'BEARISH' : 'NEUTRAL'} market`);
-      } else if (hasNegativeMomentum && isOversold) {
+        aiConfidence = 0.70 + (isBearishMarket ? 0.15 : 0) + (rsi > 68 ? 0.05 : 0);
+        const changeDisplay = stockData.changePercent !== 0 ? `${stockData.changePercent.toFixed(1)}% change, ` : '';
+        console.log(`${ticker}: ✓ PUT OPPORTUNITY - ${changeDisplay}RSI ${rsi.toFixed(0)}, ${isBearishMarket ? 'BEARISH' : 'NEUTRAL'} market`);
+      } else if (isOversold) {
         // Weak pullback: still tradeable but lower confidence
         strategyType = 'call';
         aiConfidence = 0.65;
-        console.log(`${ticker}: ✓ CALL OPPORTUNITY (weak) - Down ${Math.abs(stockData.changePercent).toFixed(1)}%, RSI ${rsi.toFixed(0)}`);
-      } else if (hasPositiveMomentum && isOverbought) {
+        const changeDisplay = stockData.changePercent !== 0 ? `${stockData.changePercent.toFixed(1)}% change, ` : '';
+        console.log(`${ticker}: ✓ CALL OPPORTUNITY (weak) - ${changeDisplay}RSI ${rsi.toFixed(0)}`);
+      } else if (isOverbought) {
         // Weak reversal: still tradeable but lower confidence
         strategyType = 'put';
         aiConfidence = 0.65;
-        console.log(`${ticker}: ✓ PUT OPPORTUNITY (weak) - Up ${stockData.changePercent.toFixed(1)}%, RSI ${rsi.toFixed(0)}`);
+        const changeDisplay = stockData.changePercent !== 0 ? `${stockData.changePercent.toFixed(1)}% change, ` : '';
+        console.log(`${ticker}: ✓ PUT OPPORTUNITY (weak) - ${changeDisplay}RSI ${rsi.toFixed(0)}`);
       }
       
-      // Skip if no momentum signal
+      // Skip if no RSI signal
       if (!strategyType) {
         return null;
       }
@@ -473,10 +475,18 @@ export class AIAnalysisService {
       // Scrape stock/index data using market index symbol
       const marketSymbol = this.getMarketIndexSymbol(ticker);
       console.log(`Scraping ${ticker} using market symbol: ${marketSymbol}`);
-      const stockData = await WebScraperService.scrapeStockPrice(marketSymbol);
+      let stockData = await WebScraperService.scrapeStockPrice(marketSymbol);
       if (!stockData.price || stockData.price === 0) {
         console.warn(`Invalid price data for ${ticker}`);
         return null;
+      }
+      
+      // Convert QQQ price to MNQ equivalent (MNQ ≈ QQQ * 34.3)
+      if (ticker === 'MNQ' && marketSymbol === 'QQQ') {
+        const qqqPrice = stockData.price;
+        const mnqPrice = qqqPrice * 34.3; // Approximate conversion factor
+        console.log(`${ticker}: Converting QQQ price $${qqqPrice.toFixed(2)} → MNQ equiv $${mnqPrice.toFixed(2)}`);
+        stockData = { ...stockData, price: mnqPrice };
       }
       
       console.log(`${ticker}: Current price ${stockData.price.toLocaleString()}`);
