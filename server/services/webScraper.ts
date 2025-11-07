@@ -1,6 +1,5 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import { AlphaVantageService } from './alphaVantage';
 
 export interface StockData {
   symbol: string;
@@ -304,41 +303,7 @@ export class WebScraperService {
   }
 
   static async scrapeMarketIndices(): Promise<MarketIndices> {
-    try {
-      // Try Alpha Vantage API first
-      const indices = await AlphaVantageService.getMarketIndices();
-      
-      if (indices.vix && indices.vix.price > 0) {
-        console.log('Using Alpha Vantage for market indices');
-        return {
-          sp500: indices.sp500 ? {
-            symbol: 'SPY',
-            price: indices.sp500.price,
-            change: indices.sp500.change,
-            changePercent: indices.sp500.changePercent,
-            volume: indices.sp500.volume
-          } : this.getDefaultData('^GSPC'),
-          nasdaq: indices.nasdaq ? {
-            symbol: 'QQQ',
-            price: indices.nasdaq.price,
-            change: indices.nasdaq.change,
-            changePercent: indices.nasdaq.changePercent,
-            volume: indices.nasdaq.volume
-          } : this.getDefaultData('^IXIC'),
-          vix: {
-            symbol: 'VIX',
-            price: indices.vix.price,
-            change: indices.vix.change,
-            changePercent: indices.vix.changePercent,
-            volume: indices.vix.volume
-          }
-        };
-      }
-    } catch (error) {
-      console.warn('Alpha Vantage failed for market indices, falling back to scraping:', error);
-    }
-    
-    // Fallback to web scraping if Alpha Vantage fails
+    // Use Google Finance web scraping for all market indices (no API dependencies)
     try {
       const symbols = ['%5EGSPC', '%5EIXIC', '%5EVIX']; // S&P 500, NASDAQ, VIX
       const results = await Promise.allSettled(
@@ -363,28 +328,7 @@ export class WebScraperService {
   }
 
   static async scrapeStockPrice(symbol: string): Promise<StockData> {
-    // Use Alpha Vantage API for real-time data
-    try {
-      // Clean symbol for Alpha Vantage (remove Yahoo Finance encoding)
-      const cleanSymbol = symbol.replace('%5E', '^');
-      
-      const quote = await AlphaVantageService.getQuote(cleanSymbol);
-      
-      if (quote && quote.price > 0) {
-        console.log(`${symbol}: Got Alpha Vantage price ${quote.price}`);
-        return {
-          symbol: cleanSymbol,
-          price: quote.price,
-          change: quote.change,
-          changePercent: quote.changePercent,
-          volume: quote.volume
-        };
-      }
-    } catch (error) {
-      console.warn(`Alpha Vantage failed for ${symbol}:`, error instanceof Error ? error.message : 'Unknown error');
-    }
-    
-    // Fallback to web scraping if Alpha Vantage fails
+    // Use Google Finance web scraping for all price data (no API dependencies)
     const sources = [
       () => this.scrapeGoogleFinance(symbol),
       () => this.scrapeMarketWatch(symbol)
@@ -527,24 +471,79 @@ export class WebScraperService {
   }
 
   /**
-   * Get 52-week high and low data using Alpha Vantage API
+   * Get 52-week high and low data from Google Finance web scraping
    */
   static async scrape52WeekRange(symbol: string): Promise<{ fiftyTwoWeekHigh: number; fiftyTwoWeekLow: number } | null> {
     try {
-      // Use Alpha Vantage API for 52-week range
       const cleanSymbol = symbol.replace('%5E', '^');
-      const range = await AlphaVantageService.get52WeekRange(cleanSymbol);
       
-      if (range && range.fiftyTwoWeekHigh > 0 && range.fiftyTwoWeekLow > 0) {
-        console.log(`${symbol}: Alpha Vantage 52-week range: $${range.fiftyTwoWeekLow.toFixed(2)} - $${range.fiftyTwoWeekHigh.toFixed(2)}`);
-        return range;
+      // Try to extract from Google Finance __NEXT_DATA__ JSON payload
+      const exchanges = ['NASDAQ', 'NYSE'];
+      
+      for (const exchange of exchanges) {
+        try {
+          const url = `https://www.google.com/finance/quote/${cleanSymbol}:${exchange}`;
+          const response = await axios.get(url, {
+            headers: {
+              ...this.HEADERS,
+              'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+              'Accept-Language': 'en-US,en;q=0.9',
+              'Cache-Control': 'no-cache',
+              'Pragma': 'no-cache'
+            },
+            timeout: 8000
+          });
+          
+          const $ = cheerio.load(response.data);
+          
+          // Try to extract from page content using selectors
+          const stats = $('[data-test-id]');
+          let high52 = 0;
+          let low52 = 0;
+          
+          stats.each((_, elem) => {
+            const text = $(elem).text().toLowerCase();
+            const valueText = $(elem).find('[class*="value"], [class*="P6K39c"]').text();
+            
+            if (text.includes('52-week high') || text.includes('52 week high')) {
+              const match = valueText.match(/[\d,.]+/);
+              if (match) high52 = parseFloat(match[0].replace(/,/g, ''));
+            }
+            if (text.includes('52-week low') || text.includes('52 week low')) {
+              const match = valueText.match(/[\d,.]+/);
+              if (match) low52 = parseFloat(match[0].replace(/,/g, ''));
+            }
+          });
+          
+          // Alternative: Look in all text nodes for 52-week data
+          if (high52 === 0 || low52 === 0) {
+            const pageText = $('body').text();
+            const highMatch = pageText.match(/52[-\s]?week\s+high[:\s]+\$?([\d,]+\.?\d*)/i);
+            const lowMatch = pageText.match(/52[-\s]?week\s+low[:\s]+\$?([\d,]+\.?\d*)/i);
+            
+            if (highMatch) high52 = parseFloat(highMatch[1].replace(/,/g, ''));
+            if (lowMatch) low52 = parseFloat(lowMatch[1].replace(/,/g, ''));
+          }
+          
+          if (high52 > 0 && low52 > 0 && high52 > low52) {
+            console.log(`${symbol}: Google Finance 52-week range from ${exchange}: $${low52.toFixed(2)} - $${high52.toFixed(2)}`);
+            return {
+              fiftyTwoWeekHigh: high52,
+              fiftyTwoWeekLow: low52
+            };
+          }
+        } catch (error) {
+          console.log(`Google Finance ${exchange} failed for ${symbol}:`, error instanceof Error ? error.message : 'Unknown error');
+          continue;
+        }
       }
+      
+      console.warn(`Could not get 52-week range for ${symbol} from Google Finance`);
+      return null;
     } catch (error) {
-      console.warn(`Alpha Vantage failed for 52-week range ${symbol}:`, error instanceof Error ? error.message : 'Unknown error');
+      console.warn(`Error scraping 52-week range for ${symbol}:`, error instanceof Error ? error.message : 'Unknown error');
+      return null;
     }
-    
-    console.warn(`Could not get 52-week range for ${symbol} - Alpha Vantage unavailable`);
-    return null;
   }
   
   // Get real options chain data using web scraping

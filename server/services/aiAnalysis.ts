@@ -318,17 +318,9 @@ export class AIAnalysisService {
 
       // 3. COMBINE: Day trading plays ALWAYS in positions 1-2, then best swing trades
       const sortedSwingTrades = swingTrades.sort((a, b) => b.score - a.score).slice(0, 3);
+      const finalTrades = [...dayTradingTrades, ...sortedSwingTrades].slice(0, 5);
       
-      // FALLBACK: If no swing trades found (Alpha Vantage rate limit), generate mock swing trades
-      let finalSwingTrades = sortedSwingTrades;
-      if (sortedSwingTrades.length === 0) {
-        console.log('⚠️  No swing trades generated (likely Alpha Vantage rate limit) - generating fallback mock data...');
-        finalSwingTrades = await this.generateFallbackSwingTrades(marketData);
-      }
-      
-      const finalTrades = [...dayTradingTrades, ...finalSwingTrades].slice(0, 5);
-      
-      console.log(`Generated ${finalTrades.length} trade recommendations (${dayTradingTrades.length} day trading, ${finalSwingTrades.length} swing trading)`);
+      console.log(`Generated ${finalTrades.length} trade recommendations (${dayTradingTrades.length} day trading, ${sortedSwingTrades.length} swing trading)`);
       return finalTrades;
       
     } catch (error) {
@@ -1126,25 +1118,25 @@ export class AIAnalysisService {
   }
 
   private static async calculateRSI(ticker: string): Promise<number> {
-    // Use Alpha Vantage's built-in RSI indicator for accurate calculations
-    try {
-      const { AlphaVantageService } = await import('./alphaVantage');
-      const rsi = await AlphaVantageService.getRSI(ticker, 14);
-      
-      if (rsi !== null && rsi >= 0 && rsi <= 100) {
-        console.log(`${ticker}: Real RSI from Alpha Vantage: ${rsi.toFixed(1)}`);
-        return rsi;
-      }
-    } catch (error) {
-      console.warn(`Alpha Vantage RSI failed for ${ticker}, using fallback`);
-    }
-    
-    // Fallback to mock calculation if Alpha Vantage fails
+    // Calculate RSI from current price volatility (simplified approach without historical data)
+    // RSI = 50 baseline, adjusted by price volatility
     try {
       const stockData = await WebScraperService.scrapeStockPrice(ticker);
-      const rsi = 50 + (stockData.changePercent * 2);
-      return Math.max(0, Math.min(100, rsi));
+      
+      // Estimate RSI based on recent price movement
+      // Positive change pushes RSI above 50, negative pushes below 50
+      // Scale the change by a factor to get RSI-like values
+      const baseRSI = 50;
+      const rsiAdjustment = stockData.changePercent * 2.5; // Scale factor
+      
+      // Calculate RSI with bounds [0, 100]
+      let rsi = baseRSI + rsiAdjustment;
+      rsi = Math.max(0, Math.min(100, rsi));
+      
+      console.log(`${ticker}: Calculated RSI: ${rsi.toFixed(1)} (based on ${stockData.changePercent >= 0 ? '+' : ''}${stockData.changePercent.toFixed(2)}% change)`);
+      return rsi;
     } catch (error) {
+      console.warn(`RSI calculation failed for ${ticker}, using neutral value`);
       return 50; // Neutral RSI as fallback
     }
   }
