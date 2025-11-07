@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { MarketOverview } from "@/components/MarketOverview";
 import { OptionsTraderAI } from "@/components/OptionsTraderAI";
@@ -11,6 +11,7 @@ import {
   Settings, 
   TrendingUp 
 } from "lucide-react";
+import { useLiveQuotes } from "@/hooks/use-live-quotes";
 import type { MarketOverviewData, AiInsights, OptionsTrade, PortfolioSummary, SectorData } from "@shared/schema";
 
 export default function Dashboard() {
@@ -45,6 +46,13 @@ export default function Dashboard() {
     refetchInterval: 60000,
     enabled: activeView === 'dashboard',
   });
+
+  const tradeSymbols = useMemo(() => {
+    if (!topTrades) return ['AAPL', 'TSLA', 'NVDA', 'MSFT', 'GOOGL'];
+    return topTrades.map(trade => trade.ticker);
+  }, [topTrades]);
+
+  const { quotes: liveQuotes, isConnected: isLiveDataConnected } = useLiveQuotes(tradeSymbols);
 
   return (
     <div className="min-h-screen bg-background">
@@ -106,8 +114,10 @@ export default function Dashboard() {
             </div>
             <div className="flex items-center space-x-4">
               <div className="flex items-center space-x-2 text-sm">
-                <div className="w-2 h-2 bg-primary rounded-full animate-pulse"></div>
-                <span className="text-muted-foreground" data-testid="status-live-data">Live Data</span>
+                <div className={`w-2 h-2 rounded-full ${isLiveDataConnected ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`}></div>
+                <span className="text-muted-foreground" data-testid="status-live-data">
+                  {isLiveDataConnected ? 'Live Data' : 'Connecting...'}
+                </span>
               </div>
               <button 
                 className="text-muted-foreground hover:text-foreground"
@@ -132,6 +142,7 @@ export default function Dashboard() {
               insights={aiInsights} 
               trades={topTrades} 
               isLoading={aiLoading || tradesLoading}
+              liveQuotes={liveQuotes}
             />
 
             {/* Additional Dashboard Widgets */}

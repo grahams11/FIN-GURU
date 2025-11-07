@@ -8,13 +8,22 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import type { AiInsights, OptionsTrade } from "@shared/schema";
 
+interface Quote {
+  price: number;
+  bid: number;
+  ask: number;
+  volume: number;
+  timestamp: number;
+}
+
 interface OptionsTraderAIProps {
   insights?: AiInsights;
   trades?: OptionsTrade[];
   isLoading: boolean;
+  liveQuotes?: Record<string, Quote>;
 }
 
-export function OptionsTraderAI({ insights, trades, isLoading }: OptionsTraderAIProps) {
+export function OptionsTraderAI({ insights, trades, isLoading, liveQuotes }: OptionsTraderAIProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -149,6 +158,7 @@ export function OptionsTraderAI({ insights, trades, isLoading }: OptionsTraderAI
               key={trade.id}
               trade={trade}
               rank={index + 1}
+              liveQuotes={liveQuotes}
             />
           ))
         ) : (

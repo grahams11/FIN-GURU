@@ -5,9 +5,18 @@ import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { OptionsTrade, Greeks } from "@shared/schema";
 
+interface Quote {
+  price: number;
+  bid: number;
+  ask: number;
+  volume: number;
+  timestamp: number;
+}
+
 interface TradeCardProps {
   trade: OptionsTrade;
   rank: number;
+  liveQuotes?: Record<string, Quote>;
 }
 
 // Format numbers with commas for thousands
@@ -18,9 +27,12 @@ const formatNumber = (num: number, decimals: number = 2): string => {
   });
 };
 
-export function TradeCard({ trade, rank }: TradeCardProps) {
+export function TradeCard({ trade, rank, liveQuotes }: TradeCardProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  
+  const livePrice = liveQuotes?.[trade.ticker]?.price;
+  const currentDisplayPrice = livePrice || trade.currentPrice;
 
   const executeMutation = useMutation({
     mutationFn: () => apiRequest("POST", `/api/execute-trade/${trade.id}`),
@@ -102,9 +114,12 @@ export function TradeCard({ trade, rank }: TradeCardProps) {
         
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
           <div>
-            <p className="text-xs text-muted-foreground uppercase tracking-wide">Stock Price</p>
+            <p className="text-xs text-muted-foreground uppercase tracking-wide flex items-center space-x-1">
+              <span>Stock Price</span>
+              {livePrice && <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" title="Live Price"></span>}
+            </p>
             <p className="text-sm font-medium text-primary" data-testid={`current-${trade.ticker}`}>
-              ${formatNumber(trade.currentPrice)}
+              ${formatNumber(currentDisplayPrice)}
             </p>
           </div>
           <div>
