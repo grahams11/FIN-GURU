@@ -40,7 +40,17 @@ export interface OptionsChain {
 
 export class WebScraperService {
   private static readonly HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'DNT': '1',
+    'Connection': 'keep-alive',
+    'Upgrade-Insecure-Requests': '1',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'none',
+    'Cache-Control': 'max-age=0'
   };
 
   // Company name cache with TTL (7 days)
@@ -471,79 +481,68 @@ export class WebScraperService {
   }
 
   /**
-   * Get 52-week high and low data from Google Finance web scraping
+   * Get 52-week high and low data from web scraping (Yahoo Finance for data, not API)
    */
   static async scrape52WeekRange(symbol: string): Promise<{ fiftyTwoWeekHigh: number; fiftyTwoWeekLow: number } | null> {
+    const cleanSymbol = symbol.replace('%5E', '^');
+    
+    // Try Yahoo Finance web scraping (HTML page, not API)
     try {
-      const cleanSymbol = symbol.replace('%5E', '^');
+      const url = `https://finance.yahoo.com/quote/${cleanSymbol}`;
+      const response = await axios.get(url, {
+        headers: this.HEADERS,
+        timeout: 8000
+      });
       
-      // Try to extract from Google Finance __NEXT_DATA__ JSON payload
-      const exchanges = ['NASDAQ', 'NYSE'];
+      const $ = cheerio.load(response.data);
       
-      for (const exchange of exchanges) {
-        try {
-          const url = `https://www.google.com/finance/quote/${cleanSymbol}:${exchange}`;
-          const response = await axios.get(url, {
-            headers: {
-              ...this.HEADERS,
-              'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-              'Accept-Language': 'en-US,en;q=0.9',
-              'Cache-Control': 'no-cache',
-              'Pragma': 'no-cache'
-            },
-            timeout: 8000
-          });
-          
-          const $ = cheerio.load(response.data);
-          
-          // Try to extract from page content using selectors
-          const stats = $('[data-test-id]');
-          let high52 = 0;
-          let low52 = 0;
-          
-          stats.each((_, elem) => {
-            const text = $(elem).text().toLowerCase();
-            const valueText = $(elem).find('[class*="value"], [class*="P6K39c"]').text();
-            
-            if (text.includes('52-week high') || text.includes('52 week high')) {
-              const match = valueText.match(/[\d,.]+/);
-              if (match) high52 = parseFloat(match[0].replace(/,/g, ''));
-            }
-            if (text.includes('52-week low') || text.includes('52 week low')) {
-              const match = valueText.match(/[\d,.]+/);
-              if (match) low52 = parseFloat(match[0].replace(/,/g, ''));
-            }
-          });
-          
-          // Alternative: Look in all text nodes for 52-week data
-          if (high52 === 0 || low52 === 0) {
-            const pageText = $('body').text();
-            const highMatch = pageText.match(/52[-\s]?week\s+high[:\s]+\$?([\d,]+\.?\d*)/i);
-            const lowMatch = pageText.match(/52[-\s]?week\s+low[:\s]+\$?([\d,]+\.?\d*)/i);
-            
-            if (highMatch) high52 = parseFloat(highMatch[1].replace(/,/g, ''));
-            if (lowMatch) low52 = parseFloat(lowMatch[1].replace(/,/g, ''));
+      // Yahoo Finance displays 52-week range clearly in statistics
+      let high52 = 0;
+      let low52 = 0;
+      
+      // Look for 52-week range in the page
+      $('td').each((_, elem) => {
+        const label = $(elem).text().trim();
+        if (label === '52 Week Range' || label.includes('52-Week Range') || label.includes('52 week range')) {
+          const value = $(elem).next('td').text().trim();
+          // Format usually: "low - high"
+          const matches = value.match(/([\d,.]+)\s*-\s*([\d,.]+)/);
+          if (matches && matches.length >= 3) {
+            low52 = parseFloat(matches[1].replace(/,/g, ''));
+            high52 = parseFloat(matches[2].replace(/,/g, ''));
           }
-          
-          if (high52 > 0 && low52 > 0 && high52 > low52) {
-            console.log(`${symbol}: Google Finance 52-week range from ${exchange}: $${low52.toFixed(2)} - $${high52.toFixed(2)}`);
-            return {
-              fiftyTwoWeekHigh: high52,
-              fiftyTwoWeekLow: low52
-            };
-          }
-        } catch (error) {
-          console.log(`Google Finance ${exchange} failed for ${symbol}:`, error instanceof Error ? error.message : 'Unknown error');
-          continue;
         }
+      });
+      
+      // Alternative: look in spans/divs
+      if (high52 === 0 || low52 === 0) {
+        $('span, div').each((_, elem) => {
+          const text = $(elem).text();
+          if (text.includes('52') && text.includes('Range')) {
+            const parent = $(elem).parent();
+            const value = parent.find('span, td').last().text();
+            const matches = value.match(/([\d,.]+)\s*-\s*([\d,.]+)/);
+            if (matches && matches.length >= 3) {
+              low52 = parseFloat(matches[1].replace(/,/g, ''));
+              high52 = parseFloat(matches[2].replace(/,/g, ''));
+            }
+          }
+        });
       }
       
-      console.warn(`Could not get 52-week range for ${symbol} from Google Finance`);
-      return null;
+      if (high52 > 0 && low52 > 0 && high52 > low52) {
+        console.log(`${symbol}: Yahoo Finance web scraping 52-week range: $${low52.toFixed(2)} - $${high52.toFixed(2)}`);
+        return {
+          fiftyTwoWeekHigh: high52,
+          fiftyTwoWeekLow: low52
+        };
+      }
     } catch (error) {
-      console.warn(`Error scraping 52-week range for ${symbol}:`, error instanceof Error ? error.message : 'Unknown error');
-      return null;
+      console.log(`Yahoo Finance web scraping failed for ${symbol}:`, error instanceof Error ? error.message : 'Unknown error');
     }
+    
+    console.warn(`Could not get 52-week range for ${symbol} from web scraping`);
+    return null;
   }
   
   // Get real options chain data using web scraping
