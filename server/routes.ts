@@ -4,9 +4,66 @@ import { storage } from "./storage";
 import { WebScraperService } from "./services/webScraper";
 import { AIAnalysisService } from "./services/aiAnalysis";
 import { PositionAnalysisService } from "./services/positionAnalysis";
+import { tastytradeService } from "./services/tastytradeService";
 import { insertMarketDataSchema, insertOptionsTradeSchema, insertAiInsightsSchema, insertPortfolioPositionSchema, type OptionsTrade } from "@shared/schema";
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // Server-Sent Events endpoint for real-time quote streaming
+  app.get('/api/quotes/stream', async (req, res) => {
+    const symbols = (req.query.symbols as string)?.split(',').filter(Boolean) || ['AAPL', 'TSLA', 'NVDA', 'MSFT'];
+    
+    console.log(`📡 SSE connection established for symbols: ${symbols.join(', ')}`);
+    
+    // Set SSE headers
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    
+    // Subscribe to symbols if Tastytrade is connected
+    if (tastytradeService.isServiceConnected()) {
+      tastytradeService.subscribeToSymbols(symbols).catch(err => {
+        console.warn('⚠️ SSE subscription failed:', err.message);
+      });
+    }
+    
+    // Send initial quotes immediately
+    const sendQuotes = () => {
+      const quotes: Record<string, any> = {};
+      
+      for (const symbol of symbols) {
+        const cached = tastytradeService.getCachedQuote(symbol);
+        if (cached && cached.lastPrice > 0) {
+          quotes[symbol] = {
+            price: cached.lastPrice,
+            bid: cached.bidPrice,
+            ask: cached.askPrice,
+            volume: cached.volume,
+            timestamp: Date.now()
+          };
+        }
+      }
+      
+      if (Object.keys(quotes).length > 0) {
+        res.write(`data: ${JSON.stringify(quotes)}\n\n`);
+      }
+    };
+    
+    // Send initial quotes
+    sendQuotes();
+    
+    // Stream updates every 1 second
+    const interval = setInterval(() => {
+      sendQuotes();
+    }, 1000);
+    
+    // Cleanup on disconnect
+    req.on('close', () => {
+      clearInterval(interval);
+      console.log(`📡 SSE connection closed for symbols: ${symbols.join(', ')}`);
+    });
+  });
+
   // Market Overview endpoint
   app.get('/api/market-overview', async (req, res) => {
     try {
