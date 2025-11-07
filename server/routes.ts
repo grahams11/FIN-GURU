@@ -71,20 +71,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Top Trades endpoint - Returns existing trades from database (auto-refreshes if empty)
+  // Top Trades endpoint - Returns existing trades from database (auto-refreshes if empty or old)
   app.get('/api/top-trades', async (req, res) => {
     try {
       // Check if we have existing trades
       let trades = await storage.getTopTrades();
       
       // Auto-regenerate if: (1) no trades exist OR (2) cached trades are older than 5 minutes
+      // BUT skip regeneration if trades were just created (within 60 seconds) to prevent duplicate generation after POST /api/refresh-trades
       const shouldRegenerate = trades.length === 0 || (
         trades.length > 0 && 
         trades[0].createdAt && 
         (Date.now() - new Date(trades[0].createdAt).getTime()) > 5 * 60 * 1000
       );
       
-      if (shouldRegenerate) {
+      const recentlyCreated = trades.length > 0 && 
+        trades[0].createdAt && 
+        (Date.now() - new Date(trades[0].createdAt).getTime()) < 60 * 1000; // Created within last 60 seconds
+      
+      if (shouldRegenerate && !recentlyCreated) {
         const reason = trades.length === 0 ? 'No trades in cache' : 'Cache expired (>5 min old)';
         console.log(`${reason}, automatically refreshing with fresh market data...`);
         
@@ -135,6 +140,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         
         trades = storedTrades.filter(trade => trade !== null) as OptionsTrade[];
         console.log(`✅ Fresh market scan complete: ${trades.length} trades with latest prices`);
+      } else if (recentlyCreated) {
+        console.log(`Skipping regeneration: trades were created ${Math.floor((Date.now() - new Date(trades[0].createdAt!).getTime()) / 1000)}s ago`);
       }
       
       res.json(trades);
