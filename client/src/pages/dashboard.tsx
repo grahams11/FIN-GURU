@@ -49,7 +49,8 @@ export default function Dashboard() {
 
   const tradeSymbols = useMemo(() => {
     if (!topTrades) return ['AAPL', 'TSLA', 'NVDA', 'MSFT', 'GOOGL'];
-    return topTrades.map(trade => trade.ticker);
+    const symbols = topTrades.map(trade => trade.ticker);
+    return Array.from(new Set(symbols));
   }, [topTrades]);
 
   const { quotes: liveQuotes, isConnected: isLiveDataConnected } = useLiveQuotes(tradeSymbols);
