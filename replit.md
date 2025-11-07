@@ -12,8 +12,18 @@ Preferred communication style: Simple, everyday language.
 - **Framework**: React with TypeScript using Vite as the build tool
 - **UI Library**: Shadcn/ui components built on Radix UI primitives with Tailwind CSS for styling
 - **State Management**: TanStack Query (React Query) for server state management and caching
+- **Real-Time Data**: Server-Sent Events (SSE) with custom React hook for live price streaming
 - **Routing**: Wouter for lightweight client-side routing
 - **Styling**: Dark-themed design system with CSS variables and custom color scheme optimized for financial data visualization
+
+## Real-Time Data Streaming Architecture
+- **Server-Side Flow**: Tastytrade WebSocket → In-memory cache updates → SSE endpoint polls cache every 1 second → Streams to frontend clients
+- **Client-Side Flow**: EventSource connects to `/api/quotes/stream` → `useLiveQuotes` hook consumes stream → Dashboard extracts symbols from trades → TradeCard components display live prices
+- **SSE Endpoint**: `/api/quotes/stream?symbols=AAPL,TSLA,NVDA` streams JSON quote updates with bid/ask/price/volume data
+- **Visual Indicators**: Green pulsing dot next to stock prices indicates live data active, falls back to stored prices when disconnected
+- **Connection Management**: Automatic SSE reconnection on disconnect, dynamic symbol subscription based on current trades
+- **Performance**: 1-second polling interval provides near real-time updates without overwhelming the frontend
+- **Future Optimization**: Event-driven push architecture planned to replace polling for even lower latency
 
 ## Backend Architecture
 - **Runtime**: Node.js with Express.js server
