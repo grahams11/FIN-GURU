@@ -1,0 +1,75 @@
+Account Status
+ 5.61.0 
+[ Base URL: api.tastyworks.com ]
+Download Open-api Json
+This API is currently unversioned, so you can leave the `Accept-Version` header blank.
+Filter by tag
+trading-status
+Allows an API client to request information about the basic trade status of an account.
+This includes information about the strategies an account can trade.
+
+
+
+GET
+/accounts/{account_number}/trading-status
+Returns current trading status for an account.
+
+Parameters
+Name	Description
+account_number *
+integer($int32)
+(path)
+account_number
+Responses
+Response content type
+
+application/json
+Code	Description
+200	
+Returns current trading status for an account.
+
+Example Value
+Model
+{
+  "are-single-tick-expiring-hedges-ignored": true,
+  "is-small-notional-futures-intra-day-enabled": true,
+  "is-futures-intra-day-enabled": true,
+  "clearing-account-number": "string",
+  "is-futures-enabled": true,
+  "is-in-day-trade-equity-maintenance-call": true,
+  "cmta-override": 0,
+  "is-frozen": true,
+  "is-futures-closing-only": true,
+  "updated-at": "2025-11-07T15:20:42.640Z",
+  "is-equity-offering-closing-only": true,
+  "is-closing-only": true,
+  "is-cryptocurrency-enabled": true,
+  "account-number": "string",
+  "is-portfolio-margin-enabled": true,
+  "pdt-reset-on": "2025-11-07",
+  "is-aggregated-at-clearing": true,
+  "futures-margin-rate-multiplier": 0,
+  "clearing-aggregation-identifier": "string",
+  "are-deep-itm-carry-options-enabled": true,
+  "are-far-otm-net-options-restricted": true,
+  "is-closed": true,
+  "is-full-equity-margin-required": true,
+  "enhanced-fraud-safeguards-enabled-at": "2025-11-07T15:20:42.640Z",
+  "autotrade-account-type": "string",
+  "equities-margin-calculation-type": "string",
+  "small-notional-futures-margin-rate-multiplier": 0,
+  "are-options-values-restricted-to-nlv": true,
+  "day-trade-count": 0,
+  "options-level": "string",
+  "ext-crm-id": "string",
+  "is-in-margin-call": true,
+  "short-calls-enabled": true,
+  "fee-schedule-name": "string",
+  "id": 0,
+  "is-risk-reducing-only": true,
+  "has-intraday-equities-margin": true,
+  "is-cryptocurrency-closing-only": true,
+  "is-roll-the-day-forward-enabled": true,
+  "is-pattern-day-trader": true,
+  "is-equity-offering-enabled": true
+}
