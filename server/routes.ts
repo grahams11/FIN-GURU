@@ -583,6 +583,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Tastytrade API test endpoint
+  app.get('/api/test-tastytrade', async (req, res) => {
+    try {
+      const { tastytradeService } = await import('./services/tastytradeService');
+      const isConnected = await tastytradeService.testConnection();
+      
+      if (isConnected) {
+        res.json({ 
+          success: true, 
+          message: 'Tastytrade API connected successfully',
+          timestamp: new Date().toISOString()
+        });
+      } else {
+        res.status(500).json({ 
+          success: false, 
+          message: 'Failed to connect to Tastytrade API' 
+        });
+      }
+    } catch (error: any) {
+      console.error('Tastytrade test error:', error);
+      res.status(500).json({ 
+        success: false, 
+        message: error.message 
+      });
+    }
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }
