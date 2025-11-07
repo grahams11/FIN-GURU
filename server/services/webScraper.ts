@@ -386,7 +386,7 @@ export class WebScraperService {
     try {
       const tastyQuote = await tastytradeService.getFuturesQuote(symbol);
       if (tastyQuote && tastyQuote.price > 0) {
-        console.log(`${symbol}: Got Tastytrade futures price ${tastyQuote.price}`);
+        console.log(`✅ ${symbol}: Using Tastytrade LIVE futures data - $${tastyQuote.price.toFixed(2)}`);
         return {
           symbol,
           price: tastyQuote.price,
@@ -395,13 +395,12 @@ export class WebScraperService {
         };
       }
     } catch (error) {
-      console.log(`${symbol}: Tastytrade futures unavailable, falling back to scraping`);
+      console.log(`⚠️ ${symbol}: Tastytrade error, falling back to proxy: ${error instanceof Error ? error.message : 'Unknown'}`);
     }
 
-    // Fallback to regular scraping if Tastytrade fails
-    // Map to scraping-compatible symbols
+    // FALLBACK PATH: Use proxy estimation
     const fallbackSymbol = symbol === 'SPX' ? '^GSPC' : symbol === 'MNQ' ? 'QQQ' : symbol;
-    console.log(`${symbol}: Using fallback symbol ${fallbackSymbol} for scraping`);
+    console.log(`⚠️ ${symbol}: FALLBACK MODE - Using ${fallbackSymbol} proxy (not live futures data)`);
     
     const sources = [
       () => this.scrapeGoogleFinance(fallbackSymbol),
@@ -415,7 +414,8 @@ export class WebScraperService {
         // Apply conversion if using QQQ proxy for MNQ
         if (symbol === 'MNQ' && fallbackSymbol === 'QQQ' && data.price > 0) {
           const conversionFactor = 41.2; // Updated conversion: QQQ * 41.2 ≈ MNQ
-          console.log(`${symbol}: Converting QQQ $${data.price.toFixed(2)} to MNQ using factor ${conversionFactor}`);
+          console.log(`⚠️ ${symbol}: PROXY CONVERSION - QQQ $${data.price.toFixed(2)} × ${conversionFactor} = $${(data.price * conversionFactor).toFixed(2)}`);
+          console.log(`⚠️ ${symbol}: WARNING - This is an ESTIMATE, not real-time MNQ futures data`);
           data = {
             ...data,
             symbol,
@@ -424,16 +424,16 @@ export class WebScraperService {
         }
         
         if (data.price > 0) {
-          console.log(`${symbol}: Got fallback price ${data.price}`);
+          console.log(`✅ ${symbol}: Fallback price from ${fallbackSymbol}: $${data.price.toFixed(2)}`);
           return data;
         }
       } catch (error) {
-        console.warn(`Source ${scraper.name} failed for ${symbol}:`, error instanceof Error ? error.message : 'Unknown error');
+        console.warn(`❌ Source ${scraper.name} failed for ${symbol}:`, error instanceof Error ? error.message : 'Unknown error');
         continue;
       }
     }
     
-    console.error(`All sources failed for futures ${symbol}`);
+    console.error(`❌ All sources failed for futures ${symbol}`);
     return this.getDefaultData(symbol);
   }
 

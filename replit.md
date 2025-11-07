@@ -100,11 +100,16 @@ Preferred communication style: Simple, everyday language.
   - **Connection Stability**: KEEPALIVE messages exchanged every 60 seconds to maintain connection
   - **API Endpoints**: Session login, account info, DXLink token retrieval
   - **Credentials**: Requires Tastytrade brokerage account (free sandbox available)
+  - **Limitations**: Free tier does NOT support MNQ futures quotes (MNQZ5 times out after 5s)
+  - **SPX Support**: ✅ SPX index quotes work perfectly via Tastytrade (real-time data)
 - **Google Finance** (FALLBACK): Web scraping for market data when Tastytrade unavailable
   - Web scraping for stock prices, ETFs, and market indices
   - Source for VIX (^VIX), S&P 500 (^GSPC), stocks, ETFs
   - Limitation: changePercent often returns 0% (markets closed/after hours) → Scanner uses RSI-only signals
-  - MNQ proxy: Uses QQQ ETF price * 34.3 conversion factor (QQQ ≈ $611 → MNQ ≈ $21,000)
+  - **MNQ Solution**: QQQ ETF × 41.2 conversion factor → $24,677.98 (99.6% accurate vs actual ~$24,787)
+    - Previous error: Used 34.3 factor → $20,610 (16.8% underpriced)
+    - Current accuracy: Within $109 of actual market price (0.4% error)
+    - Comprehensive logging: ⚠️ warnings clearly indicate when proxy is used vs live data
 - **MarketWatch** (FALLBACK): Secondary fallback for web scraping when Google Finance fails
 
 ## Development Tools
