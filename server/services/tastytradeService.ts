@@ -177,23 +177,26 @@ class TastytradeService {
         this.ws.on('open', () => {
           console.log('✅ DXLink WebSocket connected');
           
-          // Step 1: Send SETUP message
-          this.ws?.send(JSON.stringify({
-            type: 'SETUP',
-            channel: 0,
-            keepaliveTimeout: 60,
-            acceptKeepaliveTimeout: 60,
-            version: '0.1-js/1.0.0'
-          }));
-          console.log('🔧 Sent SETUP message');
-          
-          // Step 2: Send AUTH message
-          this.ws?.send(JSON.stringify({
-            type: 'AUTH',
-            channel: 0,
-            token: this.dxlinkToken
-          }));
-          console.log('🔐 Sent AUTH message');
+          // Wait for socket to be fully ready before sending messages
+          setTimeout(() => {
+            // Step 1: Send SETUP message
+            this.ws?.send(JSON.stringify({
+              type: 'SETUP',
+              channel: 0,
+              keepaliveTimeout: 60,
+              acceptKeepaliveTimeout: 60,
+              version: '0.1-js/1.0.0'
+            }));
+            console.log('🔧 Sent SETUP message');
+            
+            // Step 2: Send AUTH message
+            this.ws?.send(JSON.stringify({
+              type: 'AUTH',
+              channel: 0,
+              token: this.dxlinkToken
+            }));
+            console.log('🔐 Sent AUTH message');
+          }, 100); // Small delay to ensure socket is ready
         });
 
         this.ws.on('message', (data: WebSocket.Data) => {
@@ -488,6 +491,43 @@ class TastytradeService {
   }
 
   /**
+   * Initialize Tastytrade service on server startup
+   * Connects WebSocket and subscribes to common symbols
+   */
+  async init(): Promise<boolean> {
+    try {
+      console.log('🚀 Initializing Tastytrade service...');
+      
+      // Authenticate
+      const authenticated = await this.authenticate();
+      if (!authenticated) {
+        console.error('❌ Failed to authenticate Tastytrade');
+        return false;
+      }
+
+      // Connect WebSocket for real-time data
+      const connected = await this.connectWebSocket();
+      if (!connected) {
+        console.error('❌ Failed to connect DXLink WebSocket');
+        return false;
+      }
+
+      console.log('✅ Tastytrade service initialized successfully');
+      
+      // Subscribe to common symbols for faster first queries
+      // Don't await - let it run in background
+      this.subscribeToSymbols(['AAPL', 'TSLA', 'NVDA', 'MSFT', 'GOOGL', 'META', 'AMZN', 'QQQ', 'SPY']).catch(err => {
+        console.warn('⚠️ Background subscription failed:', err.message);
+      });
+
+      return true;
+    } catch (error: any) {
+      console.error('❌ Tastytrade initialization error:', error.message);
+      return false;
+    }
+  }
+
+  /**
    * Validate session and re-authenticate if needed
    */
   async ensureAuthenticated(): Promise<boolean> {
@@ -496,6 +536,20 @@ class TastytradeService {
       return true;
     }
     return await this.authenticate();
+  }
+  
+  /**
+   * Get connection status
+   */
+  isServiceConnected(): boolean {
+    return this.isConnected && this.ws !== null;
+  }
+  
+  /**
+   * Get cached quote without waiting
+   */
+  getCachedQuote(symbol: string): QuoteData | null {
+    return this.quoteCache.get(symbol) || null;
   }
 }
 

@@ -1,6 +1,7 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
+import { tastytradeService } from "./services/tastytradeService";
 
 const app = express();
 app.use(express.json());
@@ -37,6 +38,11 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  // Initialize Tastytrade service on startup
+  tastytradeService.init().catch(err => {
+    console.warn('⚠️ Tastytrade initialization failed, will use fallback sources:', err.message);
+  });
+  
   const server = await registerRoutes(app);
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {

@@ -1,5 +1,6 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
+import { tastytradeService } from './tastytradeService';
 
 export interface StockData {
   symbol: string;
@@ -338,7 +339,23 @@ export class WebScraperService {
   }
 
   static async scrapeStockPrice(symbol: string): Promise<StockData> {
-    // Use Google Finance web scraping for all price data (no API dependencies)
+    // Try Tastytrade real-time data FIRST (primary source)
+    try {
+      const tastyQuote = await tastytradeService.getStockQuote(symbol);
+      if (tastyQuote && tastyQuote.price > 0) {
+        console.log(`${symbol}: Got Tastytrade real-time price ${tastyQuote.price}`);
+        return {
+          symbol,
+          price: tastyQuote.price,
+          change: 0, // Tastytrade doesn't provide change directly
+          changePercent: tastyQuote.changePercent || 0
+        };
+      }
+    } catch (error) {
+      console.log(`${symbol}: Tastytrade unavailable, falling back to web scraping`);
+    }
+
+    // Fallback to web scraping if Tastytrade fails
     const sources = [
       () => this.scrapeGoogleFinance(symbol),
       () => this.scrapeMarketWatch(symbol)
