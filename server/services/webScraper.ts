@@ -378,6 +378,64 @@ export class WebScraperService {
     return this.getDefaultData(symbol);
   }
 
+  /**
+   * Scrape futures data (MNQ, SPX) using Tastytrade as primary source
+   */
+  static async scrapeFuturesPrice(symbol: string): Promise<StockData> {
+    // Try Tastytrade futures quotes FIRST (primary source)
+    try {
+      const tastyQuote = await tastytradeService.getFuturesQuote(symbol);
+      if (tastyQuote && tastyQuote.price > 0) {
+        console.log(`${symbol}: Got Tastytrade futures price ${tastyQuote.price}`);
+        return {
+          symbol,
+          price: tastyQuote.price,
+          change: 0,
+          changePercent: tastyQuote.changePercent || 0
+        };
+      }
+    } catch (error) {
+      console.log(`${symbol}: Tastytrade futures unavailable, falling back to scraping`);
+    }
+
+    // Fallback to regular scraping if Tastytrade fails
+    // Map to scraping-compatible symbols
+    const fallbackSymbol = symbol === 'SPX' ? '^GSPC' : symbol === 'MNQ' ? 'QQQ' : symbol;
+    console.log(`${symbol}: Using fallback symbol ${fallbackSymbol} for scraping`);
+    
+    const sources = [
+      () => this.scrapeGoogleFinance(fallbackSymbol),
+      () => this.scrapeMarketWatch(fallbackSymbol)
+    ];
+
+    for (const scraper of sources) {
+      try {
+        let data = await scraper();
+        
+        // Apply conversion if using QQQ proxy for MNQ
+        if (symbol === 'MNQ' && fallbackSymbol === 'QQQ' && data.price > 0) {
+          const conversionFactor = 41.2; // Updated conversion: QQQ * 41.2 ≈ MNQ
+          console.log(`${symbol}: Converting QQQ $${data.price.toFixed(2)} to MNQ using factor ${conversionFactor}`);
+          data = {
+            ...data,
+            symbol,
+            price: data.price * conversionFactor
+          };
+        }
+        
+        if (data.price > 0) {
+          console.log(`${symbol}: Got fallback price ${data.price}`);
+          return data;
+        }
+      } catch (error) {
+        console.warn(`Source ${scraper.name} failed for ${symbol}:`, error instanceof Error ? error.message : 'Unknown error');
+        continue;
+      }
+    }
+    
+    console.error(`All sources failed for futures ${symbol}`);
+    return this.getDefaultData(symbol);
+  }
 
   private static async scrapeGoogleFinance(symbol: string): Promise<StockData> {
     // Clean symbol and map to Google Finance format

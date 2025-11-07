@@ -194,11 +194,11 @@ export class AIAnalysisService {
   // SPX = S&P 500 Index, MNQ = Micro E-mini NASDAQ-100 Futures (professional day trading instruments)
   private static readonly DAY_TRADING_INSTRUMENTS = ['SPX', 'MNQ'];
   
-  // Map day trading tickers to standard market index symbols
+  // Map day trading tickers to standard market index symbols for fallback scraping
   private static getMarketIndexSymbol(ticker: string): string {
     const symbolMap: Record<string, string> = {
       'SPX': '^GSPC',      // S&P 500 Index (Google Finance compatible)
-      'MNQ': 'QQQ',        // Use QQQ ETF as NASDAQ-100 proxy (MNQ ≈ 1/10th NQ ≈ QQQ * 50)
+      'MNQ': 'MNQ',        // MNQ futures (Tastytrade supports this directly)
     };
     return symbolMap[ticker] || ticker;
   }
@@ -472,21 +472,12 @@ export class AIAnalysisService {
       const vixValue = marketContext.vix?.value || 18; // Default to 18 if not available
       console.log(`VIX: ${vixValue.toFixed(2)}`);
       
-      // Scrape stock/index data using market index symbol
-      const marketSymbol = this.getMarketIndexSymbol(ticker);
-      console.log(`Scraping ${ticker} using market symbol: ${marketSymbol}`);
-      let stockData = await WebScraperService.scrapeStockPrice(marketSymbol);
+      // Fetch real-time data for futures instruments (MNQ, SPX)
+      console.log(`Fetching ${ticker} data...`);
+      let stockData = await WebScraperService.scrapeFuturesPrice(ticker);
       if (!stockData.price || stockData.price === 0) {
         console.warn(`Invalid price data for ${ticker}`);
         return null;
-      }
-      
-      // Convert QQQ price to MNQ equivalent (MNQ ≈ QQQ * 34.3)
-      if (ticker === 'MNQ' && marketSymbol === 'QQQ') {
-        const qqqPrice = stockData.price;
-        const mnqPrice = qqqPrice * 34.3; // Approximate conversion factor
-        console.log(`${ticker}: Converting QQQ price $${qqqPrice.toFixed(2)} → MNQ equiv $${mnqPrice.toFixed(2)}`);
-        stockData = { ...stockData, price: mnqPrice };
       }
       
       console.log(`${ticker}: Current price ${stockData.price.toLocaleString()}`);
@@ -523,7 +514,7 @@ export class AIAnalysisService {
       console.log(`${ticker}: ${signal} → ${strategyType.toUpperCase()}`);
       
       // Scrape 52-week range for Fibonacci entry calculation
-      const weekRange = await WebScraperService.scrape52WeekRange(marketSymbol);
+      const weekRange = await WebScraperService.scrape52WeekRange(ticker);
       
       // Generate day trading options strategy (shorter timeframe)
       const optionsStrategy = await this.generateDayTradingOptionsStrategy(
