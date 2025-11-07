@@ -395,6 +395,9 @@ export class WebScraperService {
       
       // Google Finance selectors
       let price = 0;
+      let changePercent = 0;
+      let change = 0;
+      
       const priceSelectors = [
         '[data-last-price]',
         '.YMlKec.fxKbKc', // Google Finance price class
@@ -414,12 +417,32 @@ export class WebScraperService {
         }
       }
 
+      // Extract price change percent
+      const changePercentSelectors = [
+        '[data-last-change-perc]',
+        '.JwB6zf', // Google Finance change percent class
+        '[jsname="rfaVEf"]',
+        '.P2Luy.Ez2Ioe.ZYVHBb' // Alternative change percent class
+      ];
+
+      for (const selector of changePercentSelectors) {
+        const changeElement = $(selector).first();
+        let changeText = changeElement.attr('data-last-change-perc') || changeElement.text();
+        changeText = changeText.replace(/[%,]/g, '').trim();
+        
+        if (changeText && !isNaN(parseFloat(changeText))) {
+          changePercent = parseFloat(changeText);
+          console.log(`${symbol}: Google Finance found changePercent ${changePercent}%`);
+          break;
+        }
+      }
+
       if (price > 0) {
         return {
           symbol: cleanSymbol,
           price,
-          change: 0,
-          changePercent: 0
+          change,
+          changePercent
         };
       }
       
@@ -481,67 +504,13 @@ export class WebScraperService {
   }
 
   /**
-   * Get 52-week high and low data from web scraping (Yahoo Finance for data, not API)
+   * Get 52-week high and low data - NOT AVAILABLE from Google Finance
+   * Google Finance doesn't expose this data in scrapable format
+   * Returns null to indicate unavailable data
    */
   static async scrape52WeekRange(symbol: string): Promise<{ fiftyTwoWeekHigh: number; fiftyTwoWeekLow: number } | null> {
-    const cleanSymbol = symbol.replace('%5E', '^');
-    
-    // Try Yahoo Finance web scraping (HTML page, not API)
-    try {
-      const url = `https://finance.yahoo.com/quote/${cleanSymbol}`;
-      const response = await axios.get(url, {
-        headers: this.HEADERS,
-        timeout: 8000
-      });
-      
-      const $ = cheerio.load(response.data);
-      
-      // Yahoo Finance displays 52-week range clearly in statistics
-      let high52 = 0;
-      let low52 = 0;
-      
-      // Look for 52-week range in the page
-      $('td').each((_, elem) => {
-        const label = $(elem).text().trim();
-        if (label === '52 Week Range' || label.includes('52-Week Range') || label.includes('52 week range')) {
-          const value = $(elem).next('td').text().trim();
-          // Format usually: "low - high"
-          const matches = value.match(/([\d,.]+)\s*-\s*([\d,.]+)/);
-          if (matches && matches.length >= 3) {
-            low52 = parseFloat(matches[1].replace(/,/g, ''));
-            high52 = parseFloat(matches[2].replace(/,/g, ''));
-          }
-        }
-      });
-      
-      // Alternative: look in spans/divs
-      if (high52 === 0 || low52 === 0) {
-        $('span, div').each((_, elem) => {
-          const text = $(elem).text();
-          if (text.includes('52') && text.includes('Range')) {
-            const parent = $(elem).parent();
-            const value = parent.find('span, td').last().text();
-            const matches = value.match(/([\d,.]+)\s*-\s*([\d,.]+)/);
-            if (matches && matches.length >= 3) {
-              low52 = parseFloat(matches[1].replace(/,/g, ''));
-              high52 = parseFloat(matches[2].replace(/,/g, ''));
-            }
-          }
-        });
-      }
-      
-      if (high52 > 0 && low52 > 0 && high52 > low52) {
-        console.log(`${symbol}: Yahoo Finance web scraping 52-week range: $${low52.toFixed(2)} - $${high52.toFixed(2)}`);
-        return {
-          fiftyTwoWeekHigh: high52,
-          fiftyTwoWeekLow: low52
-        };
-      }
-    } catch (error) {
-      console.log(`Yahoo Finance web scraping failed for ${symbol}:`, error instanceof Error ? error.message : 'Unknown error');
-    }
-    
-    console.warn(`Could not get 52-week range for ${symbol} from web scraping`);
+    // Google Finance doesn't expose 52-week ranges in HTML
+    // This method exists for interface compatibility but always returns null
     return null;
   }
   
