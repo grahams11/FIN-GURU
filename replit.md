@@ -80,13 +80,22 @@ Preferred communication style: Simple, everyday language.
 - **Drizzle ORM**: Type-safe database toolkit with PostgreSQL dialect support
 
 ## Financial Data Sources
-- **Google Finance**: ONLY data source for real-time market data (user requirement: NO APIs)
+- **Tastytrade API** (PRIMARY): Real-time market data via DXLink WebSocket streaming
+  - **Authentication**: OAuth-based login with session tokens (stored in TASTYTRADE_USERNAME and TASTYTRADE_PASSWORD secrets)
+  - **DXLink WebSocket**: Persistent WebSocket connection to wss://tasty-openapi-ws.dxfeed.com/realtime
+  - **Protocol Flow**: SETUP → AUTH → CHANNEL_REQUEST → FEED_SETUP → FEED_SUBSCRIPTION
+  - **Data Format**: COMPACT format with Quote and Trade events streamed in real-time
+  - **Features**: Bid/ask prices, last trade price, volume, exchange codes
+  - **Caching**: In-memory quote cache updated on every Quote/Trade event
+  - **Connection Stability**: KEEPALIVE messages exchanged every 60 seconds to maintain connection
+  - **API Endpoints**: Session login, account info, DXLink token retrieval
+  - **Credentials**: Requires Tastytrade brokerage account (free sandbox available)
+- **Google Finance** (FALLBACK): Web scraping for market data when Tastytrade unavailable
   - Web scraping for stock prices, ETFs, and market indices
-  - Primary source for VIX (^VIX), S&P 500 (^GSPC), stocks, ETFs
+  - Source for VIX (^VIX), S&P 500 (^GSPC), stocks, ETFs
   - Limitation: changePercent often returns 0% (markets closed/after hours) → Scanner uses RSI-only signals
   - MNQ proxy: Uses QQQ ETF price * 34.3 conversion factor (QQQ ≈ $611 → MNQ ≈ $21,000)
-- **MarketWatch**: Secondary fallback for web scraping when Google Finance fails
-- **NO API Dependencies**: All Alpha Vantage and Yahoo Finance code removed per user requirement
+- **MarketWatch** (FALLBACK): Secondary fallback for web scraping when Google Finance fails
 
 ## Development Tools
 - **Replit Integration**: Development environment plugins for cartographer and dev banner

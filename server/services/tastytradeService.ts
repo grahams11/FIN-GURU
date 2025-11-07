@@ -2,8 +2,8 @@ import axios, { AxiosInstance } from 'axios';
 import WebSocket from 'ws';
 
 interface TastytradeSession {
-  sessionToken: string;
-  rememberToken: string;
+  'session-token': string;
+  'remember-token': string;
   user: {
     email: string;
     username: string;
@@ -27,8 +27,9 @@ interface QuoteData {
 
 interface DXLinkToken {
   token: string;
-  dxlinkUrl: string;
+  'dxlink-url': string;
   level: string;
+  'ws-url'?: string;
 }
 
 class TastytradeService {
@@ -38,6 +39,11 @@ class TastytradeService {
   private sessionToken: string | null = null;
   private rememberToken: string | null = null;
   private accountNumber: string | null = null;
+  private dxlinkToken: string | null = null;
+  private dxlinkUrl: string | null = null;
+  private ws: WebSocket | null = null;
+  private quoteCache: Map<string, QuoteData> = new Map();
+  private isConnected = false;
 
   constructor() {
     this.apiClient = axios.create({
@@ -70,10 +76,10 @@ class TastytradeService {
       });
 
       if (response.data && response.data.data) {
-        this.sessionToken = response.data.data.sessionToken;
-        this.rememberToken = response.data.data.rememberToken;
+        this.sessionToken = response.data.data['session-token'];
+        this.rememberToken = response.data.data['remember-token'];
         
-        // Set session token in headers for future requests
+        // Set session token in headers for future requests (no Bearer prefix for Tastytrade)
         this.apiClient.defaults.headers.common['Authorization'] = this.sessionToken;
 
         console.log('✅ Tastytrade authentication successful');
@@ -113,72 +119,322 @@ class TastytradeService {
   }
 
   /**
-   * Fetch current price and data for a stock symbol
+   * Get DXLink WebSocket token for market data streaming
    */
-  async getStockQuote(symbol: string): Promise<{ price: number; changePercent: number } | null> {
+  private async getDXLinkToken(): Promise<boolean> {
     try {
       if (!this.sessionToken) {
-        const authenticated = await this.authenticate();
-        if (!authenticated) return null;
+        await this.authenticate();
       }
 
-      // Get equity quote from Tastytrade
-      const response = await this.apiClient.get(`/instruments/equities/${symbol}`);
+      console.log('📡 Requesting DXLink quote tokens...');
+      const response = await this.apiClient.get<{ data: DXLinkToken }>('/api-quote-tokens');
+      
+      console.log('📡 API Response:', JSON.stringify(response.data, null, 2));
       
       if (response.data && response.data.data) {
-        const data = response.data.data;
+        this.dxlinkToken = response.data.data.token;
+        this.dxlinkUrl = response.data.data['dxlink-url'] || response.data.data['ws-url'];
+        console.log('✅ DXLink token obtained');
+        console.log(`✅ DXLink URL: ${this.dxlinkUrl}`);
+        return true;
+      }
+
+      console.error('❌ Failed to get DXLink token - no data in response');
+      return false;
+    } catch (error: any) {
+      console.error('❌ Error getting DXLink token:', error.message);
+      console.error('❌ Error details:', error.response?.data || error);
+      return false;
+    }
+  }
+
+  /**
+   * Connect to DXLink WebSocket for real-time streaming
+   */
+  async connectWebSocket(): Promise<boolean> {
+    try {
+      if (!this.dxlinkToken) {
+        const tokenObtained = await this.getDXLinkToken();
+        if (!tokenObtained) return false;
+      }
+
+      if (!this.dxlinkUrl) {
+        console.error('❌ No DXLink URL available');
+        return false;
+      }
+
+      console.log('🔌 Connecting to DXLink WebSocket...');
+
+      this.ws = new WebSocket(this.dxlinkUrl);
+
+      return new Promise((resolve, reject) => {
+        if (!this.ws) {
+          reject(new Error('WebSocket not initialized'));
+          return;
+        }
+
+        this.ws.on('open', () => {
+          console.log('✅ DXLink WebSocket connected');
+          
+          // Step 1: Send SETUP message
+          this.ws?.send(JSON.stringify({
+            type: 'SETUP',
+            channel: 0,
+            keepaliveTimeout: 60,
+            acceptKeepaliveTimeout: 60,
+            version: '0.1-js/1.0.0'
+          }));
+          console.log('🔧 Sent SETUP message');
+          
+          // Step 2: Send AUTH message
+          this.ws?.send(JSON.stringify({
+            type: 'AUTH',
+            channel: 0,
+            token: this.dxlinkToken
+          }));
+          console.log('🔐 Sent AUTH message');
+        });
+
+        this.ws.on('message', (data: WebSocket.Data) => {
+          try {
+            const message = JSON.parse(data.toString());
+            console.log('📨 Received:', JSON.stringify(message).substring(0, 300));
+
+            // Handle AUTH_STATE response
+            if (message.type === 'AUTH_STATE') {
+              if (message.state === 'AUTHORIZED') {
+                console.log('✅ DXLink authenticated');
+                
+                // Create feed channel (DXLink protocol step 2)
+                this.ws?.send(JSON.stringify({
+                  type: 'CHANNEL_REQUEST',
+                  channel: 1,
+                  service: 'FEED',
+                  parameters: { contract: 'AUTO' }
+                }));
+                console.log('📡 Requested feed channel');
+              } else if (message.state === 'UNAUTHORIZED') {
+                // Sometimes we get UNAUTHORIZED before AUTHORIZED - wait a bit
+                console.log('⏳ Waiting for authorization...');
+              }
+            }
+
+            // Handle CHANNEL_OPENED response
+            if (message.type === 'CHANNEL_OPENED' && message.channel === 1) {
+              console.log('✅ Feed channel opened');
+              
+              // Setup feed (DXLink protocol step 3)
+              this.ws?.send(JSON.stringify({
+                type: 'FEED_SETUP',
+                channel: 1,
+                acceptAggregationPeriod: 10.0,
+                acceptDataFormat: 'COMPACT'
+              }));
+              console.log('✅ Feed setup complete');
+              
+              this.isConnected = true;
+              resolve(true);
+            }
+
+            // Handle market data
+            if (message.type === 'FEED_DATA' && message.data) {
+              this.handleFeedData(message.data);
+            }
+
+            // Handle config messages
+            if (message.type === 'FEED_CONFIG') {
+              console.log('📋 Feed configured');
+            }
+
+            // Handle KEEPALIVE - must respond to keep connection alive
+            if (message.type === 'KEEPALIVE' && message.channel === 0) {
+              this.ws?.send(JSON.stringify({
+                type: 'KEEPALIVE',
+                channel: 0
+              }));
+              console.log('💓 Sent KEEPALIVE response');
+            }
+          } catch (error: any) {
+            console.error('Error processing message:', error.message);
+          }
+        });
+
+        this.ws.on('error', (error) => {
+          console.error('❌ DXLink WebSocket error:', error.message);
+          this.isConnected = false;
+          reject(error);
+        });
+
+        this.ws.on('close', () => {
+          console.log('⚠️ DXLink WebSocket closed');
+          this.isConnected = false;
+        });
+
+        // Timeout after 10 seconds
+        setTimeout(() => {
+          if (!this.isConnected) {
+            reject(new Error('WebSocket connection timeout'));
+          }
+        }, 10000);
+      });
+    } catch (error: any) {
+      console.error('❌ WebSocket connection error:', error.message);
+      return false;
+    }
+  }
+
+  /**
+   * Handle incoming FEED_DATA messages from DXLink (COMPACT format)
+   */
+  private handleFeedData(data: any[]): void {
+    try {
+      if (!Array.isArray(data) || data.length < 2) {
+        return;
+      }
+
+      // Compact format: [eventType, singleEventArray]
+      const [eventType, event] = data;
+
+      if (!Array.isArray(event) || event.length === 0) {
+        return;
+      }
+
+      console.log(`📊 Received ${eventType} event`);
+
+      // Compact format indexes for Quote events:
+      // 0: eventType, 1: symbol, 7: bidPrice, 8: bidSize, 11: askPrice, 12: askSize
+      if (eventType === 'Quote' && event.length >= 13) {
+        const symbol = event[1];
+        const bidPrice = event[7];
+        const askPrice = event[11];
         
-        // Try to get live market data
-        const marketDataResponse = await this.apiClient.get(`/quote-streamer-tokens`);
+        this.updateQuoteCache({
+          eventSymbol: symbol,
+          bidPrice,
+          askPrice,
+          lastPrice: (bidPrice + askPrice) / 2, // Mid price
+        });
+        console.log(`✅ Cached ${symbol}: Bid $${bidPrice} Ask $${askPrice}`);
+      }
+
+      // Compact format for Trade: 0: eventType, 1: symbol, 7: price
+      if (eventType === 'Trade' && event.length >= 8) {
+        const symbol = event[1];
+        const price = event[7];
         
-        // For now, return the instrument data
-        // We'll implement DXLink WebSocket for real-time quotes next
-        console.log(`📈 ${symbol}: Fetched from Tastytrade API (instrument data)`);
+        this.updateQuoteCache({
+          eventSymbol: symbol,
+          lastPrice: price,
+          bidPrice: 0,
+          askPrice: 0,
+        });
+        console.log(`✅ Cached ${symbol}: $${price.toFixed(2)} (from trade)`);
+      }
+    } catch (error: any) {
+      console.error('Error handling feed data:', error.message);
+    }
+  }
+
+  /**
+   * Update quote cache with new data
+   */
+  private updateQuoteCache(quoteData: any): void {
+    const symbol = quoteData.eventSymbol;
+    
+    this.quoteCache.set(symbol, {
+      symbol,
+      bidPrice: quoteData.bidPrice || 0,
+      askPrice: quoteData.askPrice || 0,
+      lastPrice: quoteData.lastPrice || quoteData.price || 0,
+      markPrice: (quoteData.bidPrice + quoteData.askPrice) / 2 || quoteData.price || 0,
+      volume: quoteData.volume || 0,
+      openInterest: quoteData.openInterest,
+    });
+  }
+
+  /**
+   * Subscribe to symbols for real-time quotes
+   */
+  async subscribeToSymbols(symbols: string[]): Promise<void> {
+    if (!this.isConnected || !this.ws) {
+      await this.connectWebSocket();
+    }
+
+    console.log(`📡 Subscribing to: ${symbols.join(', ')}`);
+
+    // Send FEED_SUBSCRIPTION with Quote and Trade event types
+    this.ws?.send(JSON.stringify({
+      type: 'FEED_SUBSCRIPTION',
+      channel: 1,
+      add: symbols.flatMap(symbol => [
+        { type: 'Quote', symbol },
+        { type: 'Trade', symbol }
+      ])
+    }));
+  }
+
+  /**
+   * Get quote from cache or subscribe if not available
+   */
+  async getQuote(symbol: string): Promise<{ price: number; changePercent: number } | null> {
+    try {
+      // Ensure WebSocket is connected
+      if (!this.isConnected) {
+        await this.connectWebSocket();
+        await this.subscribeToSymbols([symbol]);
         
+        // Wait longer for initial quote data (5 seconds)
+        await new Promise(resolve => setTimeout(resolve, 5000));
+      }
+
+      const cached = this.quoteCache.get(symbol);
+      
+      if (cached && cached.lastPrice > 0) {
+        console.log(`📊 ${symbol}: $${cached.lastPrice.toFixed(2)} (from Tastytrade DXLink)`);
         return {
-          price: 0, // Will be populated by DXLink WebSocket
+          price: cached.lastPrice,
+          changePercent: 0, // DXLink doesn't provide % change directly
+        };
+      }
+
+      // If not in cache, subscribe and wait longer
+      await this.subscribeToSymbols([symbol]);
+      await new Promise(resolve => setTimeout(resolve, 5000));
+
+      const newCached = this.quoteCache.get(symbol);
+      if (newCached && newCached.lastPrice > 0) {
+        console.log(`📊 ${symbol}: $${newCached.lastPrice.toFixed(2)} (from Tastytrade DXLink)`);
+        return {
+          price: newCached.lastPrice,
           changePercent: 0,
         };
       }
 
+      console.log(`⚠️ No quote data received for ${symbol} after 5s`);
       return null;
     } catch (error: any) {
-      console.error(`❌ Error fetching ${symbol} from Tastytrade:`, error.message);
+      console.error(`❌ Error getting quote for ${symbol}:`, error.message);
       return null;
     }
+  }
+
+  /**
+   * Fetch current price and data for a stock symbol
+   */
+  async getStockQuote(symbol: string): Promise<{ price: number; changePercent: number } | null> {
+    return await this.getQuote(symbol);
   }
 
   /**
    * Fetch market data for futures (SPX, MNQ)
    */
   async getFuturesQuote(symbol: string): Promise<{ price: number; changePercent: number } | null> {
-    try {
-      if (!this.sessionToken) {
-        const authenticated = await this.authenticate();
-        if (!authenticated) return null;
-      }
-
-      // Tastytrade uses specific symbols for futures
-      // SPX = /ES (E-mini S&P 500 futures)
-      // MNQ = /MNQ (Micro E-mini Nasdaq-100 futures)
-      const futuresSymbol = symbol === 'SPX' ? '/ES' : symbol === 'MNQ' ? '/MNQ' : symbol;
-
-      const response = await this.apiClient.get(`/instruments/futures/${futuresSymbol}`);
-      
-      if (response.data && response.data.data) {
-        console.log(`📊 ${symbol}: Fetched from Tastytrade API (futures instrument data)`);
-        
-        return {
-          price: 0, // Will be populated by DXLink WebSocket
-          changePercent: 0,
-        };
-      }
-
-      return null;
-    } catch (error: any) {
-      console.error(`❌ Error fetching ${symbol} futures from Tastytrade:`, error.message);
-      return null;
-    }
+    // Tastytrade uses specific symbols for futures
+    // SPX = /ES (E-mini S&P 500 futures)
+    // MNQ = /MNQ (Micro E-mini Nasdaq-100 futures)
+    const futuresSymbol = symbol === 'SPX' ? '/ES' : symbol === 'MNQ' ? '/MNQ' : symbol;
+    return await this.getQuote(futuresSymbol);
   }
 
   /**
@@ -202,16 +458,27 @@ class TastytradeService {
         console.log(`✅ Account number: ${this.accountNumber}`);
       }
 
-      // Test fetching a stock quote
-      console.log('\n📊 Testing stock quote fetch (AAPL)...');
+      // Test DXLink WebSocket connection
+      console.log('\n🔌 Testing DXLink WebSocket connection...');
+      const connected = await this.connectWebSocket();
+      
+      if (!connected) {
+        console.log('❌ WebSocket connection failed\n');
+        return false;
+      }
+
+      console.log('✅ DXLink WebSocket connected');
+
+      // Test fetching real-time quotes
+      console.log('\n📊 Testing real-time quote fetch (AAPL)...');
       const stockQuote = await this.getStockQuote('AAPL');
       
-      if (stockQuote) {
-        console.log('✅ Successfully connected to Tastytrade API');
-        console.log('✅ Market data endpoints accessible\n');
+      if (stockQuote && stockQuote.price > 0) {
+        console.log(`✅ Real-time quote received: $${stockQuote.price.toFixed(2)}`);
+        console.log('✅ Live data streaming working\n');
         return true;
       } else {
-        console.log('⚠️ Could not fetch stock data\n');
+        console.log('⚠️ Could not fetch live quote data\n');
         return false;
       }
     } catch (error: any) {
