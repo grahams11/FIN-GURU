@@ -14,6 +14,7 @@ export function useLiveQuotes(symbols: string[] = ['AAPL', 'TSLA', 'NVDA', 'MSFT
   const [quotes, setQuotes] = useState<QuotesMap>({});
   const [isConnected, setIsConnected] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
+  const symbolsKey = symbols.sort().join(',');
 
   useEffect(() => {
     if (symbols.length === 0) return;
@@ -30,6 +31,7 @@ export function useLiveQuotes(symbols: string[] = ['AAPL', 'TSLA', 'NVDA', 'MSFT
     eventSource.onmessage = (event) => {
       try {
         const data: QuotesMap = JSON.parse(event.data);
+        console.log('📊 Received SSE data:', Object.keys(data).length, 'symbols');
         setQuotes(prevQuotes => ({
           ...prevQuotes,
           ...data
@@ -49,7 +51,7 @@ export function useLiveQuotes(symbols: string[] = ['AAPL', 'TSLA', 'NVDA', 'MSFT
       eventSource.close();
       setIsConnected(false);
     };
-  }, [symbols.join(',')]);
+  }, [symbolsKey]);
 
   return { quotes, isConnected };
 }
