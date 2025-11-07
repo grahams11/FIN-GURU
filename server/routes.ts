@@ -39,7 +39,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       for (const symbol of symbols) {
         // Try Tastytrade cache first (real-time data)
-        const cached = tastytradeService.getCachedQuote(symbol);
+        const cached = await tastytradeService.getCachedQuote(symbol);
         if (cached && cached.lastPrice > 0) {
           quotes[symbol] = {
             price: cached.lastPrice,
@@ -98,7 +98,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       if (Object.keys(quotes).length > 0) {
-        res.write(`data: ${JSON.stringify(quotes)}\n\n`);
+        const quotesJSON = JSON.stringify(quotes);
+        console.log(`📤 SSE sending: ${Object.keys(quotes).join(', ')}`);
+        res.write(`data: ${quotesJSON}\n\n`);
+      } else {
+        console.log(`⚠️ SSE no quotes to send for symbols: ${symbols.join(', ')}`);
       }
     };
     
