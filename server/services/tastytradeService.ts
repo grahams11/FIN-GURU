@@ -134,7 +134,7 @@ class TastytradeService {
       
       if (response.data && response.data.data) {
         this.dxlinkToken = response.data.data.token;
-        this.dxlinkUrl = response.data.data['dxlink-url'] || response.data.data['ws-url'];
+        this.dxlinkUrl = response.data.data['dxlink-url'] || response.data.data['ws-url'] || null;
         console.log('✅ DXLink token obtained');
         console.log(`✅ DXLink URL: ${this.dxlinkUrl}`);
         return true;

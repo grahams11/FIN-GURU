@@ -267,11 +267,10 @@ export class AIAnalysisService {
   }
   
   // SWING TRADING TICKERS (Regular scanner)
+  // Only include stocks with Tastytrade real-time data support
   private static readonly TICKERS = [
-    'NVDA', 'TSLA', 'PLTR', 'SOFI', 'AMD', 'MSFT', 'AAPL', 'GOOGL', 
-    'META', 'NFLX', 'INTC', 'COIN', 'SNAP', 'UBER', 'LYFT', 'RIVN',
-    'LCID', 'PINS', 'RBLX', 'ROKU', 'SQ', 'SHOP', 'SPOT', 'TWLO',
-    'ZM', 'DOCU', 'CRWD', 'DDOG', 'NET', 'SNOW'
+    'AAPL', 'TSLA', 'NVDA', 'MSFT', 'GOOGL', 'META', 'AMZN',
+    'QQQ', 'SPY'  // Major ETFs with live data
   ];
   private static readonly RISK_FREE_RATE = 0.045;
 

@@ -66,6 +66,10 @@ Preferred communication style: Simple, everyday language.
 - **Priority**: Day trading plays ALWAYS appear in positions #1 and #2
 
 ### Elite Dual-Strategy Scanner (Positions 3-5)
+- **Stock Universe**: Only scans Tastytrade-supported symbols for real-time data accuracy:
+  - **Tech Stocks**: AAPL, TSLA, NVDA, MSFT, GOOGL, META, AMZN
+  - **Major ETFs**: QQQ, SPY
+  - All symbols have continuous WebSocket price updates from Tastytrade DXLink
 - **RSI-Only Momentum Scanner**: No longer reliant on 52-week data or changePercent (Google Finance limitation)
 - **CALL Strategy**: RSI < 48 (oversold/pullback) + market not bearish → Bullish reversal plays
 - **PUT Strategy**: RSI > 62 (overbought/reversal) + market not bullish → Bearish reversal plays
