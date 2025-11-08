@@ -296,43 +296,76 @@ class TastytradeService {
         return;
       }
 
-      // Compact format: [eventType, singleEventArray]
-      const [eventType, event] = data;
+      // Compact format: [eventType, multipleEventsArray]
+      const [eventType, events] = data;
 
-      if (!Array.isArray(event) || event.length === 0) {
+      if (!Array.isArray(events) || events.length === 0) {
         return;
       }
 
       console.log(`📊 Received ${eventType} event`);
 
-      // Compact format indexes for Quote events:
-      // 0: eventType, 1: symbol, 7: bidPrice, 8: bidSize, 11: askPrice, 12: askSize
-      if (eventType === 'Quote' && event.length >= 13) {
-        const symbol = event[1];
-        const bidPrice = event[7];
-        const askPrice = event[11];
+      // Process Quote events - each quote has 13 fields
+      if (eventType === 'Quote') {
+        const QUOTE_FIELD_COUNT = 13;
+        let i = 0;
+        let quotesProcessed = 0;
         
-        this.updateQuoteCache({
-          eventSymbol: symbol,
-          bidPrice,
-          askPrice,
-          lastPrice: (bidPrice + askPrice) / 2, // Mid price
-        });
-        console.log(`✅ Cached ${symbol}: Bid $${bidPrice} Ask $${askPrice}`);
+        while (i + QUOTE_FIELD_COUNT <= events.length) {
+          // Extract fields for this quote
+          const quoteType = events[i];     // "Quote"
+          const symbol = events[i + 1];    // Symbol
+          const bidPrice = events[i + 7];  // Bid price
+          const askPrice = events[i + 11]; // Ask price
+          
+          if (quoteType === 'Quote' && symbol && typeof bidPrice === 'number' && typeof askPrice === 'number') {
+            this.updateQuoteCache({
+              eventSymbol: symbol,
+              bidPrice,
+              askPrice,
+              lastPrice: (bidPrice + askPrice) / 2, // Mid price
+            });
+            console.log(`✅ Cached ${symbol}: Bid $${bidPrice} Ask $${askPrice}`);
+            quotesProcessed++;
+          }
+          
+          i += QUOTE_FIELD_COUNT;
+        }
+        
+        if (quotesProcessed > 0) {
+          console.log(`📊 Processed ${quotesProcessed} quotes`);
+        }
       }
 
-      // Compact format for Trade: 0: eventType, 1: symbol, 7: price
-      if (eventType === 'Trade' && event.length >= 8) {
-        const symbol = event[1];
-        const price = event[7];
+      // Process Trade events - each trade has 13 fields
+      if (eventType === 'Trade') {
+        const TRADE_FIELD_COUNT = 13;
+        let i = 0;
+        let tradesProcessed = 0;
         
-        this.updateQuoteCache({
-          eventSymbol: symbol,
-          lastPrice: price,
-          bidPrice: 0,
-          askPrice: 0,
-        });
-        console.log(`✅ Cached ${symbol}: $${price.toFixed(2)} (from trade)`);
+        while (i + TRADE_FIELD_COUNT <= events.length) {
+          // Extract fields for this trade
+          const tradeType = events[i];     // "Trade"
+          const symbol = events[i + 1];    // Symbol
+          const price = events[i + 7];     // Last trade price
+          
+          if (tradeType === 'Trade' && symbol && typeof price === 'number') {
+            this.updateQuoteCache({
+              eventSymbol: symbol,
+              lastPrice: price,
+              bidPrice: 0,
+              askPrice: 0,
+            });
+            console.log(`✅ Cached ${symbol}: $${price.toFixed(2)} (from trade)`);
+            tradesProcessed++;
+          }
+          
+          i += TRADE_FIELD_COUNT;
+        }
+        
+        if (tradesProcessed > 0) {
+          console.log(`📊 Processed ${tradesProcessed} trades`);
+        }
       }
     } catch (error: any) {
       console.error('Error handling feed data:', error.message);
