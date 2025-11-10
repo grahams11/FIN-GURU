@@ -873,10 +873,18 @@ class TastytradeService {
         }
 
         // Calculate current price from Tastytrade data or use cached quote
-        const currentPrice = pos['close-price'] || pos['average-open-price'] || 0;
-        const avgCost = pos['average-open-price'] || 0;
-        const quantity = Math.abs(parseFloat(pos.quantity || '0'));
-        const multiplier = pos.multiplier || 1;
+        // Use Number.isFinite to ensure valid numbers, default to 0 for missing values
+        const parsedCurrentPrice = parseFloat(pos['close-price'] || pos['average-open-price'] || '0');
+        const currentPrice = Number.isFinite(parsedCurrentPrice) ? parsedCurrentPrice : 0;
+        
+        const parsedAvgCost = parseFloat(pos['average-open-price'] || '0');
+        const avgCost = Number.isFinite(parsedAvgCost) ? parsedAvgCost : 0;
+        
+        const parsedQuantity = parseFloat(pos.quantity || '0');
+        const quantity = Math.abs(Number.isFinite(parsedQuantity) ? parsedQuantity : 0);
+        
+        const parsedMultiplier = parseFloat(pos.multiplier || '1');
+        const multiplier = Number.isFinite(parsedMultiplier) ? parsedMultiplier : 1;
         
         // Calculate P&L with contract multiplier
         const totalCost = avgCost * quantity * multiplier;
@@ -891,7 +899,9 @@ class TastytradeService {
           avgCost,
           currentPrice,
           unrealizedPnL,
-          realizedPnL: parseFloat(pos['realized-today'] || '0'),
+          realizedPnL: Number.isFinite(parseFloat(pos['realized-today'] || '0')) 
+            ? parseFloat(pos['realized-today'] || '0') 
+            : 0,
           openDate: pos['created-at'] ? new Date(pos['created-at']) : new Date(),
           status: 'open',
           metadata,
