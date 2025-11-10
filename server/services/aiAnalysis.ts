@@ -1,5 +1,6 @@
 import type { TradeRecommendation, MarketOverviewData, Greeks } from '@shared/schema';
 import { WebScraperService, type OptionsChain } from './webScraper';
+import { polygonService } from './polygonService';
 
 // Options Market Standards
 class OptionsMarketStandards {
@@ -264,41 +265,99 @@ export class AIAnalysisService {
     return fibEntry;
   }
   
-  // SWING TRADING TICKERS (Full market scanner)
-  // Comprehensive list of popular stocks across all sectors
-  private static readonly TICKERS = [
-    // Major Tech
+  // FULL MARKET SCANNER - Dynamic ticker fetching from Polygon
+  // Cache for fetched tickers (refresh daily)
+  private static tickerCache: {
+    tickers: string[];
+    fetchedAt: number;
+  } | null = null;
+  
+  private static readonly TICKER_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
+  private static readonly RISK_FREE_RATE = 0.045;
+  
+  // Popular tickers fallback (used if Polygon API fails)
+  private static readonly FALLBACK_TICKERS = [
     'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'NVDA', 'TSLA', 'AMD', 'INTC', 'CRM',
     'ORCL', 'ADBE', 'NFLX', 'PYPL', 'SQ', 'SHOP', 'SNOW', 'PLTR', 'COIN', 'RBLX',
-    
-    // Semiconductors & AI
     'TSM', 'AVGO', 'QCOM', 'MU', 'AMAT', 'LRCX', 'KLAC', 'ARM', 'MRVL', 'ASML',
-    
-    // Finance
     'JPM', 'BAC', 'WFC', 'GS', 'MS', 'C', 'BLK', 'SCHW', 'V', 'MA', 'AXP',
-    
-    // Healthcare & Biotech
     'JNJ', 'UNH', 'PFE', 'ABBV', 'MRK', 'TMO', 'LLY', 'AMGN', 'GILD', 'MRNA',
-    
-    // Energy
     'XOM', 'CVX', 'COP', 'SLB', 'EOG', 'MPC', 'PSX', 'VLO', 'OXY', 'HAL',
-    
-    // Consumer & Retail
     'WMT', 'HD', 'COST', 'NKE', 'SBUX', 'MCD', 'DIS', 'TGT', 'LOW', 'BKNG',
-    
-    // Industrial & Aerospace
     'BA', 'CAT', 'GE', 'HON', 'LMT', 'RTX', 'UPS', 'DE', 'MMM', 'EMR',
-    
-    // Electric Vehicles & Auto
     'F', 'GM', 'RIVN', 'LCID', 'NIO', 'XPEV', 'LI',
-    
-    // Communication & Media
-    'T', 'VZ', 'TMUS', 'CMCSA', 'CHTR', 'DIS', 'PARA',
-    
-    // Major ETFs
+    'T', 'VZ', 'TMUS', 'CMCSA', 'CHTR', 'PARA',
     'SPY', 'QQQ', 'IWM', 'DIA', 'VTI', 'VOO', 'XLF', 'XLE', 'XLK', 'XLV'
   ];
-  private static readonly RISK_FREE_RATE = 0.045;
+  
+  /**
+   * Fetch all tradeable tickers with intelligent filtering
+   * Returns: Liquid, optionable stocks suitable for trading
+   */
+  private static async getAllTradeableTickers(): Promise<string[]> {
+    const now = Date.now();
+    
+    // Return cached tickers if still fresh
+    if (this.tickerCache && (now - this.tickerCache.fetchedAt) < this.TICKER_CACHE_TTL) {
+      console.log(`📋 Using cached tickers (${this.tickerCache.tickers.length} stocks)`);
+      return this.tickerCache.tickers;
+    }
+    
+    try {
+      console.log('🔍 Fetching entire market from Polygon (this may take a moment)...');
+      const allTickers = await polygonService.fetchAllTickers();
+      
+      if (!allTickers || allTickers.length === 0) {
+        console.warn('⚠️ No tickers received from Polygon, using fallback list');
+        return this.FALLBACK_TICKERS;
+      }
+      
+      // Filter for liquid, tradeable stocks
+      const filteredTickers = this.filterLiquidTickers(allTickers);
+      
+      // Cache the results
+      this.tickerCache = {
+        tickers: filteredTickers,
+        fetchedAt: now
+      };
+      
+      console.log(`✅ Fetched ${allTickers.length} total tickers, filtered to ${filteredTickers.length} liquid stocks`);
+      return filteredTickers;
+      
+    } catch (error) {
+      console.error('❌ Error fetching tickers from Polygon:', error);
+      console.log('📋 Using fallback ticker list');
+      return this.FALLBACK_TICKERS;
+    }
+  }
+  
+  /**
+   * Filter tickers for liquidity and options availability
+   * Removes: Penny stocks, ultra-small caps, obscure symbols
+   */
+  private static filterLiquidTickers(tickers: string[]): string[] {
+    // Remove penny stocks and obscure tickers using symbol patterns
+    const filtered = tickers.filter(ticker => {
+      // Skip tickers with special characters (warrants, units, preferreds)
+      if (ticker.includes('.') || ticker.includes('-') || ticker.includes('^')) {
+        return false;
+      }
+      
+      // Skip very long tickers (usually obscure)
+      if (ticker.length > 5) {
+        return false;
+      }
+      
+      // Skip tickers ending in specific patterns (warrants, rights)
+      if (ticker.endsWith('W') || ticker.endsWith('R') || ticker.endsWith('U')) {
+        return false;
+      }
+      
+      return true;
+    });
+    
+    return filtered;
+  }
 
   static async generateTradeRecommendations(): Promise<TradeRecommendation[]> {
     try {
@@ -324,9 +383,10 @@ export class AIAnalysisService {
         }
       });
       
-      // 2. SCAN REGULAR TICKERS FOR SWING TRADES
-      const shuffledTickers = [...this.TICKERS].sort(() => Math.random() - 0.5);
-      console.log(`Scanning ${shuffledTickers.length} stocks in randomized order for pullback opportunities...`);
+      // 2. SCAN ENTIRE MARKET FOR SWING TRADES
+      const allTickers = await this.getAllTradeableTickers();
+      const shuffledTickers = [...allTickers].sort(() => Math.random() - 0.5);
+      console.log(`🔍 Scanning ${shuffledTickers.length} stocks across entire market for pullback opportunities...`);
       
       const tradeAnalyses = await Promise.allSettled(
         shuffledTickers.map(ticker => this.analyzeTicker(ticker, marketData))

@@ -565,6 +565,86 @@ class PolygonService {
   }
 
   /**
+   * Fetch all active US stock tickers from Polygon reference API
+   */
+  async fetchAllTickers(): Promise<string[]> {
+    const allTickers: string[] = [];
+    let nextUrl: string | null = 'https://api.polygon.io/v3/reference/tickers';
+    
+    const params = new URLSearchParams({
+      market: 'stocks',
+      type: 'CS', // Common Stock only (no ETFs, warrants, etc.)
+      active: 'true',
+      limit: '1000',
+      apiKey: this.apiKey
+    });
+
+    try {
+      console.log('🔍 Fetching all active US stock tickers from Polygon...');
+      
+      // Fetch all pages (pagination)
+      while (nextUrl) {
+        const url = nextUrl.includes('?') ? nextUrl : `${nextUrl}?${params}`;
+        
+        const response = await axios.get(url);
+        const data = response.data;
+        
+        if (data.results && Array.isArray(data.results)) {
+          const tickers = data.results.map((ticker: any) => ticker.ticker);
+          allTickers.push(...tickers);
+          console.log(`📊 Fetched ${tickers.length} tickers (total: ${allTickers.length})`);
+        }
+        
+        // Get next page URL
+        nextUrl = data.next_url || null;
+        
+        // Avoid rate limiting
+        if (nextUrl) {
+          await new Promise(resolve => setTimeout(resolve, 200));
+        }
+      }
+      
+      console.log(`✅ Total tickers fetched: ${allTickers.length}`);
+      return allTickers;
+      
+    } catch (error: any) {
+      console.error('❌ Error fetching tickers from Polygon:', error.message);
+      return [];
+    }
+  }
+
+  /**
+   * Fetch ticker details with market cap and liquidity metrics
+   */
+  async fetchTickerDetails(symbol: string): Promise<{ 
+    marketCap?: number; 
+    shareClassSharesOutstanding?: number;
+    weightedSharesOutstanding?: number;
+  } | null> {
+    try {
+      const response = await axios.get(
+        `https://api.polygon.io/v3/reference/tickers/${symbol}`,
+        {
+          params: { apiKey: this.apiKey }
+        }
+      );
+      
+      if (response.data?.results) {
+        return {
+          marketCap: response.data.results.market_cap,
+          shareClassSharesOutstanding: response.data.results.share_class_shares_outstanding,
+          weightedSharesOutstanding: response.data.results.weighted_shares_outstanding
+        };
+      }
+      
+      return null;
+    } catch (error: any) {
+      // Silently fail for individual ticker details (avoid log spam)
+      return null;
+    }
+  }
+
+  /**
    * Close WebSocket connection
    */
   async close(): Promise<void> {
