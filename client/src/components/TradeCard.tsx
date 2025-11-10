@@ -83,6 +83,13 @@ export function TradeCard({ trade, rank, liveQuotes }: TradeCardProps) {
     return "text-foreground";
   };
 
+  // Get Fibonacci color for stock price
+  const getFibonacciPriceColor = () => {
+    if (trade.fibonacciColor === 'gold') return 'text-yellow-400';
+    if (trade.fibonacciColor === 'green') return 'text-green-400';
+    return 'text-primary';
+  };
+
   return (
     <Card className="bg-secondary border-border hover:border-primary/50 transition-all duration-200 hover:-translate-y-1 hover:shadow-lg hover:shadow-primary/10">
       <CardContent className="p-6">
@@ -100,17 +107,17 @@ export function TradeCard({ trade, rank, liveQuotes }: TradeCardProps) {
                 </h3>
                 <span 
                   className={`text-xs font-bold px-2 py-1 rounded ${
-                    (trade as any).optionType === 'put' 
+                    trade.optionType === 'put' 
                       ? 'bg-red-500/20 text-red-400 border border-red-500/40' 
                       : 'bg-green-500/20 text-green-400 border border-green-500/40'
                   }`}
                   data-testid={`option-type-${trade.ticker}`}
                 >
-                  {((trade as any).optionType?.toUpperCase() || 'CALL')}
+                  {trade.optionType?.toUpperCase() ?? 'CALL'}
                 </span>
               </div>
               <p className="text-sm text-muted-foreground">
-                {(trade as any).optionType === 'put' ? 'Bearish Elite Play' : 'Bullish Elite Play'}
+                {trade.optionType === 'put' ? 'Bearish Elite Play' : 'Bullish Elite Play'}
               </p>
             </div>
           </div>
@@ -129,8 +136,20 @@ export function TradeCard({ trade, rank, liveQuotes }: TradeCardProps) {
             <p className="text-xs text-muted-foreground uppercase tracking-wide flex items-center space-x-1">
               <span>Stock Price</span>
               {livePrice && <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" title="Live Price"></span>}
+              {trade.fibonacciLevel != null && (
+                <span 
+                  className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
+                    trade.fibonacciColor === 'gold' 
+                      ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/40' 
+                      : 'bg-green-500/20 text-green-400 border border-green-500/40'
+                  }`}
+                  title={`Fibonacci ${trade.fibonacciLevel} retracement bounce`}
+                >
+                  FIB {trade.fibonacciLevel}
+                </span>
+              )}
             </p>
-            <p className="text-sm font-medium text-primary" data-testid={`current-${trade.ticker}`}>
+            <p className={`text-sm font-medium ${getFibonacciPriceColor()}`} data-testid={`current-${trade.ticker}`}>
               ${formatNumber(currentDisplayPrice)}
             </p>
           </div>
@@ -144,7 +163,7 @@ export function TradeCard({ trade, rank, liveQuotes }: TradeCardProps) {
             <p className="text-xs text-muted-foreground uppercase tracking-wide">Premium/Contract</p>
             <div className="flex items-center space-x-1">
               <p className="text-sm font-medium text-accent" data-testid={`premium-${trade.ticker}`}>
-                ${formatNumber((trade as any).premium || trade.entryPrice)}
+                ${formatNumber(trade.premium ?? trade.entryPrice)}
               </p>
               <span className="text-[10px] text-muted-foreground bg-muted px-1 rounded" title="Estimated using Black-Scholes model. Verify with your broker before trading.">
                 EST
@@ -160,10 +179,20 @@ export function TradeCard({ trade, rank, liveQuotes }: TradeCardProps) {
           <div className="bg-primary/10 rounded-md p-2 border border-primary/20">
             <p className="text-xs text-muted-foreground uppercase tracking-wide">💰 Total Cost</p>
             <p className="text-base font-bold text-primary" data-testid={`total-cost-${trade.ticker}`}>
-              ${formatNumber((trade as any).totalCost || (trade.contracts * trade.entryPrice * 100))}
+              ${formatNumber(trade.totalCost ?? (trade.contracts * trade.entryPrice * 100))}
             </p>
           </div>
         </div>
+
+        {trade.estimatedProfit != null && (
+          <div className="bg-gradient-to-r from-green-500/20 to-green-400/10 rounded-lg p-4 mb-4 border border-green-500/30">
+            <p className="text-xs text-muted-foreground uppercase tracking-wide">💰 Estimated Profit</p>
+            <p className="text-2xl font-bold text-green-500 animate-pulse" data-testid={`estimated-profit-${trade.ticker}`}>
+              ${formatNumber(trade.estimatedProfit, 0)}
+            </p>
+            <p className="text-xs text-muted-foreground">projected dollar profit at target exit</p>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4 bg-gradient-to-r from-green-500/10 to-accent/10 rounded-lg p-4 border border-green-500/20">
           <div>
@@ -176,14 +205,14 @@ export function TradeCard({ trade, rank, liveQuotes }: TradeCardProps) {
           <div>
             <p className="text-xs text-muted-foreground uppercase tracking-wide">🎯 Stock Price Target</p>
             <p className="text-lg font-bold text-green-400" data-testid={`stock-exit-${trade.ticker}`}>
-              ${(trade as any).stockExitPrice ? formatNumber((trade as any).stockExitPrice) : 'N/A'}
+              ${trade.stockExitPrice != null ? formatNumber(trade.stockExitPrice) : 'N/A'}
             </p>
             <p className="text-xs text-muted-foreground">target stock price at exit</p>
           </div>
           <div>
             <p className="text-xs text-muted-foreground uppercase tracking-wide">⏰ Projected Hold</p>
             <p className="text-lg font-bold text-accent" data-testid={`hold-days-${trade.ticker}`}>
-              {(trade as any).holdDays || 'N/A'} days
+              {trade.holdDays ?? 'N/A'} days
             </p>
             <p className="text-xs text-muted-foreground">optimal exit window</p>
           </div>
