@@ -162,9 +162,6 @@ class PolygonService {
     const trimmedKey = this.apiKey.trim();
     
     console.log('🔐 Authenticating with Polygon...');
-    console.log(`🔑 Polygon credential detected: ${Boolean(trimmedKey)}`);
-    console.log(`🔑 Credential length: ${trimmedKey.length} chars`);
-    console.log(`🔑 Credential starts with: ${trimmedKey.substring(0, 4)}...`);
     
     const authMessage = {
       action: 'auth',
@@ -172,7 +169,6 @@ class PolygonService {
     };
 
     this.ws.send(JSON.stringify(authMessage));
-    console.log(`📤 Auth message sent with action: ${authMessage.action}`);
   }
 
   /**
@@ -389,6 +385,41 @@ class PolygonService {
   }
 
   /**
+   * Get cached quote for SSE streaming (matches interface used by Tastytrade)
+   * Returns fresh cached data or triggers REST API fetch
+   */
+  async getCachedQuote(symbol: string): Promise<{ lastPrice: number; bidPrice: number; askPrice: number; volume: number } | null> {
+    // 1. Check if quote is in cache and fresh (<=10s)
+    const cachedQuote = this.getQuote(symbol);
+    if (cachedQuote) {
+      return {
+        lastPrice: cachedQuote.lastPrice,
+        bidPrice: cachedQuote.bidPrice,
+        askPrice: cachedQuote.askPrice,
+        volume: cachedQuote.volume || 0
+      };
+    }
+
+    // 2. If no fresh cache, try REST API to fetch current quote
+    const stockQuote = await this.getStockQuote(symbol);
+    if (stockQuote) {
+      // getStockQuote already updates the cache, so fetch from cache again
+      const updatedQuote = this.getQuote(symbol);
+      if (updatedQuote) {
+        return {
+          lastPrice: updatedQuote.lastPrice,
+          bidPrice: updatedQuote.bidPrice,
+          askPrice: updatedQuote.askPrice,
+          volume: updatedQuote.volume || 0
+        };
+      }
+    }
+
+    // 3. No data available from either source
+    return null;
+  }
+
+  /**
    * Get real-time stock quote using REST API (fallback when WebSocket cache is stale)
    * Options Advanced plan includes stock NBBO data via REST API
    */
@@ -416,10 +447,13 @@ class PolygonService {
 
       // Use Polygon REST API for real-time NBBO (National Best Bid and Offer)
       // Options Advanced plan includes access to stock quotes
+      // Using Authorization Bearer header (recommended method)
       const response = await axios.get(
         `https://api.polygon.io/v2/last/nbbo/${symbol}`,
         {
-          params: { apiKey: this.apiKey },
+          headers: {
+            'Authorization': `Bearer ${this.apiKey}`
+          },
           timeout: 5000
         }
       );

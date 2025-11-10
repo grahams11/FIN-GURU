@@ -4,6 +4,7 @@ import { storage } from "./storage";
 import { WebScraperService } from "./services/webScraper";
 import { AIAnalysisService } from "./services/aiAnalysis";
 import { PositionAnalysisService } from "./services/positionAnalysis";
+import { polygonService } from "./services/polygonService";
 import { tastytradeService } from "./services/tastytradeService";
 import { insertMarketDataSchema, insertOptionsTradeSchema, insertAiInsightsSchema, insertPortfolioPositionSchema, type OptionsTrade } from "@shared/schema";
 
@@ -20,10 +21,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
     
-    // Subscribe to symbols if Tastytrade is connected
+    // Subscribe to symbols via Polygon (primary source)
+    if (polygonService.isServiceConnected()) {
+      polygonService.subscribeToSymbols(symbols).catch(err => {
+        console.warn('⚠️ Polygon subscription failed:', err.message);
+      });
+    }
+    
+    // Subscribe to symbols via Tastytrade (secondary source)
     if (tastytradeService.isServiceConnected()) {
       tastytradeService.subscribeToSymbols(symbols).catch(err => {
-        console.warn('⚠️ SSE subscription failed:', err.message);
+        console.warn('⚠️ Tastytrade subscription failed:', err.message);
       });
     }
     
@@ -38,62 +46,79 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const quotes: Record<string, any> = {};
       
       for (const symbol of symbols) {
-        // Try Tastytrade cache first (real-time data)
-        const cached = await tastytradeService.getCachedQuote(symbol);
-        if (cached && cached.lastPrice > 0) {
+        // Data Source Hierarchy: Polygon → Tastytrade → WebScraper
+        
+        // 1. Try Polygon cache first (primary source - Options Advanced plan)
+        const polygonQuote = await polygonService.getCachedQuote(symbol);
+        if (polygonQuote && polygonQuote.lastPrice > 0) {
           quotes[symbol] = {
-            price: cached.lastPrice,
-            bid: cached.bidPrice,
-            ask: cached.askPrice,
-            volume: cached.volume,
+            price: polygonQuote.lastPrice,
+            bid: polygonQuote.bidPrice,
+            ask: polygonQuote.askPrice,
+            volume: polygonQuote.volume || 0,
+            timestamp: Date.now(),
+            source: 'polygon'
+          };
+          continue;
+        }
+        
+        // 2. Fallback to Tastytrade cache (secondary source)
+        const tastyQuote = await tastytradeService.getCachedQuote(symbol);
+        if (tastyQuote && tastyQuote.lastPrice > 0) {
+          quotes[symbol] = {
+            price: tastyQuote.lastPrice,
+            bid: tastyQuote.bidPrice,
+            ask: tastyQuote.askPrice,
+            volume: tastyQuote.volume,
             timestamp: Date.now(),
             source: 'tastytrade'
           };
-        } else {
-          // Fallback to scraper if not in Tastytrade cache
-          const now = Date.now();
-          const cachedScrape = scrapedQuotesCache[symbol];
-          const lastError = scrapedErrors[symbol] || 0;
-          
-          // Only fetch if cache is missing or stale AND we haven't recently failed
-          if ((!cachedScrape || now - cachedScrape.timestamp > SCRAPER_CACHE_TTL) && now - lastError > SCRAPER_ERROR_BACKOFF) {
-            try {
-              // Use scraper service for fallback data
-              const scraped = await WebScraperService.scrapeStockPrice(symbol);
-              if (scraped && scraped.price > 0) {
-                scrapedQuotesCache[symbol] = {
-                  price: scraped.price,
-                  timestamp: now
-                };
-                quotes[symbol] = {
-                  price: scraped.price,
-                  bid: 0,
-                  ask: 0,
-                  volume: 0,
-                  timestamp: now,
-                  source: 'scraper'
-                };
-                // Clear error on success
-                delete scrapedErrors[symbol];
-              } else {
-                // Mark as failed (no valid price)
-                scrapedErrors[symbol] = now;
-              }
-            } catch (error) {
-              // Track error timestamp to avoid rapid retries
+          continue;
+        }
+        
+        // 3. Final fallback to web scraper (tertiary source)
+        const now = Date.now();
+        const cachedScrape = scrapedQuotesCache[symbol];
+        const lastError = scrapedErrors[symbol] || 0;
+        
+        // Only fetch if cache is missing or stale AND we haven't recently failed
+        if ((!cachedScrape || now - cachedScrape.timestamp > SCRAPER_CACHE_TTL) && now - lastError > SCRAPER_ERROR_BACKOFF) {
+          try {
+            // Use scraper service for fallback data
+            const scraped = await WebScraperService.scrapeStockPrice(symbol);
+            if (scraped && scraped.price > 0) {
+              scrapedQuotesCache[symbol] = {
+                price: scraped.price,
+                timestamp: now
+              };
+              quotes[symbol] = {
+                price: scraped.price,
+                bid: 0,
+                ask: 0,
+                volume: 0,
+                timestamp: now,
+                source: 'scraper'
+              };
+              // Clear error on success
+              delete scrapedErrors[symbol];
+            } else {
+              // Mark as failed (no valid price)
               scrapedErrors[symbol] = now;
             }
-          } else if (cachedScrape) {
-            // Use cached scraped data
-            quotes[symbol] = {
-              price: cachedScrape.price,
-              bid: 0,
-              ask: 0,
-              volume: 0,
-              timestamp: cachedScrape.timestamp,
-              source: 'scraper_cached'
-            };
+          } catch (error) {
+            // Track error timestamp to avoid rapid retries
+            scrapedErrors[symbol] = now;
           }
+        } else if (cachedScrape) {
+          // Use cached scraped data
+          quotes[symbol] = {
+            price: cachedScrape.price,
+            bid: 0,
+            ask: 0,
+            volume: 0,
+            timestamp: cachedScrape.timestamp,
+            source: 'scraper_cached'
+          };
         }
       }
       
