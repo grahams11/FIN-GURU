@@ -12,29 +12,11 @@ import { insertMarketDataSchema, insertOptionsTradeSchema, insertAiInsightsSchem
 export async function registerRoutes(app: Express): Promise<Server> {
   // Server-Sent Events endpoint for real-time quote streaming with live Greeks
   app.get('/api/quotes/stream', async (req, res) => {
-    const symbols = (req.query.symbols as string)?.split(',').filter(Boolean) || ['AAPL', 'TSLA', 'NVDA', 'MSFT'];
-    
-    console.log(`📡 SSE connection established for symbols: ${symbols.join(', ')}`);
-    
     // Set SSE headers
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
-    
-    // Subscribe to symbols via Polygon (primary source)
-    if (polygonService.isServiceConnected()) {
-      polygonService.subscribeToSymbols(symbols).catch(err => {
-        console.warn('⚠️ Polygon subscription failed:', err.message);
-      });
-    }
-    
-    // Subscribe to symbols via Tastytrade (secondary source)
-    if (tastytradeService.isServiceConnected()) {
-      tastytradeService.subscribeToSymbols(symbols).catch(err => {
-        console.warn('⚠️ Tastytrade subscription failed:', err.message);
-      });
-    }
     
     // Cache for scraped quotes (refresh every 30 seconds)
     const scrapedQuotesCache: Record<string, { price: number; timestamp: number }> = {};
@@ -42,10 +24,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const SCRAPER_CACHE_TTL = 30000; // 30 seconds
     const SCRAPER_ERROR_BACKOFF = 60000; // Wait 60s before retrying failed symbols
     
-    // Fetch current top trades to enable live Greeks calculation
+    // Fetch current top trades to enable live Greeks calculation AND get symbols
+    // Using the same data source for both ensures consistency (fixes race condition)
     const topTrades = await storage.getTopTrades();
     const tradeMap = new Map<string, OptionsTrade>();
-    topTrades.forEach(trade => tradeMap.set(trade.ticker, trade));
+    const symbols: string[] = [];
+    
+    topTrades.forEach(trade => {
+      tradeMap.set(trade.ticker, trade);
+      symbols.push(trade.ticker); // Use ticker, not symbol
+    });
+    
+    console.log(`📡 SSE connection established for ${symbols.length} symbols: ${symbols.join(', ')}`);
+    console.log(`📊 Live Greeks enabled for ${topTrades.length} trades: ${Array.from(tradeMap.keys()).join(', ')}`);
+    
+    // Subscribe to symbols via Polygon (primary source)
+    if (polygonService.isServiceConnected() && symbols.length > 0) {
+      polygonService.subscribeToSymbols(symbols).catch(err => {
+        console.warn('⚠️ Polygon subscription failed:', err.message);
+      });
+    }
+    
+    // Subscribe to symbols via Tastytrade (secondary source)
+    if (tastytradeService.isServiceConnected() && symbols.length > 0) {
+      tastytradeService.subscribeToSymbols(symbols).catch(err => {
+        console.warn('⚠️ Tastytrade subscription failed:', err.message);
+      });
+    }
     
     // Helper function to calculate live Greeks for a trade
     const calculateLiveGreeks = (trade: OptionsTrade, currentPrice: number) => {
@@ -108,6 +113,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             const liveGreeks = calculateLiveGreeks(trade, polygonQuote.lastPrice);
             if (liveGreeks) {
               quote.greeks = liveGreeks;
+              console.log(`✅ ${symbol}: Live Greeks calculated - Delta: ${liveGreeks.delta.toFixed(4)}, Gamma: ${liveGreeks.gamma.toFixed(4)}, Theta: ${liveGreeks.theta.toFixed(4)}`);
             }
           }
           
@@ -133,6 +139,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             const liveGreeks = calculateLiveGreeks(trade, tastyQuote.lastPrice);
             if (liveGreeks) {
               quote.greeks = liveGreeks;
+              console.log(`✅ ${symbol}: Live Greeks calculated - Delta: ${liveGreeks.delta.toFixed(4)}, Gamma: ${liveGreeks.gamma.toFixed(4)}, Theta: ${liveGreeks.theta.toFixed(4)}`);
             }
           }
           
@@ -210,7 +217,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       if (Object.keys(quotes).length > 0) {
         const quotesJSON = JSON.stringify(quotes);
-        console.log(`📤 SSE sending: ${Object.keys(quotes).join(', ')}`);
         res.write(`data: ${quotesJSON}\n\n`);
       } else {
         console.log(`⚠️ SSE no quotes to send for symbols: ${symbols.join(', ')}`);
