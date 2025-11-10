@@ -70,12 +70,11 @@ class PolygonService {
   private quoteFreshnessThreshold = 10000; // 10 seconds - quotes older than this are considered stale
 
   constructor() {
-    // Try Access Key ID first, fall back to secret key
-    // Massive.com uses Access Key ID for WebSocket auth
-    this.apiKey = process.env.POLYGON_ACCESS_KEY_ID || process.env.POLYGON_API_KEY || '';
+    // Use the main Polygon API key for WebSocket authentication
+    this.apiKey = process.env.POLYGON_API_KEY || '';
     
     if (!this.apiKey) {
-      console.error('❌ POLYGON_ACCESS_KEY_ID or POLYGON_API_KEY not found in environment variables');
+      console.error('❌ POLYGON_API_KEY not found in environment variables');
     }
   }
 
