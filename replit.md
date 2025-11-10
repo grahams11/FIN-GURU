@@ -149,13 +149,23 @@ Preferred communication style: Simple, everyday language.
   - **Protocol Flow**: SETUP → AUTH → CHANNEL_REQUEST → FEED_SETUP → FEED_SUBSCRIPTION
   - **Event Types**: Quote (bid/ask), Trade (last price), Greeks (delta, gamma, theta, vega, rho, IV, theoretical price)
   - **Data Format**: COMPACT format with streaming events in real-time
-  - **Options Symbol Format**: `.SPX251114C06850000` (dot prefix, YYMMDD date, C/P, 8-digit zero-padded strike)
+  - **Options Symbol Format**: 
+    - **SPX Weekly Options**: `.SPXW{YYMMDD}{C/P}{STRIKE}` (non-third-Friday expirations)
+      - Example: `.SPXW251114C06850000` for Friday Nov 14, 2025 (weekly)
+    - **SPX Monthly Options**: `.SPX{YYMMDD}{C/P}{STRIKE}` (third Friday expirations only)
+      - Example: `.SPX251121C06850000` for Friday Nov 21, 2025 (monthly - third Friday)
+    - **Other Stocks**: `.{UNDERLYING}{YYMMDD}{C/P}{STRIKE}` (standard format)
+    - **Symbol Auto-Detection**: `isThirdFriday()` method automatically detects weekly vs monthly expirations
   - **Pending Promises Pattern**: Stores promises in pendingGreeks Map, resolves when Greeks event arrives, 5s timeout
   - **Caching**: Separate optionsCache (Greeks+quotes) from quoteCache (stocks only) with ref-counting
   - **Connection Stability**: KEEPALIVE messages exchanged every 60 seconds to maintain connection
   - **API Endpoints**: Session login, account info, DXLink token retrieval
   - **Credentials**: Requires Tastytrade brokerage account (free sandbox available)
   - **SPX Support**: ✅ SPX index options work perfectly via Tastytrade DXLink (real-time Greeks and IV)
+  - **CRITICAL FIX (Nov 10, 2025)**: Implemented SPXW vs SPX symbol formatting to support weekly options
+    - DXLink silently rejects `.SPX...` symbols for non-monthly expirations → timeout after 5s
+    - Solution: Detect third Friday using date math, output `.SPXW` for weekly, `.SPX` for monthly
+    - Result: SPX day trading now receives live Greeks from Tastytrade DXLink instead of Black-Scholes fallback
 
 - **Google Finance** (FINAL FALLBACK): Web scraping for market data when both Polygon and Tastytrade unavailable
   - Web scraping for stock prices, ETFs, and market indices

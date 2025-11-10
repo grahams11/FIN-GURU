@@ -564,8 +564,31 @@ class TastytradeService {
   }
 
   /**
+   * Check if a date is the third Friday of its month (standard monthly expiration)
+   */
+  private isThirdFriday(date: Date): boolean {
+    // Check if it's a Friday (5 = Friday in JS Date)
+    if (date.getDay() !== 5) return false;
+    
+    // Find the first Friday of the month
+    const firstDay = new Date(date.getFullYear(), date.getMonth(), 1);
+    const firstFriday = firstDay.getDay() <= 5 
+      ? 1 + (5 - firstDay.getDay())  // First Friday in first week
+      : 1 + (12 - firstDay.getDay()); // First Friday in second week
+    
+    // Third Friday is 14 days after first Friday
+    const thirdFriday = firstFriday + 14;
+    
+    return date.getDate() === thirdFriday;
+  }
+
+  /**
    * Format option symbol to DXLink streamer format
-   * Example: SPX, 6850, 2025-11-14, call -> .SPX251114C06850000
+   * SPX weekly options: .SPXW{YYMMDD}{C/P}{STRIKE} (non-third-Friday)
+   * SPX monthly options: .SPX{YYMMDD}{C/P}{STRIKE} (third Friday)
+   * Other underlyings: .{UNDERLYING}{YYMMDD}{C/P}{STRIKE}
+   * Example: SPX, 6850, 2025-11-14 (weekly), call -> .SPXW251114C06850000
+   * Example: SPX, 6850, 2025-11-21 (monthly), call -> .SPX251121C06850000
    */
   private formatOptionSymbol(
     underlying: string,
@@ -585,8 +608,16 @@ class TastytradeService {
     // C for call, P for put
     const type = optionType.toLowerCase() === 'call' ? 'C' : 'P';
     
+    // SPX requires special handling: SPXW for weekly, SPX for monthly (third Friday)
+    let symbolPrefix = underlying;
+    if (underlying === 'SPX') {
+      const isMonthly = this.isThirdFriday(date);
+      symbolPrefix = isMonthly ? 'SPX' : 'SPXW';
+      console.log(`📅 SPX expiration ${expiryDate}: ${isMonthly ? 'MONTHLY (third Friday)' : 'WEEKLY'} → ${symbolPrefix}`);
+    }
+    
     // DXLink format: .{UNDERLYING}{YYMMDD}{C/P}{STRIKE}
-    return `.${underlying}${yy}${mm}${dd}${type}${strikeFormatted}`;
+    return `.${symbolPrefix}${yy}${mm}${dd}${type}${strikeFormatted}`;
   }
 
   /**
