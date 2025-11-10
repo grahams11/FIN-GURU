@@ -99,7 +99,10 @@ class PolygonService {
         console.log('🔌 Connecting to Polygon WebSocket...');
         
         // Connect to real-time endpoint
-        this.ws = new WebSocket('wss://socket.polygon.io/stocks');
+        // Polygon rebranded to Massive.com - use new WebSocket URL
+        // Real-time: wss://socket.massive.com/stocks
+        // Delayed: wss://delayed.massive.com/stocks
+        this.ws = new WebSocket('wss://socket.massive.com/stocks');
 
         this.ws.on('open', () => {
           console.log('✅ Polygon WebSocket connected');
