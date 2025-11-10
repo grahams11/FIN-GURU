@@ -96,8 +96,10 @@ export class ExitAnalysisService {
       currentValue,
       unrealizedPnL,
       unrealizedPnLPercent,
-      dayChange: unrealizedPnL * 0.1, // Simplified
-      dayChangePercent: unrealizedPnLPercent * 0.1,
+      dayChange: position.realizedPnL || 0, // Real day P/L from Tastytrade
+      dayChangePercent: position.realizedPnL && currentValue > 0 
+        ? (position.realizedPnL / currentValue) * 100 
+        : 0,
       quantity: position.quantity,
       totalCost,
       breakEvenPrice,
