@@ -886,6 +886,11 @@ class TastytradeService {
         const parsedMultiplier = parseFloat(pos.multiplier || '1');
         const multiplier = Number.isFinite(parsedMultiplier) ? parsedMultiplier : 1;
         
+        // Calculate day P/L from yesterday's close
+        const parsedYesterdayClose = parseFloat(pos['average-daily-market-close-price'] || currentPrice.toString());
+        const yesterdayClose = Number.isFinite(parsedYesterdayClose) ? parsedYesterdayClose : currentPrice;
+        const dayPnL = (currentPrice - yesterdayClose) * quantity * multiplier;
+        
         // Calculate P&L with contract multiplier
         const totalCost = avgCost * quantity * multiplier;
         const currentValue = currentPrice * quantity * multiplier;
@@ -899,9 +904,7 @@ class TastytradeService {
           avgCost,
           currentPrice,
           unrealizedPnL,
-          realizedPnL: Number.isFinite(parseFloat(pos['realized-today'] || '0')) 
-            ? parseFloat(pos['realized-today'] || '0') 
-            : 0,
+          realizedPnL: Number.isFinite(dayPnL) ? dayPnL : 0, // Day P/L from yesterday's close
           openDate: pos['created-at'] ? new Date(pos['created-at']) : new Date(),
           status: 'open',
           metadata,
