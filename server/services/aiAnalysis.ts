@@ -1479,13 +1479,17 @@ export class AIAnalysisService {
       
       console.log(`${ticker}: Next Friday expiration: ${expiryDate.toLocaleDateString()} (${targetDays} days away)`);
       
-      // Higher IV for day trading (more volatile, shorter timeframe)
-      const baseIV = 0.40; // Base 40% for day trading volatility
-      const vixIVBoost = (vixValue - 15) * 0.02; // Add 2% IV for each VIX point above 15
-      const rsiIVBoost = (Math.abs(rsi - 50) / 50) * 0.10; // Up to 10% boost for extreme RSI
-      const impliedVolatility = Math.min(0.95, Math.max(0.30, baseIV + vixIVBoost + rsiIVBoost));
+      // IV calculation: SPX (index) has much lower IV than individual stocks
+      // SPX typical IV: 10-18% (very low for indices), Individual stocks: 30-60%
+      const isIndex = ticker === 'SPX' || ticker === 'NDX' || ticker === 'RUT';
+      const baseIV = isIndex ? 0.13 : 0.40; // SPX: 13% base (conservative), Stocks: 40% base
+      const vixIVBoost = (vixValue - 15) * (isIndex ? 0.005 : 0.02); // SPX much less sensitive to VIX
+      const rsiIVBoost = (Math.abs(rsi - 50) / 50) * (isIndex ? 0.03 : 0.10); // SPX: max 3% RSI boost, Stocks: 10%
+      const minIV = isIndex ? 0.10 : 0.30; // SPX minimum 10%, Stocks 30%
+      const maxIV = isIndex ? 0.25 : 0.95; // SPX maximum 25%, Stocks 95%
+      const impliedVolatility = Math.min(maxIV, Math.max(minIV, baseIV + vixIVBoost + rsiIVBoost));
       
-      console.log(`${ticker}: Day trading IV: ${(impliedVolatility * 100).toFixed(1)}% (VIX ${vixValue.toFixed(1)}, RSI ${rsi.toFixed(0)})`);
+      console.log(`${ticker}: Day trading IV: ${(impliedVolatility * 100).toFixed(1)}% (VIX ${vixValue.toFixed(1)}, RSI ${rsi.toFixed(0)}, ${isIndex ? 'INDEX' : 'STOCK'})`);
       
       // Try to fetch real option data from Polygon first
       const polygonService = (await import('./polygonService')).default;
