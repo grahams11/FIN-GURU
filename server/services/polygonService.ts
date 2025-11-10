@@ -11,6 +11,15 @@ interface QuoteData {
   timestamp: number;
 }
 
+export interface HistoricalBar {
+  o: number; // Open
+  h: number; // High
+  l: number; // Low
+  c: number; // Close
+  v: number; // Volume
+  t: number; // Timestamp (Unix ms)
+}
+
 interface PolygonTradeMessage {
   ev: 'T'; // Trade event
   sym: string; // Symbol
@@ -714,6 +723,49 @@ class PolygonService {
       
     } catch (error: any) {
       console.error(`❌ Unexpected error in getOptionQuote for ${underlying}:`, error.message);
+      return null;
+    }
+  }
+
+  /**
+   * Get historical price bars (aggregates) for Fibonacci calculations
+   * Uses Polygon REST API for historical data
+   * 
+   * @param symbol Stock symbol
+   * @param from Start date (YYYY-MM-DD)
+   * @param to End date (YYYY-MM-DD)
+   * @param timespan 'day' or 'hour'
+   * @returns Array of historical bars or null on error
+   */
+  async getHistoricalBars(
+    symbol: string,
+    from: string,
+    to: string,
+    timespan: 'day' | 'hour' = 'day'
+  ): Promise<HistoricalBar[] | null> {
+    try {
+      const url = `https://api.polygon.io/v2/aggs/ticker/${symbol}/range/1/${timespan}/${from}/${to}?adjusted=true&sort=asc&apiKey=${this.apiKey}`;
+      
+      const response = await axios.get(url, {
+        timeout: 10000
+      });
+
+      if (response.data?.results && Array.isArray(response.data.results)) {
+        console.log(`${symbol}: Retrieved ${response.data.results.length} historical ${timespan} bars from ${from} to ${to}`);
+        return response.data.results;
+      }
+
+      console.warn(`${symbol}: No historical data found for ${from} to ${to}`);
+      return null;
+
+    } catch (error: any) {
+      if (error.response?.status === 404) {
+        console.warn(`${symbol}: Historical data not available (404)`);
+      } else if (error.response?.status === 429) {
+        console.error(`${symbol}: Rate limit exceeded for historical data`);
+      } else {
+        console.error(`${symbol}: Failed to fetch historical bars from ${from} to ${to}:`, error.message);
+      }
       return null;
     }
   }

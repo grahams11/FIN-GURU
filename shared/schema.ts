@@ -39,6 +39,9 @@ export const optionsTrade = pgTable("options_trades", {
   greeks: jsonb("greeks").notNull(),
   sentiment: real("sentiment"),
   score: real("score").notNull(),
+  fibonacciLevel: real("fibonacci_level"), // 0.707 or 0.618 if bouncing off Fibonacci level
+  fibonacciColor: text("fibonacci_color"), // 'gold' for 0.707, 'green' for 0.618
+  estimatedProfit: real("estimated_profit"), // Dollar amount profit (not percentage)
   isExecuted: boolean("is_executed").default(false),
   createdAt: timestamp("created_at").defaultNow(),
 });
@@ -205,6 +208,9 @@ export interface TradeRecommendation {
   sentiment: number;
   score: number;
   holdDays: number;
+  fibonacciLevel?: number; // 0.707 or 0.618 if bouncing off Fibonacci level
+  fibonacciColor?: 'gold' | 'green'; // Color coding for UI display
+  estimatedProfit?: number; // Dollar amount profit (not percentage)
 }
 
 export interface PortfolioSummary {

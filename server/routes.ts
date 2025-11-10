@@ -341,6 +341,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const storedTrades = await Promise.all(
           validRecommendations.map(async (rec) => {
             try {
+              // Validate Fibonacci level (must be 0.618 or 0.707 if present)
+              const validFibLevel = rec.fibonacciLevel === 0.618 || rec.fibonacciLevel === 0.707 
+                ? rec.fibonacciLevel 
+                : null;
+              
+              // Validate estimated profit (must be finite number)
+              const validEstimatedProfit = rec.estimatedProfit !== undefined && Number.isFinite(rec.estimatedProfit)
+                ? rec.estimatedProfit
+                : null;
+              
               return await storage.createOptionsTrade({
                 ticker: rec.ticker,
                 optionType: rec.optionType,
@@ -360,6 +370,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 greeks: rec.greeks,
                 sentiment: rec.sentiment,
                 score: rec.score,
+                fibonacciLevel: validFibLevel,
+                fibonacciColor: rec.fibonacciColor ?? null,
+                estimatedProfit: validEstimatedProfit,
                 isExecuted: false
               });
             } catch (error) {
@@ -424,6 +437,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const trades = await Promise.all(
         validRecommendations.map(async (rec) => {
           try {
+            // Validate Fibonacci level (must be 0.618 or 0.707 if present)
+            const validFibLevel = rec.fibonacciLevel === 0.618 || rec.fibonacciLevel === 0.707 
+              ? rec.fibonacciLevel 
+              : null;
+            
+            // Validate estimated profit (must be finite number)
+            const validEstimatedProfit = rec.estimatedProfit !== undefined && Number.isFinite(rec.estimatedProfit)
+              ? rec.estimatedProfit
+              : null;
+            
             return await storage.createOptionsTrade({
               ticker: rec.ticker,
               optionType: rec.optionType,
@@ -443,6 +466,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
               greeks: rec.greeks,
               sentiment: rec.sentiment,
               score: rec.score,
+              fibonacciLevel: validFibLevel,
+              fibonacciColor: rec.fibonacciColor ?? null,
+              estimatedProfit: validEstimatedProfit,
               isExecuted: false
             });
           } catch (error) {

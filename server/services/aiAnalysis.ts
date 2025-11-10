@@ -1,6 +1,7 @@
 import type { TradeRecommendation, MarketOverviewData, Greeks } from '@shared/schema';
 import { WebScraperService, type OptionsChain } from './webScraper';
 import { polygonService } from './polygonService';
+import { FibonacciService } from './fibonacciService';
 
 // Options Market Standards
 class OptionsMarketStandards {
@@ -513,11 +514,34 @@ export class AIAnalysisService {
         return null;
       }
 
+      // FIBONACCI BOUNCE DETECTION (enrichment, not filter)
+      // Check if price is at golden 0.707 or green 0.618 Fibonacci levels
+      let fibonacciLevel: number | undefined;
+      let fibonacciColor: 'gold' | 'green' | undefined;
+      
+      try {
+        const bounce = await FibonacciService.detectBounce(ticker, stockData.price, strategyType);
+        if (bounce.isBouncing && bounce.fibLevel && bounce.color) {
+          fibonacciLevel = bounce.fibLevel;
+          fibonacciColor = bounce.color;
+          // Boost confidence for Fibonacci bounces
+          aiConfidence = Math.min(0.95, aiConfidence + 0.10);
+          console.log(`${ticker}: ${bounce.color === 'gold' ? '⭐ GOLDEN' : '✅ GREEN'} Fibonacci ${bounce.fibLevel} bounce detected!`);
+        }
+      } catch (error) {
+        console.log(`${ticker}: Fibonacci check skipped (${error instanceof Error ? error.message : 'error'})`);
+      }
+
+      // Calculate estimated profit (dollar amount)
+      const estimatedProfit = profit;
+
       // Scoring based on ROI and market alignment
       const marketAlignmentBonus = (strategyType === 'call' && isBullishMarket) || (strategyType === 'put' && isBearishMarket) ? 50 : 0;
-      const score = (projectedROI * aiConfidence * 0.8) + marketAlignmentBonus;
+      const fibonacciBonus = fibonacciLevel ? (fibonacciLevel === 0.707 ? 75 : 50) : 0; // Golden gets +75, Green gets +50
+      const score = (projectedROI * aiConfidence * 0.8) + marketAlignmentBonus + fibonacciBonus;
 
-      console.log(`${ticker}: ✅ ELITE ${strategyType.toUpperCase()} - ROI ${projectedROI.toFixed(0)}%, Confidence ${(aiConfidence * 100).toFixed(0)}%, Score ${score.toFixed(1)}`);
+      const fibLabel = fibonacciLevel ? ` 🎯 Fib ${fibonacciLevel}` : '';
+      console.log(`${ticker}: ✅ ELITE ${strategyType.toUpperCase()}${fibLabel} - ROI ${projectedROI.toFixed(0)}%, Confidence ${(aiConfidence * 100).toFixed(0)}%, Score ${score.toFixed(1)}`);
 
       return {
         ticker,
@@ -537,7 +561,10 @@ export class AIAnalysisService {
         greeks,
         sentiment: isBullishMarket ? 0.8 : isBearishMarket ? 0.2 : 0.5,
         score,
-        holdDays: optionsStrategy.holdDays
+        holdDays: optionsStrategy.holdDays,
+        fibonacciLevel,
+        fibonacciColor,
+        estimatedProfit
       };
 
     } catch (error) {
@@ -651,6 +678,9 @@ export class AIAnalysisService {
       
       confidence = Math.min(0.95, confidence);
       
+      // Calculate estimated profit (dollar amount)
+      const estimatedProfit = profit;
+
       // Day trading gets higher score priority (always top 2)
       const score = 1000 + (projectedROI * confidence); // 1000+ ensures always top
       
@@ -674,7 +704,8 @@ export class AIAnalysisService {
         greeks,
         sentiment: vixValue / 100, // Use VIX as sentiment proxy for day trading
         score,
-        holdDays: optionsStrategy.holdDays
+        holdDays: optionsStrategy.holdDays,
+        estimatedProfit
       };
       
     } catch (error) {
