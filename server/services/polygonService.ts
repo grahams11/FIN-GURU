@@ -584,10 +584,10 @@ class PolygonService {
       
       // Fetch all pages (pagination)
       while (nextUrl) {
-        const url = nextUrl.includes('?') ? nextUrl : `${nextUrl}?${params}`;
+        const url: string = nextUrl.includes('?') ? nextUrl : `${nextUrl}?${params}`;
         
-        const response = await axios.get(url);
-        const data = response.data;
+        const response: any = await axios.get(url);
+        const data: any = response.data;
         
         if (data.results && Array.isArray(data.results)) {
           const tickers = data.results.map((ticker: any) => ticker.ticker);
