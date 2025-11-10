@@ -379,19 +379,19 @@ function UnifiedPositionCard({ position, analysis, currentPrice, liveQuote, onCl
               <div className="grid grid-cols-5 gap-4 text-sm">
                 <div>
                   <p className="text-muted-foreground">Delta</p>
-                  <p className="font-medium">{greeks.delta.toFixed(4)}</p>
+                  <p className="font-medium">{greeks.delta != null ? greeks.delta.toFixed(4) : 'N/A'}</p>
                 </div>
                 <div>
                   <p className="text-muted-foreground">Gamma</p>
-                  <p className="font-medium">{greeks.gamma.toFixed(4)}</p>
+                  <p className="font-medium">{greeks.gamma != null ? greeks.gamma.toFixed(4) : 'N/A'}</p>
                 </div>
                 <div>
                   <p className="text-muted-foreground">Theta</p>
-                  <p className="font-medium text-red-500">{greeks.theta.toFixed(2)}</p>
+                  <p className="font-medium text-red-500">{greeks.theta != null ? greeks.theta.toFixed(2) : 'N/A'}</p>
                 </div>
                 <div>
                   <p className="text-muted-foreground">Vega</p>
-                  <p className="font-medium">{greeks.vega.toFixed(4)}</p>
+                  <p className="font-medium">{greeks.vega != null ? greeks.vega.toFixed(4) : 'N/A'}</p>
                 </div>
                 <div>
                   <p className="text-muted-foreground">Days to Expiry</p>
