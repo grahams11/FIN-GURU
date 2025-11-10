@@ -138,17 +138,24 @@ Preferred communication style: Simple, everyday language.
     - Stock quotes: WebSocket-first → Tastytrade fallback → Web scraping final
     - Options quotes: REST API with Black-Scholes fallback when Polygon unavailable
 
-- **Tastytrade API** (FALLBACK): Real-time market data via DXLink WebSocket streaming
+- **Tastytrade API** (SPX OPTIONS PRIMARY SOURCE): Real-time options data via DXLink WebSocket streaming
+  - **Purpose**: PRIMARY source for SPX index options ONLY - provides real market Greeks, IV, and theoretical prices
+  - **Architecture Decision**: Tastytrade reserved for SPX day trading; all momentum stocks use Polygon
+    - **SPX Day Trading:** Tastytrade (PRIMARY) → Polygon (FALLBACK) → Black-Scholes (FINAL)
+    - **Momentum Stocks:** Polygon (PRIMARY) → Black-Scholes (FALLBACK)
+  - **Rationale**: Tastytrade excels at SPX index options; Polygon already handles individual stocks well
   - **Authentication**: OAuth-based login with session tokens (stored in TASTYTRADE_USERNAME and TASTYTRADE_PASSWORD secrets)
   - **DXLink WebSocket**: Persistent WebSocket connection to wss://tasty-openapi-ws.dxfeed.com/realtime
   - **Protocol Flow**: SETUP → AUTH → CHANNEL_REQUEST → FEED_SETUP → FEED_SUBSCRIPTION
-  - **Data Format**: COMPACT format with Quote and Trade events streamed in real-time
-  - **Features**: Bid/ask prices, last trade price, volume, exchange codes
-  - **Caching**: In-memory quote cache updated on every Quote/Trade event
+  - **Event Types**: Quote (bid/ask), Trade (last price), Greeks (delta, gamma, theta, vega, rho, IV, theoretical price)
+  - **Data Format**: COMPACT format with streaming events in real-time
+  - **Options Symbol Format**: `.SPX251114C06850000` (dot prefix, YYMMDD date, C/P, 8-digit zero-padded strike)
+  - **Pending Promises Pattern**: Stores promises in pendingGreeks Map, resolves when Greeks event arrives, 5s timeout
+  - **Caching**: Separate optionsCache (Greeks+quotes) from quoteCache (stocks only) with ref-counting
   - **Connection Stability**: KEEPALIVE messages exchanged every 60 seconds to maintain connection
   - **API Endpoints**: Session login, account info, DXLink token retrieval
   - **Credentials**: Requires Tastytrade brokerage account (free sandbox available)
-  - **SPX Support**: ✅ SPX index quotes work perfectly via Tastytrade (real-time data)
+  - **SPX Support**: ✅ SPX index options work perfectly via Tastytrade DXLink (real-time Greeks and IV)
 
 - **Google Finance** (FINAL FALLBACK): Web scraping for market data when both Polygon and Tastytrade unavailable
   - Web scraping for stock prices, ETFs, and market indices
