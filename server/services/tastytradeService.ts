@@ -137,17 +137,23 @@ class TastytradeService {
    */
   private async getAccountInfo(): Promise<void> {
     try {
+      console.log('🔍 Fetching account information...');
       const response = await this.apiClient.get('/customers/me/accounts');
       
       if (response.data && response.data.data && response.data.data.items) {
         const accounts = response.data.data.items;
+        console.log(`📋 Found ${accounts.length} account(s)`);
+        
         if (accounts.length > 0) {
-          this.accountNumber = accounts[0]['account-number'];
-          console.log(`📊 Account Number: ${this.accountNumber}`);
+          // Account number is nested inside account object
+          this.accountNumber = accounts[0].account['account-number'];
+          console.log('✅ Account authenticated');
         }
+      } else {
+        console.error('❌ Unexpected account response structure');
       }
     } catch (error: any) {
-      console.error('⚠️ Could not fetch account info:', error.message);
+      console.error('❌ Error fetching account info:', error.response?.data || error.message);
     }
   }
 
@@ -162,8 +168,6 @@ class TastytradeService {
 
       console.log('📡 Requesting DXLink quote tokens...');
       const response = await this.apiClient.get<{ data: DXLinkToken }>('/api-quote-tokens');
-      
-      console.log('📡 API Response:', JSON.stringify(response.data, null, 2));
       
       if (response.data && response.data.data) {
         this.dxlinkToken = response.data.data.token;
@@ -835,7 +839,7 @@ class TastytradeService {
         return [];
       }
 
-      console.log(`📊 Fetching positions for account ${this.accountNumber}...`);
+      console.log('📊 Fetching positions...');
       
       const response = await this.apiClient.get(`/accounts/${this.accountNumber}/positions`);
       
@@ -861,7 +865,7 @@ class TastytradeService {
           if (parsed) {
             ticker = parsed.underlying;
             metadata = {
-              optionType: parsed.optionType,
+              optionType: parsed.optionType.toLowerCase(),
               strike: parsed.strike,
               expiryDate: parsed.expiry,
             };
@@ -880,7 +884,7 @@ class TastytradeService {
         const unrealizedPnL = currentValue - totalCost;
 
         return {
-          id: `${pos.symbol}-${pos['account-number']}`,
+          id: pos.symbol,
           ticker,
           positionType: isOption || isFuture ? 'options' : 'stock',
           quantity,
