@@ -107,15 +107,16 @@ Preferred communication style: Simple, everyday language.
 
 **Priority Order**: Polygon → Tastytrade → Google Finance → MarketWatch
 
-- **Polygon/Massive.com** (PRIMARY): Real-time market data via WebSocket and REST API
-  - **Plan**: Options Advanced ($199/month) - Unlimited API calls, 5+ years historical data, 100% market coverage
-  - **WebSocket**: Real-time streaming via wss://socket.massive.com/options
-  - **REST API**: NBBO (National Best Bid and Offer) quotes for stocks via /v2/last/nbbo/{ticker}
+- **Polygon/Massive.com** (PRIMARY - WebSocket Only): Real-time market data via WebSocket
+  - **Plan**: Options Advanced ($199/month) - Unlimited API calls, 5+ years historical data, 100% options coverage
+  - **WebSocket**: Real-time streaming via wss://socket.massive.com/options (fully functional)
+  - **REST API**: ❌ NOT included with Options plan - requires separate Stocks Advanced plan ($199/month additional)
   - **Authentication**: API key authentication (POLYGON_API_KEY secret)
-  - **Features**: Bid/ask prices, last trade price, volume, real-time options data
+  - **Features**: Options data, reference API for ticker lists, WebSocket subscriptions for real-time quotes
   - **Caching**: In-memory quote cache with 10-second freshness threshold
-  - **Coverage**: All US stocks and options with 100% market coverage
+  - **Coverage**: 100% US options coverage + ticker reference data for market scanning
   - **Connection Stability**: Automatic reconnection with 5 max retry attempts
+  - **Note**: Stock NBBO REST endpoints return 401 (expected) - Tastytrade WebSocket + web scraping handle stock quotes
 
 - **Tastytrade API** (FALLBACK): Real-time market data via DXLink WebSocket streaming
   - **Authentication**: OAuth-based login with session tokens (stored in TASTYTRADE_USERNAME and TASTYTRADE_PASSWORD secrets)

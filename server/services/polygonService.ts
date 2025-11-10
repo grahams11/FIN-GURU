@@ -484,7 +484,11 @@ class PolygonService {
 
       return null;
     } catch (error: any) {
-      console.log(`⚠️ ${symbol}: Polygon REST API error - ${error.message}`);
+      // Silently handle 401 errors - Options Advanced plan doesn't include stock REST API access
+      // This is expected behavior, not an error. Fallback to Tastytrade/web scraping will handle it.
+      if (error.response?.status !== 401) {
+        console.log(`⚠️ ${symbol}: Polygon REST API error - ${error.message}`);
+      }
       return null;
     }
   }
