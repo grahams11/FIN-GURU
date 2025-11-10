@@ -995,6 +995,127 @@ class TastytradeService {
   getCachedQuote(symbol: string): QuoteData | null {
     return this.quoteCache.get(symbol) || null;
   }
+  
+  /**
+   * Fetch today's P/L (realized + unrealized day change)
+   */
+  async fetchTodayPnL(): Promise<{ realized: number; unrealized: number; total: number }> {
+    try {
+      await this.ensureAuthenticated();
+      
+      if (!this.accountNumber) {
+        console.error('❌ No account number available');
+        return { realized: 0, unrealized: 0, total: 0 };
+      }
+
+      // 1. Calculate unrealized day P/L from open positions
+      const positions = await this.apiClient.get(`/accounts/${this.accountNumber}/positions`);
+      let unrealizedDayPnL = 0;
+      
+      if (positions.data && positions.data.data && positions.data.data.items) {
+        positions.data.data.items.forEach((pos: any) => {
+          const closePrice = parseFloat(pos['close-price'] || 0);
+          const yesterdayClose = parseFloat(pos['average-daily-market-close-price'] || 0);
+          const quantity = parseFloat(pos.quantity || 0);
+          const multiplier = parseFloat(pos.multiplier || 1);
+          
+          if (closePrice > 0 && yesterdayClose > 0) {
+            const dayChange = (closePrice - yesterdayClose) * quantity * multiplier;
+            unrealizedDayPnL += dayChange;
+          }
+        });
+      }
+
+      // 2. Calculate realized P/L from today's closed positions
+      // Get all transactions and build cost basis
+      const allTxResponse = await this.apiClient.get(`/accounts/${this.accountNumber}/transactions`, {
+        params: {
+          'per-page': 250,
+          'sort': 'Desc'
+        }
+      });
+      
+      // Build cost basis map: symbol -> { totalCost, totalQuantity }
+      const costBasis = new Map<string, { totalCost: number; totalQuantity: number }>();
+      
+      if (allTxResponse.data && allTxResponse.data.data && allTxResponse.data.data.items) {
+        allTxResponse.data.data.items.forEach((tx: any) => {
+          const symbol = tx.symbol;
+          const subType = tx['transaction-sub-type'];
+          const netValue = parseFloat(tx['net-value'] || 0);
+          const quantity = Math.abs(parseFloat(tx.quantity || 0));
+          
+          if (subType === 'Buy to Open' || subType === 'Sell to Open') {
+            if (!costBasis.has(symbol)) {
+              costBasis.set(symbol, { totalCost: 0, totalQuantity: 0 });
+            }
+            const basis = costBasis.get(symbol)!;
+            
+            if (subType === 'Buy to Open') {
+              // Debit: we paid this amount
+              basis.totalCost += netValue;
+              basis.totalQuantity += quantity;
+            } else {
+              // Sell to Open: credit (short position)
+              basis.totalCost -= netValue;
+              basis.totalQuantity += quantity;
+            }
+          }
+        });
+      }
+
+      // 3. Calculate realized P/L from today's closing transactions
+      const today = new Date().toISOString().split('T')[0];
+      const todayTxResponse = await this.apiClient.get(`/accounts/${this.accountNumber}/transactions`, {
+        params: {
+          'start-date': today,
+          'per-page': 100
+        }
+      });
+      
+      let realizedDayPnL = 0;
+      
+      if (todayTxResponse.data && todayTxResponse.data.data && todayTxResponse.data.data.items) {
+        todayTxResponse.data.data.items.forEach((tx: any) => {
+          const subType = tx['transaction-sub-type'];
+          
+          if (subType === 'Sell to Close' || subType === 'Buy to Close') {
+            const symbol = tx.symbol;
+            const netValue = parseFloat(tx['net-value'] || 0);
+            const quantity = Math.abs(parseFloat(tx.quantity || 0));
+            
+            const basis = costBasis.get(symbol);
+            
+            if (basis && basis.totalQuantity > 0) {
+              // Calculate cost per contract
+              const costPerContract = basis.totalCost / basis.totalQuantity;
+              const costOfClosedPosition = costPerContract * quantity;
+              
+              if (subType === 'Sell to Close') {
+                // We sold (closed long): P/L = proceeds - cost
+                realizedDayPnL += (netValue - costOfClosedPosition);
+              } else {
+                // Buy to Close (closed short): P/L = cost - buy price
+                realizedDayPnL += (costOfClosedPosition - netValue);
+              }
+            }
+          }
+        });
+      }
+      
+      const total = realizedDayPnL + unrealizedDayPnL;
+      console.log(`📊 Today's P/L: Realized=${realizedDayPnL.toFixed(2)}, Unrealized=${unrealizedDayPnL.toFixed(2)}, Total=${total.toFixed(2)}`);
+      
+      return {
+        realized: realizedDayPnL,
+        unrealized: unrealizedDayPnL,
+        total
+      };
+    } catch (error: any) {
+      console.error('❌ Error fetching today P/L:', error.response?.data || error.message);
+      return { realized: 0, unrealized: 0, total: 0 };
+    }
+  }
 }
 
 // Export singleton instance

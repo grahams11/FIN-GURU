@@ -813,6 +813,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get today's P/L (realized + unrealized)
+  app.get('/api/portfolio/pnl-day', async (req, res) => {
+    try {
+      const pnl = await tastytradeService.fetchTodayPnL();
+      res.json(pnl);
+    } catch (error: any) {
+      console.error('Error fetching today P/L:', error);
+      res.status(500).json({ message: 'Failed to fetch P/L' });
+    }
+  });
+
   // Get full portfolio analysis with exit recommendations
   app.get('/api/portfolio/analysis', async (req, res) => {
     try {
