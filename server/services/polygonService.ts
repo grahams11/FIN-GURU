@@ -447,12 +447,12 @@ class PolygonService {
 
       // Use Polygon REST API for real-time NBBO (National Best Bid and Offer)
       // Options Advanced plan includes access to stock quotes
-      // Using Authorization Bearer header (recommended method)
+      // Using query parameter authentication (Polygon's standard method)
       const response = await axios.get(
         `https://api.polygon.io/v2/last/nbbo/${symbol}`,
         {
-          headers: {
-            'Authorization': `Bearer ${this.apiKey}`
+          params: {
+            apiKey: this.apiKey
           },
           timeout: 5000
         }
