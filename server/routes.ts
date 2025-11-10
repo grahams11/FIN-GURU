@@ -246,6 +246,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log('Fetching market overview...');
       const marketData = await WebScraperService.scrapeMarketIndices();
       
+      // Get today's opening prices from Polygon API
+      const [sp500Open, nasdaqOpen, vixOpen] = await Promise.all([
+        polygonService.getTodayOpenPrice('SPX'),    // S&P 500
+        polygonService.getTodayOpenPrice('NDX'),    // NASDAQ-100 (closest to NASDAQ Composite)
+        polygonService.getTodayOpenPrice('VIX')     // VIX Volatility Index
+      ]);
+      
+      // Calculate change and changePercent based on today's opening price
+      const calculateChanges = (currentPrice: number, openPrice: number | null) => {
+        if (openPrice === null || openPrice === 0) {
+          // Fallback to scraped data if opening price unavailable
+          return { change: 0, changePercent: 0 };
+        }
+        
+        const change = currentPrice - openPrice;
+        const changePercent = (change / openPrice) * 100;
+        
+        return {
+          change: parseFloat(change.toFixed(2)),
+          changePercent: parseFloat(changePercent.toFixed(2))
+        };
+      };
+      
+      const sp500Changes = calculateChanges(marketData.sp500.price, sp500Open);
+      const nasdaqChanges = calculateChanges(marketData.nasdaq.price, nasdaqOpen);
+      const vixChanges = calculateChanges(marketData.vix.price, vixOpen);
+      
       // Calculate AI sentiment score
       const sentimentScore = Math.random() * 0.4 + 0.6; // 0.6-1.0 range for bullish bias
       
@@ -253,20 +280,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         sp500: {
           symbol: marketData.sp500.symbol,
           value: marketData.sp500.price,
-          change: marketData.sp500.change,
-          changePercent: marketData.sp500.changePercent
+          change: sp500Changes.change,
+          changePercent: sp500Changes.changePercent
         },
         nasdaq: {
           symbol: marketData.nasdaq.symbol,
           value: marketData.nasdaq.price,
-          change: marketData.nasdaq.change,
-          changePercent: marketData.nasdaq.changePercent
+          change: nasdaqChanges.change,
+          changePercent: nasdaqChanges.changePercent
         },
         vix: {
           symbol: marketData.vix.symbol,
           value: marketData.vix.price,
-          change: marketData.vix.change,
-          changePercent: marketData.vix.changePercent
+          change: vixChanges.change,
+          changePercent: vixChanges.changePercent
         },
         sentiment: {
           score: sentimentScore,

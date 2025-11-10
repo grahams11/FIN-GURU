@@ -774,6 +774,58 @@ class PolygonService {
   }
 
   /**
+   * Get today's opening price for a symbol
+   * Uses Polygon REST API to get today's or previous day's aggregate
+   * 
+   * @param symbol Stock symbol (without I: prefix - e.g., 'SPX', 'NDX', 'VIX')
+   * @returns Opening price or null if unavailable
+   */
+  async getTodayOpenPrice(symbol: string): Promise<number | null> {
+    try {
+      // Get date range (today and previous 5 trading days for fallback)
+      const today = new Date();
+      const prevDays = new Date(today);
+      prevDays.setDate(prevDays.getDate() - 5); // Go back 5 days to account for weekends
+      
+      const todayStr = today.toISOString().split('T')[0];
+      const prevStr = prevDays.toISOString().split('T')[0];
+      
+      // For indices, try both with and without I: prefix
+      const symbols = [
+        `I:${symbol}`,  // Try with I: prefix first (standard for indices)
+        symbol          // Fallback to symbol without prefix
+      ];
+      
+      for (const testSymbol of symbols) {
+        try {
+          const url = `https://api.polygon.io/v2/aggs/ticker/${testSymbol}/range/1/day/${prevStr}/${todayStr}?adjusted=true&limit=5&sort=desc&apiKey=${this.apiKey}`;
+          
+          const response = await axios.get(url, {
+            timeout: 5000
+          });
+
+          if (response.data?.results && Array.isArray(response.data.results) && response.data.results.length > 0) {
+            // Get the most recent bar (should be today or last trading day)
+            const recentBar = response.data.results[0];
+            console.log(`${symbol}: Using open price = $${recentBar.o.toFixed(2)} from ${testSymbol}`);
+            return recentBar.o; // Opening price of most recent trading session
+          }
+        } catch (innerError: any) {
+          // Try next symbol format
+          continue;
+        }
+      }
+
+      console.warn(`${symbol}: No opening price data available (all formats tried)`);
+      return null;
+
+    } catch (error: any) {
+      console.warn(`${symbol}: Failed to fetch opening price:`, error.message);
+      return null;
+    }
+  }
+
+  /**
    * Close WebSocket connection
    */
   async close(): Promise<void> {

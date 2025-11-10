@@ -2,6 +2,21 @@
 
 This project is an AI-powered options trading dashboard designed to provide market analysis, trade recommendations, and portfolio management. It leverages web scraping and AI algorithms to identify high-confidence options trading opportunities, complete with calculated Greeks and risk metrics. The system aims to empower users with data-driven insights for profitable options trading.
 
+# Recent Changes
+
+## Dashboard Market Overview - Day-Based Changes (November 10, 2025)
+- **Feature**: S&P 500, NASDAQ, and VIX now display % and point changes based on today's opening price (not previous close)
+- **Implementation**: Uses Polygon API to fetch today's opening price via aggregates endpoint  
+- **Calculation**: Change = Current Price - Today's Open | Change% = (Change / Today's Open) × 100
+- **Fallback**: When opening price unavailable (weekends, API access limits), displays 0% change
+- **Live**: Feature displays accurate intraday changes during market hours
+
+## Fibonacci Retracement - 4-Hour Chart Upgrade (November 10, 2025)
+- **Upgrade**: Changed from daily bars to 4-hour bars for Fibonacci calculations
+- **Data Volume**: ~360 four-hour candles (60 days) vs ~60 daily candles  
+- **Precision**: More granular price action analysis for better entry point validation
+- **Technical Levels**: 0.618 and 0.707 Fibonacci retracement levels with bounce detection
+
 # User Preferences
 
 Preferred communication style: Simple, everyday language.
