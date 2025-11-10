@@ -501,12 +501,19 @@ export class AIAnalysisService {
         strategyType
       );
 
-      // Calculate ROI
+      // Calculate ROI (Return on Investment = Profit / Total Cost × 100)
       const totalCost = optionsStrategy.totalCost;
+      
+      // Safety check: skip if total cost is invalid
+      if (!totalCost || totalCost <= 0) {
+        console.warn(`${ticker}: Invalid total cost $${totalCost}, skipping trade`);
+        return null;
+      }
+      
       const contractMultiplier = this.getContractMultiplier(ticker);
       const totalExitValue = optionsStrategy.contracts * optionsStrategy.exitPrice * contractMultiplier;
-      const profit = totalExitValue - totalCost;
-      const projectedROI = (profit / totalCost) * 100;
+      const profit = totalExitValue - totalCost; // Estimated profit in dollars
+      const projectedROI = (profit / totalCost) * 100; // ROI percentage
 
       // Filter: Only elite opportunities with 100%+ ROI potential
       if (projectedROI < 100) {
@@ -656,12 +663,19 @@ export class AIAnalysisService {
         strategyType
       );
       
-      // Calculate ROI using correct contract multiplier
+      // Calculate ROI (Return on Investment = Profit / Total Cost × 100)
       const totalCost = optionsStrategy.totalCost;
+      
+      // Safety check: skip if total cost is invalid
+      if (!totalCost || totalCost <= 0) {
+        console.warn(`${ticker}: Invalid total cost $${totalCost}, skipping day trade`);
+        return null;
+      }
+      
       const contractMultiplier = this.getContractMultiplier(ticker);
       const totalExitValue = optionsStrategy.contracts * optionsStrategy.exitPrice * contractMultiplier;
-      const profit = totalExitValue - totalCost;
-      const projectedROI = (profit / totalCost) * 100;
+      const profit = totalExitValue - totalCost; // Estimated profit in dollars
+      const projectedROI = (profit / totalCost) * 100; // ROI percentage
       
       // Day trading confidence (higher for strong VIX+RSI signals)
       let confidence = 0.70; // Base day trading confidence
