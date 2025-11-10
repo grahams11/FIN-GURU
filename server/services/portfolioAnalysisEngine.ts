@@ -1,8 +1,9 @@
 import type { PortfolioPosition, TradeRecommendation } from '@shared/schema';
 import { ExitAnalysisService } from './exitAnalysis';
+import { grokAI, type GrokEnhancement } from './grokAIService';
 
 /**
- * Internal AI Analysis Engine
+ * Hybrid AI Analysis Engine (Internal + Grok)
  * 
  * Compiles all existing trading algorithms into a unified recommendation system:
  * - RSI (14-period smoothed) for momentum analysis
@@ -73,7 +74,8 @@ export class PortfolioAnalysisEngine {
       marketCondition
     );
 
-    return {
+    // Base analysis from internal AI
+    const baseAnalysis: AIPortfolioAnalysis = {
       timestamp: new Date().toISOString(),
       accountValue,
       totalUnrealizedPnL,
@@ -85,8 +87,35 @@ export class PortfolioAnalysisEngine {
       goalProgress,
       recommendations,
       actionableInsights,
-      positionAnalyses
+      positionAnalyses,
+      grokEnhancement: null
     };
+
+    // Enhance with Grok AI when:
+    // 1. Risk level is HIGH or CRITICAL
+    // 2. Have urgent exit recommendations
+    // 3. Major rebalancing decisions needed
+    const needsGrokEnhancement = 
+      overallRisk === 'HIGH' || 
+      overallRisk === 'CRITICAL' ||
+      recommendations.some(r => r.urgency === 'HIGH' && r.type === 'EXIT_POSITION') ||
+      recommendations.some(r => r.type === 'REBALANCE');
+
+    if (needsGrokEnhancement) {
+      console.log('🤖 Consulting Grok AI for portfolio enhancement...');
+      const grokEnhancement = await grokAI.enhancePortfolioAnalysis(
+        baseAnalysis,
+        positions,
+        dashboardOpportunities
+      );
+      
+      if (grokEnhancement) {
+        baseAnalysis.grokEnhancement = grokEnhancement;
+        console.log(`✅ Grok AI enhanced analysis (confidence: ${(grokEnhancement.confidence * 100).toFixed(0)}%)`);
+      }
+    }
+
+    return baseAnalysis;
   }
 
   /**
@@ -389,6 +418,7 @@ export interface AIPortfolioAnalysis {
   recommendations: StrategicRecommendation[];
   actionableInsights: ActionableInsight[];
   positionAnalyses: any[];
+  grokEnhancement: GrokEnhancement | null;
 }
 
 interface MarketCondition {
