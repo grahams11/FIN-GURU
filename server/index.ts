@@ -2,6 +2,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { tastytradeService } from "./services/tastytradeService";
+import { polygonService } from "./services/polygonService";
 
 const app = express();
 app.use(express.json());
@@ -38,9 +39,20 @@ app.use((req, res, next) => {
 });
 
 (async () => {
-  // Initialize Tastytrade service on startup
+  // Initialize Polygon service on startup (primary data source)
+  polygonService.initialize().then(success => {
+    if (success) {
+      console.log('✅ Polygon WebSocket service ready - unlimited live data enabled');
+    } else {
+      console.warn('⚠️ Polygon initialization failed, will use Tastytrade as fallback');
+    }
+  }).catch(err => {
+    console.warn('⚠️ Polygon initialization failed:', err.message);
+  });
+
+  // Initialize Tastytrade service on startup (fallback data source)
   tastytradeService.init().catch(err => {
-    console.warn('⚠️ Tastytrade initialization failed, will use fallback sources:', err.message);
+    console.warn('⚠️ Tastytrade initialization failed, will use other fallback sources:', err.message);
   });
   
   const server = await registerRoutes(app);

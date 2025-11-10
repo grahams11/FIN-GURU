@@ -45,6 +45,14 @@ interface PolygonAggregateMessage {
 
 type PolygonMessage = PolygonTradeMessage | PolygonQuoteMessage | PolygonAggregateMessage | { ev: 'status', status: string, message: string };
 
+enum ConnectionStatus {
+  DISCONNECTED = 'disconnected',
+  CONNECTING = 'connecting',
+  CONNECTED = 'connected',
+  AUTHENTICATED = 'authenticated',
+  ERROR = 'error'
+}
+
 class PolygonService {
   private ws: WebSocket | null = null;
   private quoteCache: Map<string, QuoteData> = new Map();
@@ -54,6 +62,12 @@ class PolygonService {
   private maxReconnectAttempts = 5;
   private reconnectDelay = 5000; // 5 seconds
   private apiKey: string;
+  
+  // Health tracking
+  private lastMessageTimestamp: number = 0;
+  private lastHeartbeatTimestamp: number = 0;
+  private connectionStatus: ConnectionStatus = ConnectionStatus.DISCONNECTED;
+  private quoteFreshnessThreshold = 10000; // 10 seconds - quotes older than this are considered stale
 
   constructor() {
     this.apiKey = process.env.POLYGON_API_KEY || '';
@@ -219,6 +233,9 @@ class PolygonService {
    */
   private handleMessage(data: WebSocket.Data): void {
     try {
+      // Update last message timestamp for health tracking
+      this.lastMessageTimestamp = Date.now();
+      
       const messages = JSON.parse(data.toString()) as PolygonMessage[];
       
       if (!Array.isArray(messages)) {
@@ -245,12 +262,17 @@ class PolygonService {
    * Handle status messages (auth success, subscription confirmations, etc.)
    */
   private handleStatusMessage(message: any): void {
+    // Update heartbeat timestamp
+    this.lastHeartbeatTimestamp = Date.now();
+    
     if (message.status === 'auth_success') {
       console.log('✅ Polygon authentication successful');
+      this.connectionStatus = ConnectionStatus.AUTHENTICATED;
     } else if (message.status === 'success') {
       console.log(`✅ Polygon: ${message.message}`);
     } else if (message.status === 'error') {
       console.error(`❌ Polygon error: ${message.message}`);
+      this.connectionStatus = ConnectionStatus.ERROR;
     } else {
       console.log(`📨 Polygon status: ${message.status} - ${message.message}`);
     }
@@ -335,10 +357,23 @@ class PolygonService {
   }
 
   /**
-   * Get cached quote data for a symbol
+   * Get cached quote data for a symbol (with freshness check)
    */
   getQuote(symbol: string): QuoteData | null {
-    return this.quoteCache.get(symbol) || null;
+    const quote = this.quoteCache.get(symbol);
+    
+    if (!quote) {
+      return null;
+    }
+    
+    // Check if quote is fresh (within threshold)
+    const now = Date.now();
+    if (now - quote.timestamp > this.quoteFreshnessThreshold) {
+      console.warn(`⚠️ Polygon quote for ${symbol} is stale (${Math.round((now - quote.timestamp) / 1000)}s old)`);
+      return null; // Return null for stale quotes so SSE can fall back
+    }
+    
+    return quote;
   }
 
   /**
@@ -353,6 +388,43 @@ class PolygonService {
    */
   isServiceConnected(): boolean {
     return this.isConnected && this.ws !== null && this.ws.readyState === WebSocket.OPEN;
+  }
+
+  /**
+   * Check if service is healthy (connected + receiving data)
+   */
+  isHealthy(): boolean {
+    const now = Date.now();
+    const connected = this.isServiceConnected();
+    const authenticated = this.connectionStatus === ConnectionStatus.AUTHENTICATED;
+    const receivingData = this.lastMessageTimestamp > 0 && (now - this.lastMessageTimestamp) < 30000; // 30 seconds
+    
+    return connected && authenticated && receivingData;
+  }
+
+  /**
+   * Get health metrics
+   */
+  getHealth(): {
+    status: ConnectionStatus;
+    connected: boolean;
+    lastMessageAge: number;
+    lastHeartbeatAge: number;
+    subscribedSymbols: number;
+    cachedQuotes: number;
+    reconnectAttempts: number;
+  } {
+    const now = Date.now();
+    
+    return {
+      status: this.connectionStatus,
+      connected: this.isServiceConnected(),
+      lastMessageAge: this.lastMessageTimestamp ? now - this.lastMessageTimestamp : -1,
+      lastHeartbeatAge: this.lastHeartbeatTimestamp ? now - this.lastHeartbeatTimestamp : -1,
+      subscribedSymbols: this.subscribedSymbols.size,
+      cachedQuotes: this.quoteCache.size,
+      reconnectAttempts: this.reconnectAttempts
+    };
   }
 
   /**
