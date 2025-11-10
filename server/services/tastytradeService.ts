@@ -820,3 +820,4 @@ class TastytradeService {
 
 // Export singleton instance
 export const tastytradeService = new TastytradeService();
+export default tastytradeService;
