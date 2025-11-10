@@ -18,16 +18,25 @@ Preferred communication style: Simple, everyday language.
 
 ## Real-Time Data Streaming Architecture
 - **Server-Side Flow**: Polygon WebSocket (primary) + Tastytrade WebSocket (fallback) → In-memory cache updates → SSE endpoint polls cache every 1 second → Streams to frontend clients
-- **Client-Side Flow**: EventSource connects to `/api/quotes/stream` → `useLiveQuotes` hook consumes stream → Dashboard extracts symbols from trades → TradeCard components display live prices
-- **SSE Endpoint**: `/api/quotes/stream?symbols=AAPL,TSLA,NVDA` streams JSON quote updates with bid/ask/price/volume data
+- **Client-Side Flow**: EventSource connects to `/api/quotes/stream` → `useLiveQuotes` hook consumes stream → Dashboard extracts symbols from trades → TradeCard components display live prices and Greeks
+- **SSE Endpoint**: `/api/quotes/stream` dynamically fetches current top trades and streams:
+  - Live stock quotes (bid/ask/price/volume)
+  - **Real-time Greeks** (delta, gamma, theta, vega, rho) calculated every second using backend Black-Scholes model
+  - No query parameters needed - endpoint auto-discovers active trade symbols from storage
+- **Live Greeks Implementation**:
+  - **Backend Calculation**: Black-Scholes model in `server/services/financialCalculations.ts` ensures single source of truth
+  - **Real-Time Recalculation**: Greeks update every 1 second based on live stock prices from WebSocket feeds
+  - **Race Condition Prevention**: SSE endpoint uses single `storage.getTopTrades()` call for both symbols and trade metadata
+  - **Data Consistency**: Symbols array and tradeMap always synchronized (no mismatches)
+  - **SSE Payload**: Each update includes `symbol`, `price`, `greeks` (delta, gamma, theta, vega, rho), `bid`, `ask`, `volume`
 - **Multi-Tier Fallback System**: 
   - Primary: Polygon WebSocket real-time data (sub-second latency, 100% market coverage)
   - Secondary: Tastytrade DXLink WebSocket real-time data (sub-second latency)
   - Final: Web scraper for market indices not in WebSocket caches (30-second cached updates)
   - Ensures all trade symbols get live updates with multiple redundant sources
-- **Visual Indicators**: Green pulsing dot next to stock prices indicates live data active, falls back to stored prices when disconnected
-- **Connection Management**: Automatic SSE reconnection on disconnect, dynamic symbol subscription based on current trades
-- **Performance**: 1-second polling interval provides near real-time updates without overwhelming the frontend
+- **Visual Indicators**: Green pulsing dot next to stock prices and Greeks indicates live data active, falls back to stored values when disconnected
+- **Connection Management**: Automatic SSE reconnection on disconnect, dynamic symbol subscription based on current active trades
+- **Performance**: 1-second polling interval provides near real-time Greeks and price updates without overwhelming the frontend
 
 ## Backend Architecture
 - **Runtime**: Node.js with Express.js server
