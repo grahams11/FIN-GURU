@@ -939,11 +939,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Get real positions from Tastytrade
       const openPositions = await tastytradeService.fetchPositions();
       
-      // Get current prices from quote caches
+      // Get current prices - use position.currentPrice from Tastytrade for options
       const currentPrices = new Map<string, number>();
       
       for (const position of openPositions) {
-        // Try Polygon first
+        // For options, Tastytrade already provides the correct option premium as currentPrice
+        if (position.positionType === 'options' && position.currentPrice > 0) {
+          currentPrices.set(position.ticker, position.currentPrice);
+          continue;
+        }
+        
+        // For stocks, get live stock quote
         const polygonQuote = await polygonService.getCachedQuote(position.ticker);
         if (polygonQuote && polygonQuote.lastPrice > 0) {
           currentPrices.set(position.ticker, polygonQuote.lastPrice);
