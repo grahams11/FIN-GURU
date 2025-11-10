@@ -385,11 +385,11 @@ class PolygonService {
   }
 
   /**
-   * Get cached quote for SSE streaming (matches interface used by Tastytrade)
-   * Returns fresh cached data or triggers REST API fetch
+   * Get cached quote for SSE streaming from Polygon WebSocket
+   * Options Advanced plan provides real-time stock data via WebSocket
    */
   async getCachedQuote(symbol: string): Promise<{ lastPrice: number; bidPrice: number; askPrice: number; volume: number } | null> {
-    // 1. Check if quote is in cache and fresh (<=10s)
+    // Get quote from WebSocket cache (fresh data within threshold)
     const cachedQuote = this.getQuote(symbol);
     if (cachedQuote) {
       return {
@@ -400,97 +400,32 @@ class PolygonService {
       };
     }
 
-    // 2. If no fresh cache, try REST API to fetch current quote
-    const stockQuote = await this.getStockQuote(symbol);
-    if (stockQuote) {
-      // getStockQuote already updates the cache, so fetch from cache again
-      const updatedQuote = this.getQuote(symbol);
-      if (updatedQuote) {
-        return {
-          lastPrice: updatedQuote.lastPrice,
-          bidPrice: updatedQuote.bidPrice,
-          askPrice: updatedQuote.askPrice,
-          volume: updatedQuote.volume || 0
-        };
-      }
-    }
-
-    // 3. No data available from either source
+    // No WebSocket data available - return null to let fallback sources handle it
     return null;
   }
 
   /**
-   * Get real-time stock quote using REST API (fallback when WebSocket cache is stale)
-   * Options Advanced plan includes stock NBBO data via REST API
+   * Get real-time stock quote from Polygon WebSocket cache
+   * Options Advanced plan provides stock data via WebSocket (not REST API)
    */
   async getStockQuote(symbol: string): Promise<{ price: number; changePercent: number } | null> {
-    try {
-      // First check cache for fresh data
-      const cachedQuote = this.getQuote(symbol);
-      if (cachedQuote) {
-        console.log(`✅ ${symbol}: Using Polygon WebSocket cache - $${cachedQuote.lastPrice.toFixed(2)}`);
-        return {
-          price: cachedQuote.lastPrice,
-          changePercent: 0 // Polygon doesn't provide changePercent easily
-        };
-      }
-
-      // Fallback to REST API if cache is stale or empty
-      if (!this.apiKey) {
-        return null;
-      }
-
-      // Skip market index symbols (^GSPC, ^VIX, etc.) - Polygon doesn't support these
-      if (symbol.includes('^') || symbol.includes('%5E')) {
-        return null;
-      }
-
-      // Use Polygon REST API for real-time NBBO (National Best Bid and Offer)
-      // Options Advanced plan includes access to stock quotes
-      // Using query parameter authentication (Polygon's standard method)
-      const response = await axios.get(
-        `https://api.polygon.io/v2/last/nbbo/${symbol}`,
-        {
-          params: {
-            apiKey: this.apiKey
-          },
-          timeout: 5000
-        }
-      );
-
-      if (response.data?.status === 'OK' && response.data?.results) {
-        const result = response.data.results;
-        // Use midpoint of bid/ask as price
-        const price = result.P ? result.P : (result.p + result.P) / 2;
-        
-        console.log(`✅ ${symbol}: Using Polygon REST API - $${price.toFixed(2)}`);
-        
-        // Cache the result for future use
-        this.quoteCache.set(symbol, {
-          symbol,
-          bidPrice: result.p || price,
-          askPrice: result.P || price,
-          lastPrice: price,
-          markPrice: price,
-          volume: result.s || 0,
-          timestamp: Date.now()
-        });
-
-        return {
-          price,
-          changePercent: 0
-        };
-      }
-
-      return null;
-    } catch (error: any) {
-      // Silently handle 401 errors - Options Advanced plan doesn't include stock REST API access
-      // This is expected behavior, not an error. Fallback to Tastytrade/web scraping will handle it.
-      if (error.response?.status !== 401) {
-        console.log(`⚠️ ${symbol}: Polygon REST API error - ${error.message}`);
-      }
+    // Skip market index symbols (^GSPC, ^VIX, etc.) - Polygon doesn't support these
+    if (symbol.includes('^') || symbol.includes('%5E')) {
       return null;
     }
+
+    // Get quote from WebSocket cache
+    const cachedQuote = this.getQuote(symbol);
+    if (cachedQuote) {
+      console.log(`✅ ${symbol}: Using Polygon WebSocket - $${cachedQuote.lastPrice.toFixed(2)}`);
+      return {
+        price: cachedQuote.lastPrice,
+        changePercent: 0 // WebSocket doesn't provide changePercent
+      };
+    }
+
+    // No WebSocket data available - return null to let fallback sources handle it
+    return null;
   }
 
   /**
