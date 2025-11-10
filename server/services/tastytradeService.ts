@@ -824,6 +824,137 @@ class TastytradeService {
   }
 
   /**
+   * Fetch real account positions from Tastytrade
+   */
+  async fetchPositions(): Promise<any[]> {
+    try {
+      await this.ensureAuthenticated();
+      
+      if (!this.accountNumber) {
+        console.error('❌ No account number available');
+        return [];
+      }
+
+      console.log(`📊 Fetching positions for account ${this.accountNumber}...`);
+      
+      const response = await this.apiClient.get(`/accounts/${this.accountNumber}/positions`);
+      
+      if (!response.data || !response.data.data || !response.data.data.items) {
+        console.log('⚠️ No positions found or invalid response');
+        return [];
+      }
+
+      const positions = response.data.data.items;
+      console.log(`✅ Found ${positions.length} position(s)`);
+
+      // Map Tastytrade positions to our PortfolioPosition schema
+      const normalizedPositions = positions.map((pos: any) => {
+        const isOption = pos['instrument-type'] === 'Equity Option';
+        const isFuture = pos['instrument-type'] === 'Future Option' || pos['instrument-type'] === 'Future';
+        
+        // Parse option symbol (e.g., "SPY 250117C500" -> strike: 500, expiry: 2025-01-17, type: CALL)
+        let metadata: any = null;
+        let ticker = pos['underlying-symbol'] || pos.symbol;
+        
+        if (isOption || isFuture) {
+          const parsed = this.parseOptionSymbol(pos.symbol);
+          if (parsed) {
+            ticker = parsed.underlying;
+            metadata = {
+              optionType: parsed.optionType,
+              strike: parsed.strike,
+              expiryDate: parsed.expiry,
+            };
+          }
+        }
+
+        // Calculate current price from Tastytrade data or use cached quote
+        const currentPrice = pos['close-price'] || pos['average-open-price'] || 0;
+        const avgCost = pos['average-open-price'] || 0;
+        const quantity = Math.abs(parseFloat(pos.quantity || '0'));
+        const multiplier = pos.multiplier || 1;
+        
+        // Calculate P&L with contract multiplier
+        const totalCost = avgCost * quantity * multiplier;
+        const currentValue = currentPrice * quantity * multiplier;
+        const unrealizedPnL = currentValue - totalCost;
+
+        return {
+          id: `${pos.symbol}-${pos['account-number']}`,
+          ticker,
+          positionType: isOption || isFuture ? 'options' : 'stock',
+          quantity,
+          avgCost,
+          currentPrice,
+          unrealizedPnL,
+          realizedPnL: parseFloat(pos['realized-today'] || '0'),
+          openDate: pos['created-at'] ? new Date(pos['created-at']) : new Date(),
+          status: 'open',
+          metadata,
+          // Additional Tastytrade-specific data
+          tastytradeData: {
+            symbol: pos.symbol,
+            instrumentType: pos['instrument-type'],
+            quantityDirection: pos['quantity-direction'],
+            multiplier,
+            costEffect: pos['cost-effect'],
+            expiresAt: pos['expires-at'],
+          },
+        };
+      });
+
+      return normalizedPositions;
+    } catch (error: any) {
+      console.error('❌ Error fetching positions:', error.response?.data || error.message);
+      return [];
+    }
+  }
+
+  /**
+   * Parse option symbol from Tastytrade format
+   * Example: "SPY 250117C500" -> {underlying: "SPY", expiry: "2025-01-17", optionType: "CALL", strike: 500}
+   */
+  private parseOptionSymbol(symbol: string): { underlying: string; expiry: string; optionType: 'CALL' | 'PUT'; strike: number } | null {
+    try {
+      // Format: "SYMBOL YYMMDDCSTRIKE" or "SYMBOL YYMMDDPSTRIKE"
+      // Example: "SPY 250117C500" = SPY, Jan 17 2025, CALL, $500 strike
+      const match = symbol.match(/^([A-Z]+)\s+(\d{6})([CP])(\d+\.?\d*)$/);
+      
+      if (!match) {
+        console.warn(`⚠️ Could not parse option symbol: ${symbol}`);
+        return null;
+      }
+
+      const [, underlying, dateStr, optionChar, strikeStr] = match;
+      
+      // Parse date: YYMMDD
+      const year = 2000 + parseInt(dateStr.substring(0, 2));
+      const month = parseInt(dateStr.substring(2, 4));
+      const day = parseInt(dateStr.substring(4, 6));
+      const expiry = `${year}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
+      
+      // Parse option type
+      const optionType = optionChar === 'C' ? 'CALL' : 'PUT';
+      
+      // Parse strike (divide by 1000 if needed for proper decimal)
+      let strike = parseFloat(strikeStr);
+      if (strike > 10000) {
+        strike = strike / 1000; // Handle strikes like "500000" -> 500.00
+      }
+
+      return {
+        underlying,
+        expiry,
+        optionType,
+        strike,
+      };
+    } catch (error: any) {
+      console.error(`❌ Error parsing option symbol ${symbol}:`, error.message);
+      return null;
+    }
+  }
+
+  /**
    * Validate session and re-authenticate if needed
    */
   async ensureAuthenticated(): Promise<boolean> {
