@@ -47,23 +47,23 @@ Preferred communication style: Simple, everyday language.
 
 ## Core Business Logic
 
-### Day Trading System (Always Top 2 Plays)
-- **Instruments**: SPX (S&P 500 Index) and MNQ (Micro E-mini NASDAQ-100 Futures) - professional day trading instruments
+### Day Trading System (Always Top 1 Play)
+- **Instruments**: SPX (S&P 500 Index) only - MNQ removed due to lack of reliable live data
 - **VIX + RSI Formula**: 
   - **SELL Signal (PUT)**: VIX > 18 AND RSI > 70 (overbought) → Bearish day trade
   - **BUY Signal (CALL)**: VIX ≤ 18 OR RSI < 30 (oversold) → Bullish day trade
   - **Moderate Signals**: VIX > 18 but RSI < 70 → Elevated volatility bearish bias
-- **Expiration Dates**: Weekly Friday expirations only (SPX/MNQ have weekly options that expire every Friday at 4:00 PM ET)
+- **Expiration Dates**: Weekly Friday expirations only (SPX has weekly options that expire every Friday at 4:00 PM ET)
   - Monday-Thursday trades → Expire this Friday
   - Friday-Sunday trades → Expire next Friday
 - **Timeframe**: 1-7 days until Friday expiration (dynamic based on current day of week)
 - **Strike Selection**: ATM or very close (0.5% OTM) for maximum delta exposure
 - **ROI Targets**: 50-150% returns based on VIX+RSI signal strength
 - **Confidence Scoring**: Higher confidence for strong VIX+RSI alignment (extreme readings)
-- **Trade Budget**: $2000 maximum per day trade (higher budget for expensive SPX/MNQ options)
-- **Contract Multipliers**: SPX=100, MNQ=2 (affects total cost and ROI calculations)
-- **Budget Enforcement**: Day trading instruments always receive at least 1 contract even if cost exceeds $2000 (ensures SPX is included despite ~$16.5k per contract)
-- **Priority**: Day trading plays ALWAYS appear in positions #1 and #2
+- **Trade Budget**: $2000 maximum per day trade (higher budget for expensive SPX options)
+- **Contract Multipliers**: SPX=100 (affects total cost and ROI calculations)
+- **Budget Enforcement**: SPX always receives at least 1 contract even if cost exceeds $2000 (ensures inclusion despite ~$16.5k per contract)
+- **Priority**: SPX day trading play ALWAYS appears in position #1
 
 ### Elite Dual-Strategy Scanner (Positions 3-5)
 - **Stock Universe**: Only scans Tastytrade-supported symbols for real-time data accuracy:
@@ -96,8 +96,21 @@ Preferred communication style: Simple, everyday language.
 - **Neon Database**: Serverless PostgreSQL database with connection pooling via @neondatabase/serverless
 - **Drizzle ORM**: Type-safe database toolkit with PostgreSQL dialect support
 
-## Financial Data Sources
-- **Tastytrade API** (PRIMARY): Real-time market data via DXLink WebSocket streaming
+## Financial Data Sources (Data Source Hierarchy)
+
+**Priority Order**: Polygon → Tastytrade → Google Finance → MarketWatch
+
+- **Polygon/Massive.com** (PRIMARY): Real-time market data via WebSocket and REST API
+  - **Plan**: Options Advanced ($199/month) - Unlimited API calls, 5+ years historical data, 100% market coverage
+  - **WebSocket**: Real-time streaming via wss://socket.massive.com/options
+  - **REST API**: NBBO (National Best Bid and Offer) quotes for stocks via /v2/last/nbbo/{ticker}
+  - **Authentication**: API key authentication (POLYGON_API_KEY secret)
+  - **Features**: Bid/ask prices, last trade price, volume, real-time options data
+  - **Caching**: In-memory quote cache with 10-second freshness threshold
+  - **Coverage**: All US stocks and options with 100% market coverage
+  - **Connection Stability**: Automatic reconnection with 5 max retry attempts
+
+- **Tastytrade API** (FALLBACK): Real-time market data via DXLink WebSocket streaming
   - **Authentication**: OAuth-based login with session tokens (stored in TASTYTRADE_USERNAME and TASTYTRADE_PASSWORD secrets)
   - **DXLink WebSocket**: Persistent WebSocket connection to wss://tasty-openapi-ws.dxfeed.com/realtime
   - **Protocol Flow**: SETUP → AUTH → CHANNEL_REQUEST → FEED_SETUP → FEED_SUBSCRIPTION
@@ -107,17 +120,14 @@ Preferred communication style: Simple, everyday language.
   - **Connection Stability**: KEEPALIVE messages exchanged every 60 seconds to maintain connection
   - **API Endpoints**: Session login, account info, DXLink token retrieval
   - **Credentials**: Requires Tastytrade brokerage account (free sandbox available)
-  - **Limitations**: Free tier does NOT support MNQ futures quotes (MNQZ5 times out after 5s)
   - **SPX Support**: ✅ SPX index quotes work perfectly via Tastytrade (real-time data)
-- **Google Finance** (FALLBACK): Web scraping for market data when Tastytrade unavailable
+
+- **Google Finance** (FINAL FALLBACK): Web scraping for market data when both Polygon and Tastytrade unavailable
   - Web scraping for stock prices, ETFs, and market indices
   - Source for VIX (^VIX), S&P 500 (^GSPC), stocks, ETFs
   - Limitation: changePercent often returns 0% (markets closed/after hours) → Scanner uses RSI-only signals
-  - **MNQ Solution**: QQQ ETF × 41.2 conversion factor → $24,677.98 (99.6% accurate vs actual ~$24,787)
-    - Previous error: Used 34.3 factor → $20,610 (16.8% underpriced)
-    - Current accuracy: Within $109 of actual market price (0.4% error)
-    - Comprehensive logging: ⚠️ warnings clearly indicate when proxy is used vs live data
-- **MarketWatch** (FALLBACK): Secondary fallback for web scraping when Google Finance fails
+  
+- **MarketWatch** (FINAL FALLBACK): Secondary fallback for web scraping when all other sources fail
 
 ## Development Tools
 - **Replit Integration**: Development environment plugins for cartographer and dev banner

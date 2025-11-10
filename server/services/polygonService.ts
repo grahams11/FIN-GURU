@@ -409,6 +409,11 @@ class PolygonService {
         return null;
       }
 
+      // Skip market index symbols (^GSPC, ^VIX, etc.) - Polygon doesn't support these
+      if (symbol.includes('^') || symbol.includes('%5E')) {
+        return null;
+      }
+
       // Use Polygon REST API for real-time NBBO (National Best Bid and Offer)
       // Options Advanced plan includes access to stock quotes
       const response = await axios.get(
