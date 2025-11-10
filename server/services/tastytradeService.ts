@@ -25,6 +25,36 @@ interface QuoteData {
   rho?: number;
 }
 
+interface OptionGreeksData {
+  symbol: string;
+  premium: number;          // Theoretical option price
+  impliedVolatility: number;
+  greeks: {
+    delta: number;
+    gamma: number;
+    theta: number;
+    vega: number;
+    rho: number;
+  };
+  quote?: {
+    bidPrice: number;
+    askPrice: number;
+  };
+  timestamp: number;
+}
+
+interface OptionQuoteData {
+  premium: number;
+  impliedVolatility: number;
+  greeks: {
+    delta: number;
+    gamma: number;
+    theta: number;
+    vega: number;
+    rho: number;
+  };
+}
+
 interface DXLinkToken {
   token: string;
   'dxlink-url': string;
@@ -43,6 +73,9 @@ class TastytradeService {
   private dxlinkUrl: string | null = null;
   private ws: WebSocket | null = null;
   private quoteCache: Map<string, QuoteData> = new Map();
+  private optionsCache: Map<string, OptionGreeksData> = new Map();
+  private pendingGreeks: Map<string, { resolve: (data: OptionGreeksData) => void; reject: (error: Error) => void }> = new Map();
+  private subscribedSymbols: Set<string> = new Set();
   private isConnected = false;
 
   constructor() {
@@ -367,6 +400,61 @@ class TastytradeService {
           console.log(`📊 Processed ${tradesProcessed} trades`);
         }
       }
+
+      // Process Greeks events - each event has 11 fields
+      if (eventType === 'Greeks') {
+        const GREEKS_FIELD_COUNT = 11;
+        let i = 0;
+        let greeksProcessed = 0;
+        
+        while (i + GREEKS_FIELD_COUNT <= events.length) {
+          // Extract fields for Greeks event
+          const greeksType = events[i];        // "Greeks"
+          const symbol = events[i + 1];        // Symbol (e.g., ".SPX251114C06850000")
+          const price = events[i + 2];         // Theoretical option price (premium)
+          const volatility = events[i + 3];    // Implied volatility
+          const delta = events[i + 4];
+          const gamma = events[i + 5];
+          const theta = events[i + 6];
+          const rho = events[i + 7];
+          const vega = events[i + 8];
+          
+          if (greeksType === 'Greeks' && symbol && typeof price === 'number' && typeof volatility === 'number') {
+            const optionData: OptionGreeksData = {
+              symbol,
+              premium: price,
+              impliedVolatility: volatility,
+              greeks: {
+                delta: delta || 0,
+                gamma: gamma || 0,
+                theta: theta || 0,
+                vega: vega || 0,
+                rho: rho || 0,
+              },
+              timestamp: Date.now(),
+            };
+            
+            // Update cache
+            this.optionsCache.set(symbol, optionData);
+            
+            // Resolve pending promise if exists
+            const pending = this.pendingGreeks.get(symbol);
+            if (pending) {
+              pending.resolve(optionData);
+              this.pendingGreeks.delete(symbol);
+            }
+            
+            console.log(`✅ Option Greeks cached: ${symbol} - Premium $${price.toFixed(2)}, IV ${(volatility * 100).toFixed(1)}%, Delta ${delta.toFixed(4)}`);
+            greeksProcessed++;
+          }
+          
+          i += GREEKS_FIELD_COUNT;
+        }
+        
+        if (greeksProcessed > 0) {
+          console.log(`📊 Processed ${greeksProcessed} Greeks events`);
+        }
+      }
     } catch (error: any) {
       console.error('Error handling feed data:', error.message);
     }
@@ -475,6 +563,147 @@ class TastytradeService {
     return null;
   }
 
+  /**
+   * Format option symbol to DXLink streamer format
+   * Example: SPX, 6850, 2025-11-14, call -> .SPX251114C06850000
+   */
+  private formatOptionSymbol(
+    underlying: string,
+    strike: number,
+    expiryDate: string,  // YYYY-MM-DD
+    optionType: 'call' | 'put'
+  ): string {
+    // Parse expiry date to get YYMMDD
+    const date = new Date(expiryDate);
+    const yy = date.getFullYear().toString().slice(-2);
+    const mm = (date.getMonth() + 1).toString().padStart(2, '0');
+    const dd = date.getDate().toString().padStart(2, '0');
+    
+    // Format strike to 8 digits with 3 decimal places (multiply by 1000)
+    const strikeFormatted = Math.round(strike * 1000).toString().padStart(8, '0');
+    
+    // C for call, P for put
+    const type = optionType.toLowerCase() === 'call' ? 'C' : 'P';
+    
+    // DXLink format: .{UNDERLYING}{YYMMDD}{C/P}{STRIKE}
+    return `.${underlying}${yy}${mm}${dd}${type}${strikeFormatted}`;
+  }
+
+  /**
+   * Subscribe to option symbols for Greeks and Quote events
+   */
+  private async subscribeToOptionSymbols(symbols: string[]): Promise<void> {
+    if (!this.isConnected || !this.ws) {
+      await this.connectWebSocket();
+    }
+
+    // Only subscribe to new symbols
+    const newSymbols = symbols.filter(s => !this.subscribedSymbols.has(s));
+    if (newSymbols.length === 0) {
+      return; // Already subscribed
+    }
+
+    console.log(`📡 Subscribing to option symbols: ${newSymbols.join(', ')}`);
+
+    // Send FEED_SUBSCRIPTION with Quote and Greeks event types for options
+    this.ws?.send(JSON.stringify({
+      type: 'FEED_SUBSCRIPTION',
+      channel: 1,
+      add: newSymbols.flatMap(symbol => [
+        { type: 'Quote', symbol },
+        { type: 'Greeks', symbol }
+      ])
+    }));
+
+    // Mark as subscribed
+    newSymbols.forEach(s => this.subscribedSymbols.add(s));
+  }
+
+  /**
+   * Wait for Greeks data to arrive via WebSocket with timeout
+   */
+  private async waitForGreeksData(symbol: string, timeout: number = 5000): Promise<OptionGreeksData | null> {
+    return new Promise((resolve, reject) => {
+      // Check cache first
+      const cached = this.optionsCache.get(symbol);
+      if (cached && (Date.now() - cached.timestamp) < 15000) {
+        // Cache valid for 15 seconds
+        resolve(cached);
+        return;
+      }
+
+      // Store promise for resolution when data arrives
+      this.pendingGreeks.set(symbol, { 
+        resolve: (data: OptionGreeksData) => resolve(data),
+        reject
+      });
+
+      // Set timeout
+      const timeoutId = setTimeout(() => {
+        if (this.pendingGreeks.has(symbol)) {
+          this.pendingGreeks.delete(symbol);
+          console.log(`⏱️ Timeout waiting for Greeks data: ${symbol}`);
+          resolve(null); // Return null on timeout instead of rejecting
+        }
+      }, timeout);
+
+      // Clear timeout if data arrives
+      const originalResolve = this.pendingGreeks.get(symbol)?.resolve;
+      if (originalResolve) {
+        this.pendingGreeks.set(symbol, {
+          resolve: (data: OptionGreeksData) => {
+            clearTimeout(timeoutId);
+            originalResolve(data);
+          },
+          reject
+        });
+      }
+    });
+  }
+
+  /**
+   * Fetch option quote with Greeks and IV from DXLink
+   * Primary data source for options - matches Polygon API interface
+   */
+  async getOptionQuote(
+    underlying: string,
+    strike: number,
+    expiryDate: string,  // YYYY-MM-DD
+    optionType: 'call' | 'put'
+  ): Promise<OptionQuoteData | null> {
+    try {
+      // Ensure WebSocket is connected
+      if (!this.isConnected) {
+        await this.connectWebSocket();
+      }
+
+      // Format to DXLink symbol
+      const dxSymbol = this.formatOptionSymbol(underlying, strike, expiryDate, optionType);
+      console.log(`📊 Fetching option Greeks from Tastytrade DXLink: ${dxSymbol}`);
+
+      // Subscribe to the option symbol
+      await this.subscribeToOptionSymbols([dxSymbol]);
+
+      // Wait for Greeks data with 5 second timeout
+      const greeksData = await this.waitForGreeksData(dxSymbol, 5000);
+
+      if (!greeksData) {
+        console.log(`⚠️ No Greeks data received for ${dxSymbol} after timeout`);
+        return null;
+      }
+
+      console.log(`✅ Tastytrade option data: ${underlying} ${optionType.toUpperCase()} - Premium $${greeksData.premium.toFixed(2)}, IV ${(greeksData.impliedVolatility * 100).toFixed(1)}%, Delta ${greeksData.greeks.delta.toFixed(4)}`);
+
+      return {
+        premium: greeksData.premium,
+        impliedVolatility: greeksData.impliedVolatility,
+        greeks: greeksData.greeks,
+      };
+    } catch (error: any) {
+      console.error(`❌ Error getting option quote from Tastytrade: ${error.message}`);
+      return null;
+    }
+  }
 
   /**
    * Test connection and verify live data feed
