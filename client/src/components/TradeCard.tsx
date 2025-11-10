@@ -11,6 +11,13 @@ interface Quote {
   ask: number;
   volume: number;
   timestamp: number;
+  greeks?: {
+    delta: number;
+    gamma: number;
+    theta: number;
+    vega: number;
+    rho: number;
+  };
 }
 
 interface TradeCardProps {
@@ -33,6 +40,11 @@ export function TradeCard({ trade, rank, liveQuotes }: TradeCardProps) {
   
   const livePrice = liveQuotes?.[trade.ticker]?.price;
   const currentDisplayPrice = livePrice || trade.currentPrice;
+  
+  // Use live Greeks from SSE when available, otherwise fall back to static Greeks
+  const liveGreeks = liveQuotes?.[trade.ticker]?.greeks;
+  const displayGreeks = liveGreeks || (trade.greeks as Greeks);
+  const areGreeksLive = !!liveGreeks;
 
   const executeMutation = useMutation({
     mutationFn: () => apiRequest("POST", `/api/execute-trade/${trade.id}`),
@@ -186,21 +198,30 @@ export function TradeCard({ trade, rank, liveQuotes }: TradeCardProps) {
 
         <div className="grid grid-cols-3 gap-4 mb-4">
           <div className="bg-muted rounded-md p-3">
-            <p className="text-xs text-muted-foreground">Delta</p>
+            <p className="text-xs text-muted-foreground uppercase tracking-wide flex items-center space-x-1">
+              <span>Delta</span>
+              {areGreeksLive && <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" title="Live Greeks"></span>}
+            </p>
             <p className="text-sm font-medium" data-testid={`delta-${trade.ticker}`}>
-              {(trade.greeks as Greeks).delta.toFixed(4)}
+              {displayGreeks.delta.toFixed(4)}
             </p>
           </div>
           <div className="bg-muted rounded-md p-3">
-            <p className="text-xs text-muted-foreground">Gamma</p>
+            <p className="text-xs text-muted-foreground uppercase tracking-wide flex items-center space-x-1">
+              <span>Gamma</span>
+              {areGreeksLive && <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" title="Live Greeks"></span>}
+            </p>
             <p className="text-sm font-medium" data-testid={`gamma-${trade.ticker}`}>
-              {(trade.greeks as Greeks).gamma.toFixed(4)}
+              {displayGreeks.gamma.toFixed(4)}
             </p>
           </div>
           <div className="bg-muted rounded-md p-3">
-            <p className="text-xs text-muted-foreground">Theta</p>
+            <p className="text-xs text-muted-foreground uppercase tracking-wide flex items-center space-x-1">
+              <span>Theta</span>
+              {areGreeksLive && <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" title="Live Greeks"></span>}
+            </p>
             <p className="text-sm font-medium text-destructive" data-testid={`theta-${trade.ticker}`}>
-              {(trade.greeks as Greeks).theta.toFixed(4)}
+              {displayGreeks.theta.toFixed(4)}
             </p>
           </div>
         </div>
