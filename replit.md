@@ -17,13 +17,14 @@ Preferred communication style: Simple, everyday language.
 - **Styling**: Dark-themed design system with CSS variables and custom color scheme optimized for financial data visualization
 
 ## Real-Time Data Streaming Architecture
-- **Server-Side Flow**: Tastytrade WebSocket → In-memory cache updates → SSE endpoint polls cache every 1 second → Streams to frontend clients
+- **Server-Side Flow**: Polygon WebSocket (primary) + Tastytrade WebSocket (fallback) → In-memory cache updates → SSE endpoint polls cache every 1 second → Streams to frontend clients
 - **Client-Side Flow**: EventSource connects to `/api/quotes/stream` → `useLiveQuotes` hook consumes stream → Dashboard extracts symbols from trades → TradeCard components display live prices
 - **SSE Endpoint**: `/api/quotes/stream?symbols=AAPL,TSLA,NVDA` streams JSON quote updates with bid/ask/price/volume data
-- **Smart Fallback System**: 
-  - Primary: Tastytrade WebSocket real-time data (sub-second latency)
-  - Fallback: Web scraper for symbols not in Tastytrade cache (30-second cached updates)
-  - Ensures all trade symbols get live updates regardless of Tastytrade support
+- **Multi-Tier Fallback System**: 
+  - Primary: Polygon WebSocket real-time data (sub-second latency, 100% market coverage)
+  - Secondary: Tastytrade DXLink WebSocket real-time data (sub-second latency)
+  - Final: Web scraper for market indices not in WebSocket caches (30-second cached updates)
+  - Ensures all trade symbols get live updates with multiple redundant sources
 - **Visual Indicators**: Green pulsing dot next to stock prices indicates live data active, falls back to stored prices when disconnected
 - **Connection Management**: Automatic SSE reconnection on disconnect, dynamic symbol subscription based on current trades
 - **Performance**: 1-second polling interval provides near real-time updates without overwhelming the frontend
