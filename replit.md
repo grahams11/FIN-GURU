@@ -87,6 +87,60 @@ Preferred communication style: Simple, everyday language.
   - Dashboard "Portfolio" tab: Shows redirect message to standalone Portfolio page
   - `/portfolio` page: Single source of truth for viewing real Tastytrade positions
 
+### Hybrid AI Portfolio Analysis System (Internal + Grok AI)
+- **Architecture**: Proprietary internal AI as primary engine with Grok AI as intelligent enhancement layer
+- **Internal AI Engine**: `PortfolioAnalysisEngine` compiles all existing trading logic:
+  - RSI (14-period) momentum analysis
+  - VIX volatility assessment
+  - Black-Scholes Greeks calculations
+  - Fibonacci retracement validation (0.618/0.707 levels)
+  - P&L-based exit strategies (45% stop loss, 100%+ profit taking)
+  - 24-hour minimum hold period enforcement
+  - 24-hour fund settlement period tracking
+- **Grok AI Enhancement**: `GrokAIService` triggers for complex scenarios:
+  - Portfolio risk level >= HIGH or CRITICAL
+  - Position requires urgent exit
+  - Recommendation confidence < 70%
+  - Rebalance opportunities detected
+  - Gracefully degrades if Grok API unavailable
+- **API Endpoint**: `/api/portfolio/ai-analysis` aggregates:
+  - Live Tastytrade positions and account data
+  - Real-time market prices and Greeks
+  - VIX volatility levels
+  - Current scanner trade opportunities
+  - Strategic recommendations with risk scoring
+- **Goal Tracking**: $1M target from current account value:
+  - Progress percentage calculation
+  - Required growth multiplier (e.g., 542x)
+  - On-track status assessment
+  - Remaining capital needed
+- **Strategic Recommendations**: Actionable insights categorized by:
+  - Type: EXIT_POSITION, TAKE_PROFIT, REBALANCE, NEW_POSITION
+  - Urgency: LOW, MEDIUM, HIGH
+  - Action: CLOSE, TRIM, REALLOCATE, ENTER
+  - Expected impact: P&L realized, capital freed, potential ROI
+  - Execution constraints: 24h hold/settlement compliance
+- **Risk Assessment**: Real-time portfolio risk levels:
+  - LOW: Healthy positions, minimal exposure
+  - MEDIUM: Moderate risk, monitoring recommended
+  - HIGH: Significant exposure, action suggested
+  - CRITICAL: Urgent intervention required
+- **Frontend Component**: `PortfolioAIInsights.tsx` displays:
+  - Hybrid AI badge indicating internal + Grok analysis
+  - Portfolio risk level with color coding
+  - Goal progress with visual progress bar
+  - Strategic recommendations with urgency indicators
+  - Actionable insights categorized by priority
+  - Grok enhancement section (when triggered) with cyan accent
+  - Auto-refresh every 30 seconds
+  - Full test coverage with data-testid attributes
+- **UI Design**:
+  - Purple gradient card for internal AI analysis
+  - Cyan gradient card for Grok AI enhancements
+  - Risk badges: Red (CRITICAL), Orange (HIGH), Yellow (MEDIUM), Green (LOW)
+  - Urgency icons for recommendations
+  - "24h Rule" badges for constrained positions
+
 # External Dependencies
 
 ## Database Services
