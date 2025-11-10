@@ -1313,37 +1313,54 @@ export class AIAnalysisService {
       const momentumBoost = Math.abs(stockData.changePercent) / 100;
       const impliedVolatility = Math.min(0.9, baseIV + vixBoost + momentumBoost);
       
-      // Try to fetch real option data from Polygon first
-      const polygonService = (await import('./polygonService')).default;
-      const expiryDateString = expiryDate.toISOString().split('T')[0]; // Format: YYYY-MM-DD
-      const realOptionData = await polygonService.getOptionQuote(ticker, strikePrice, expiryDateString, strategyType);
-      
       let finalEntryPrice: number;
       let actualImpliedVolatility: number;
       let realGreeks: any = null;
       
-      // Validate Polygon response has complete data (premium, IV, delta all required for solver)
-      const hasCompletePolygonData = realOptionData && 
-        realOptionData.premium > 0 && 
-        realOptionData.impliedVolatility > 0 && 
-        Math.abs(realOptionData.greeks.delta) > 0.001;
+      const expiryDateString = expiryDate.toISOString().split('T')[0]; // Format: YYYY-MM-DD
       
-      if (hasCompletePolygonData) {
-        // Use REAL market data from Polygon (complete and valid)
-        finalEntryPrice = realOptionData.premium;
-        actualImpliedVolatility = realOptionData.impliedVolatility;
-        realGreeks = realOptionData.greeks;
-        console.log(`${ticker}: ✅ Using REAL Polygon option data - Premium $${finalEntryPrice.toFixed(2)}, IV ${(actualImpliedVolatility * 100).toFixed(1)}%, Delta ${realGreeks.delta.toFixed(4)}`);
+      // Try Tastytrade DXLink first (PRIMARY source for options data)
+      const tastytradeService = (await import('./tastytradeService')).default;
+      const tastytradeData = await tastytradeService.getOptionQuote(ticker, strikePrice, expiryDateString, strategyType);
+      
+      const hasCompleteTastytradeData = tastytradeData && 
+        tastytradeData.premium > 0 && 
+        tastytradeData.impliedVolatility > 0 && 
+        Math.abs(tastytradeData.greeks.delta) > 0.001;
+      
+      if (hasCompleteTastytradeData) {
+        // Use REAL market data from Tastytrade (PRIMARY source)
+        finalEntryPrice = tastytradeData.premium;
+        actualImpliedVolatility = tastytradeData.impliedVolatility;
+        realGreeks = tastytradeData.greeks;
+        console.log(`${ticker}: ✅ Using Tastytrade LIVE option data - Premium $${finalEntryPrice.toFixed(2)}, IV ${(actualImpliedVolatility * 100).toFixed(1)}%, Delta ${realGreeks.delta.toFixed(4)}`);
       } else {
-        if (realOptionData) {
-          console.warn(`${ticker}: ⚠️ Polygon data incomplete (Premium: ${realOptionData.premium}, IV: ${realOptionData.impliedVolatility}, Delta: ${realOptionData.greeks?.delta}) - falling back to Black-Scholes`);
+        // Fallback to Polygon (SECONDARY source)
+        const polygonService = (await import('./polygonService')).default;
+        const realOptionData = await polygonService.getOptionQuote(ticker, strikePrice, expiryDateString, strategyType);
+        
+        const hasCompletePolygonData = realOptionData && 
+          realOptionData.premium > 0 && 
+          realOptionData.impliedVolatility > 0 && 
+          Math.abs(realOptionData.greeks.delta) > 0.001;
+        
+        if (hasCompletePolygonData) {
+          // Use REAL market data from Polygon (fallback source)
+          finalEntryPrice = realOptionData.premium;
+          actualImpliedVolatility = realOptionData.impliedVolatility;
+          realGreeks = realOptionData.greeks;
+          console.log(`${ticker}: ✅ Using Polygon option data (fallback) - Premium $${finalEntryPrice.toFixed(2)}, IV ${(actualImpliedVolatility * 100).toFixed(1)}%, Delta ${realGreeks.delta.toFixed(4)}`);
+        } else {
+          if (realOptionData) {
+            console.warn(`${ticker}: ⚠️ Both Tastytrade and Polygon data incomplete - falling back to Black-Scholes`);
+          }
+          // Final fallback to Black-Scholes estimate
+          const timeToExpiry = targetDays / 365;
+          const estimatedPrice = this.estimateEliteOptionPrice(currentPrice, strikePrice, timeToExpiry, impliedVolatility, strategyType);
+          finalEntryPrice = Math.max(0.10, estimatedPrice);
+          actualImpliedVolatility = impliedVolatility;
+          console.log(`${ticker}: ⚠️ Using Black-Scholes estimate - Premium $${finalEntryPrice.toFixed(2)} (all live data sources unavailable)`);
         }
-        // Fall back to Black-Scholes estimate
-        const timeToExpiry = targetDays / 365;
-        const estimatedPrice = this.estimateEliteOptionPrice(currentPrice, strikePrice, timeToExpiry, impliedVolatility, strategyType);
-        finalEntryPrice = Math.max(0.10, estimatedPrice);
-        actualImpliedVolatility = impliedVolatility;
-        console.log(`${ticker}: ⚠️ Using Black-Scholes estimate - Premium $${finalEntryPrice.toFixed(2)} (Polygon data unavailable or incomplete)`);
       }
       
       // Contract sizing: maximize leverage within $1000 budget
@@ -1491,37 +1508,54 @@ export class AIAnalysisService {
       
       console.log(`${ticker}: Day trading IV: ${(impliedVolatility * 100).toFixed(1)}% (VIX ${vixValue.toFixed(1)}, RSI ${rsi.toFixed(0)}, ${isIndex ? 'INDEX' : 'STOCK'})`);
       
-      // Try to fetch real option data from Polygon first
-      const polygonService = (await import('./polygonService')).default;
-      const expiryDateString = expiryDate.toISOString().split('T')[0]; // Format: YYYY-MM-DD
-      const realOptionData = await polygonService.getOptionQuote(ticker, strikePrice, expiryDateString, strategyType);
-      
       let finalEntryPrice: number;
       let actualImpliedVolatility: number;
       let realGreeks: any = null;
       
-      // Validate Polygon response has complete data (premium, IV, delta all required for solver)
-      const hasCompletePolygonData = realOptionData && 
-        realOptionData.premium > 0 && 
-        realOptionData.impliedVolatility > 0 && 
-        Math.abs(realOptionData.greeks.delta) > 0.001;
+      const expiryDateString = expiryDate.toISOString().split('T')[0]; // Format: YYYY-MM-DD
       
-      if (hasCompletePolygonData) {
-        // Use REAL market data from Polygon (complete and valid)
-        finalEntryPrice = realOptionData.premium;
-        actualImpliedVolatility = realOptionData.impliedVolatility;
-        realGreeks = realOptionData.greeks;
-        console.log(`${ticker}: ✅ Using REAL Polygon option data - Premium $${finalEntryPrice.toFixed(2)}, IV ${(actualImpliedVolatility * 100).toFixed(1)}%, Delta ${realGreeks.delta.toFixed(4)}`);
+      // Try Tastytrade DXLink first (PRIMARY source for options data)
+      const tastytradeService = (await import('./tastytradeService')).default;
+      const tastytradeData = await tastytradeService.getOptionQuote(ticker, strikePrice, expiryDateString, strategyType);
+      
+      const hasCompleteTastytradeData = tastytradeData && 
+        tastytradeData.premium > 0 && 
+        tastytradeData.impliedVolatility > 0 && 
+        Math.abs(tastytradeData.greeks.delta) > 0.001;
+      
+      if (hasCompleteTastytradeData) {
+        // Use REAL market data from Tastytrade (PRIMARY source)
+        finalEntryPrice = tastytradeData.premium;
+        actualImpliedVolatility = tastytradeData.impliedVolatility;
+        realGreeks = tastytradeData.greeks;
+        console.log(`${ticker}: ✅ Using Tastytrade LIVE option data - Premium $${finalEntryPrice.toFixed(2)}, IV ${(actualImpliedVolatility * 100).toFixed(1)}%, Delta ${realGreeks.delta.toFixed(4)}`);
       } else {
-        if (realOptionData) {
-          console.warn(`${ticker}: ⚠️ Polygon data incomplete (Premium: ${realOptionData.premium}, IV: ${realOptionData.impliedVolatility}, Delta: ${realOptionData.greeks?.delta}) - falling back to Black-Scholes`);
+        // Fallback to Polygon (SECONDARY source)
+        const polygonService = (await import('./polygonService')).default;
+        const realOptionData = await polygonService.getOptionQuote(ticker, strikePrice, expiryDateString, strategyType);
+        
+        const hasCompletePolygonData = realOptionData && 
+          realOptionData.premium > 0 && 
+          realOptionData.impliedVolatility > 0 && 
+          Math.abs(realOptionData.greeks.delta) > 0.001;
+        
+        if (hasCompletePolygonData) {
+          // Use REAL market data from Polygon (fallback source)
+          finalEntryPrice = realOptionData.premium;
+          actualImpliedVolatility = realOptionData.impliedVolatility;
+          realGreeks = realOptionData.greeks;
+          console.log(`${ticker}: ✅ Using Polygon option data (fallback) - Premium $${finalEntryPrice.toFixed(2)}, IV ${(actualImpliedVolatility * 100).toFixed(1)}%, Delta ${realGreeks.delta.toFixed(4)}`);
+        } else {
+          if (realOptionData) {
+            console.warn(`${ticker}: ⚠️ Both Tastytrade and Polygon data incomplete - falling back to Black-Scholes`);
+          }
+          // Final fallback to Black-Scholes estimate
+          const timeToExpiry = targetDays / 365;
+          const estimatedPrice = this.estimateEliteOptionPrice(currentPrice, strikePrice, timeToExpiry, impliedVolatility, strategyType);
+          finalEntryPrice = Math.max(0.25, estimatedPrice);
+          actualImpliedVolatility = impliedVolatility;
+          console.log(`${ticker}: ⚠️ Using Black-Scholes estimate - Premium $${finalEntryPrice.toFixed(2)} (all live data sources unavailable)`);
         }
-        // Fall back to Black-Scholes estimate
-        const timeToExpiry = targetDays / 365;
-        const estimatedPrice = this.estimateEliteOptionPrice(currentPrice, strikePrice, timeToExpiry, impliedVolatility, strategyType);
-        finalEntryPrice = Math.max(0.25, estimatedPrice);
-        actualImpliedVolatility = impliedVolatility;
-        console.log(`${ticker}: ⚠️ Using Black-Scholes estimate - Premium $${finalEntryPrice.toFixed(2)} (Polygon data unavailable or incomplete)`);
       }
       
       // Contract sizing for day trading ($2000 budget for high-priced instruments like SPX)
