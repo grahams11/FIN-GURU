@@ -107,16 +107,17 @@ Preferred communication style: Simple, everyday language.
 
 **Priority Order**: Polygon → Tastytrade → Google Finance → MarketWatch
 
-- **Polygon/Massive.com** (PRIMARY - WebSocket Only): Real-time market data via WebSocket
-  - **Plan**: Options Advanced ($199/month) - Unlimited API calls, 5+ years historical data, 100% options coverage
-  - **WebSocket**: Real-time streaming via wss://socket.massive.com/options (fully functional)
-  - **REST API**: ❌ NOT included with Options plan - requires separate Stocks Advanced plan ($199/month additional)
+- **Polygon/Massive.com** (PRIMARY): Real-time market data via WebSocket
+  - **Plan**: Options Advanced ($199/month) - Unlimited API calls, 5+ years historical data, 100% market coverage
+  - **WebSocket**: Real-time streaming for stocks AND options via wss://socket.massive.com/options
+  - **Stock Data Source**: WebSocket provides real-time stock quotes (bid/ask/last price/volume)
+  - **REST API**: Reference endpoints for ticker lists (/v3/reference/tickers) - stock quote REST endpoints require separate Stocks plan
   - **Authentication**: API key authentication (POLYGON_API_KEY secret)
-  - **Features**: Options data, reference API for ticker lists, WebSocket subscriptions for real-time quotes
+  - **Features**: Real-time stock quotes, options data, ticker reference API, WebSocket subscriptions
   - **Caching**: In-memory quote cache with 10-second freshness threshold
-  - **Coverage**: 100% US options coverage + ticker reference data for market scanning
+  - **Coverage**: 100% US stocks and options via WebSocket
   - **Connection Stability**: Automatic reconnection with 5 max retry attempts
-  - **Note**: Stock NBBO REST endpoints return 401 (expected) - Tastytrade WebSocket + web scraping handle stock quotes
+  - **Architecture**: WebSocket-first for stock quotes → Falls back to Tastytrade → Final fallback to web scraping
 
 - **Tastytrade API** (FALLBACK): Real-time market data via DXLink WebSocket streaming
   - **Authentication**: OAuth-based login with session tokens (stored in TASTYTRADE_USERNAME and TASTYTRADE_PASSWORD secrets)
