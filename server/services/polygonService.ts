@@ -1,4 +1,5 @@
 import WebSocket from 'ws';
+import axios from 'axios';
 
 interface QuoteData {
   symbol: string;
@@ -385,6 +386,68 @@ class PolygonService {
     }
     
     return quote;
+  }
+
+  /**
+   * Get real-time stock quote using REST API (fallback when WebSocket cache is stale)
+   * Options Advanced plan includes stock NBBO data via REST API
+   */
+  async getStockQuote(symbol: string): Promise<{ price: number; changePercent: number } | null> {
+    try {
+      // First check cache for fresh data
+      const cachedQuote = this.getQuote(symbol);
+      if (cachedQuote) {
+        console.log(`✅ ${symbol}: Using Polygon WebSocket cache - $${cachedQuote.lastPrice.toFixed(2)}`);
+        return {
+          price: cachedQuote.lastPrice,
+          changePercent: 0 // Polygon doesn't provide changePercent easily
+        };
+      }
+
+      // Fallback to REST API if cache is stale or empty
+      if (!this.apiKey) {
+        return null;
+      }
+
+      // Use Polygon REST API for real-time NBBO (National Best Bid and Offer)
+      // Options Advanced plan includes access to stock quotes
+      const response = await axios.get(
+        `https://api.polygon.io/v2/last/nbbo/${symbol}`,
+        {
+          params: { apiKey: this.apiKey },
+          timeout: 5000
+        }
+      );
+
+      if (response.data?.status === 'OK' && response.data?.results) {
+        const result = response.data.results;
+        // Use midpoint of bid/ask as price
+        const price = result.P ? result.P : (result.p + result.P) / 2;
+        
+        console.log(`✅ ${symbol}: Using Polygon REST API - $${price.toFixed(2)}`);
+        
+        // Cache the result for future use
+        this.quoteCache.set(symbol, {
+          symbol,
+          bidPrice: result.p || price,
+          askPrice: result.P || price,
+          lastPrice: price,
+          markPrice: price,
+          volume: result.s || 0,
+          timestamp: Date.now()
+        });
+
+        return {
+          price,
+          changePercent: 0
+        };
+      }
+
+      return null;
+    } catch (error: any) {
+      console.log(`⚠️ ${symbol}: Polygon REST API error - ${error.message}`);
+      return null;
+    }
   }
 
   /**

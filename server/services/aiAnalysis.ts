@@ -190,9 +190,9 @@ class BlackScholesCalculator {
 }
 
 export class AIAnalysisService {
-  // DAY TRADING INSTRUMENTS (Always top 2)
-  // SPX = S&P 500 Index, MNQ = Micro E-mini NASDAQ-100 Futures (professional day trading instruments)
-  private static readonly DAY_TRADING_INSTRUMENTS = ['SPX', 'MNQ'];
+  // DAY TRADING INSTRUMENTS (Always top 1)
+  // SPX = S&P 500 Index (professional day trading instrument with reliable live data)
+  private static readonly DAY_TRADING_INSTRUMENTS = ['SPX'];
   
   // Map day trading tickers to standard market index symbols for fallback scraping
   private static getMarketIndexSymbol(ticker: string): string {
@@ -232,11 +232,9 @@ export class AIAnalysisService {
   // Get contract multiplier for different instruments
   private static getContractMultiplier(ticker: string): number {
     // SPX options: Standard 100 multiplier
-    // MNQ (Micro E-mini NASDAQ): Micro contract multiplier of 2
     // Standard equity options: 100 multiplier
     const multipliers: Record<string, number> = {
       'SPX': 100,  // S&P 500 Index options
-      'MNQ': 2,    // Micro E-mini NASDAQ-100 Futures options
     };
     
     return multipliers[ticker] || 100; // Default to 100 for equity options
@@ -281,8 +279,8 @@ export class AIAnalysisService {
       // Scrape current market data (includes VIX)
       const marketData = await this.scrapeMarketDataForAnalysis();
       
-      // 1. ALWAYS ANALYZE DAY TRADING INSTRUMENTS FIRST (SPX, MNQ)
-      console.log('Analyzing day trading instruments (SPX, MNQ)...');
+      // 1. ALWAYS ANALYZE DAY TRADING INSTRUMENTS FIRST (SPX only - MNQ removed due to lack of live data)
+      console.log('Analyzing day trading instruments (SPX)...');
       const dayTradingAnalyses = await Promise.allSettled(
         this.DAY_TRADING_INSTRUMENTS.map(ticker => 
           this.analyzeDayTradingInstrument(ticker, marketData)
@@ -460,7 +458,7 @@ export class AIAnalysisService {
   }
 
   /**
-   * Day Trading Analysis for SPX and MNQ
+   * Day Trading Analysis for SPX only
    * Formula: VIX > 18 + RSI > 70 = SELL (PUT), opposite = BUY (CALL)
    */
   private static async analyzeDayTradingInstrument(ticker: string, marketContext: any): Promise<TradeRecommendation | null> {
@@ -471,7 +469,7 @@ export class AIAnalysisService {
       const vixValue = marketContext.vix?.value || 18; // Default to 18 if not available
       console.log(`VIX: ${vixValue.toFixed(2)}`);
       
-      // Fetch real-time data for futures instruments (MNQ, SPX)
+      // Fetch real-time data for SPX index
       console.log(`Fetching ${ticker} data...`);
       let stockData = await WebScraperService.scrapeFuturesPrice(ticker);
       if (!stockData.price || stockData.price === 0) {
@@ -1290,7 +1288,7 @@ export class AIAnalysisService {
 
   /**
    * Generate day trading options strategy (0-3 day holds)
-   * Optimized for SPX and MNQ with VIX+RSI signals
+   * Optimized for SPX with VIX+RSI signals
    */
   private static async generateDayTradingOptionsStrategy(
     ticker: string,
@@ -1309,7 +1307,7 @@ export class AIAnalysisService {
       const targetStrike = currentPrice * (1 + strikeVariance);
       const strikePrice = this.getValidStrike(currentPrice, targetStrike);
       
-      // SPX/MNQ weekly options expire every Friday
+      // SPX weekly options expire every Friday
       const fridayExpiration = this.getNextFridayExpiration();
       const expiryDate = fridayExpiration.date;
       const targetDays = fridayExpiration.daysUntil;
@@ -1329,14 +1327,14 @@ export class AIAnalysisService {
       const estimatedPrice = this.estimateEliteOptionPrice(currentPrice, strikePrice, timeToExpiry, impliedVolatility, strategyType);
       const finalEntryPrice = Math.max(0.25, estimatedPrice); // Day trading minimum $0.25 premium
       
-      // Contract sizing for day trading ($2000 budget for high-priced instruments like SPX/MNQ)
+      // Contract sizing for day trading ($2000 budget for high-priced instruments like SPX)
       // Use instrument-specific contract multipliers
       const maxTradeAmount = 2000;
       const contractMultiplier = this.getContractMultiplier(ticker);
       const costPerContract = finalEntryPrice * contractMultiplier;
       const optimalContracts = Math.floor(maxTradeAmount / costPerContract);
       
-      // For day trading instruments (SPX/MNQ), always allow at least 1 contract even if budget exceeded
+      // For SPX day trading, always allow at least 1 contract even if budget exceeded
       // This ensures SPX is included despite ~$16.5k per contract cost
       const contracts = Math.max(1, Math.min(25, optimalContracts)); // At least 1, cap at 25
       const totalTradeCost = contracts * finalEntryPrice * contractMultiplier;

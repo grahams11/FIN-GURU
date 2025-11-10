@@ -463,70 +463,18 @@ class TastytradeService {
   }
 
   /**
-   * Fetch market data for futures (SPX, MNQ)
+   * Fetch market data for SPX index only
    */
   async getFuturesQuote(symbol: string): Promise<{ price: number; changePercent: number } | null> {
-    // Tastytrade uses specific symbols for futures
-    // SPX = SPX (S&P 500 Index - Tastytrade has SPX quotes)
-    // MNQ = Front-month quarterly futures contract (format: MNQZ5 for Dec 2025)
-    
+    // Only SPX is supported - MNQ removed due to lack of reliable live data
     if (symbol === 'SPX') {
       // SPX index is directly available in Tastytrade
       return await this.getQuote('SPX');
-    } else if (symbol === 'MNQ') {
-      // Try front-month MNQ futures contract
-      // MNQ trades quarterly: March(H), June(M), September(U), December(Z)
-      const frontMonth = this.getQuarterlyFrontMonth('MNQ');
-      console.log(`🔍 MNQ: Requesting Tastytrade front-month contract ${frontMonth}`);
-      const result = await this.getQuote(frontMonth);
-      
-      if (result) {
-        console.log(`✅ MNQ: Got Tastytrade futures price $${result.price.toFixed(2)}`);
-      } else {
-        console.log(`⚠️ MNQ: Tastytrade futures unavailable, will fall back to QQQ proxy`);
-      }
-      
-      return result;
     }
     
-    return await this.getQuote(symbol);
+    return null;
   }
 
-  /**
-   * Get front-month quarterly futures contract symbol for equity index futures
-   * Format: SYMBOL + QUARTERLY_MONTH_CODE + YEAR_DIGIT (NO slash prefix)
-   * Quarterly months: H=Mar, M=Jun, U=Sep, Z=Dec
-   */
-  private getQuarterlyFrontMonth(baseSymbol: string): string {
-    const now = new Date();
-    const currentMonth = now.getMonth(); // 0-11 (Jan=0, Dec=11)
-    const currentYear = now.getFullYear();
-    
-    // Quarterly month codes and their numeric values
-    const quarterlyMonths = [
-      { code: 'H', month: 2 },  // March (month 2)
-      { code: 'M', month: 5 },  // June (month 5)
-      { code: 'U', month: 8 },  // September (month 8)
-      { code: 'Z', month: 11 }  // December (month 11)
-    ];
-    
-    // Find the next quarterly expiration month
-    let targetQuarter = quarterlyMonths.find(q => q.month >= currentMonth);
-    let targetYear = currentYear;
-    
-    // If no future quarter this year, use first quarter of next year
-    if (!targetQuarter) {
-      targetQuarter = quarterlyMonths[0]; // March of next year
-      targetYear++;
-    }
-    
-    const yearDigit = targetYear % 10;
-    const contractSymbol = `${baseSymbol}${targetQuarter.code}${yearDigit}`;
-    
-    console.log(`📅 MNQ: Front-month contract for ${now.toLocaleDateString()}: ${contractSymbol} (${targetQuarter.code}=${targetYear})`);
-    
-    return contractSymbol;
-  }
 
   /**
    * Test connection and verify live data feed

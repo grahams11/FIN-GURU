@@ -1,6 +1,7 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { tastytradeService } from './tastytradeService';
+import { polygonService } from './polygonService';
 
 export interface StockData {
   symbol: string;
@@ -339,7 +340,22 @@ export class WebScraperService {
   }
 
   static async scrapeStockPrice(symbol: string): Promise<StockData> {
-    // Try Tastytrade real-time data FIRST (primary source)
+    // Try Polygon WebSocket/REST FIRST (primary source)
+    try {
+      const polygonQuote = await polygonService.getStockQuote(symbol);
+      if (polygonQuote && polygonQuote.price > 0) {
+        return {
+          symbol,
+          price: polygonQuote.price,
+          change: 0,
+          changePercent: polygonQuote.changePercent || 0
+        };
+      }
+    } catch (error) {
+      console.log(`${symbol}: Polygon unavailable, trying Tastytrade`);
+    }
+
+    // Try Tastytrade real-time data SECOND (fallback)
     try {
       const tastyQuote = await tastytradeService.getStockQuote(symbol);
       if (tastyQuote && tastyQuote.price > 0) {
@@ -347,7 +363,7 @@ export class WebScraperService {
         return {
           symbol,
           price: tastyQuote.price,
-          change: 0, // Tastytrade doesn't provide change directly
+          change: 0,
           changePercent: tastyQuote.changePercent || 0
         };
       }
@@ -355,7 +371,7 @@ export class WebScraperService {
       console.log(`${symbol}: Tastytrade unavailable, falling back to web scraping`);
     }
 
-    // Fallback to web scraping if Tastytrade fails
+    // Final fallback to web scraping
     const sources = [
       () => this.scrapeGoogleFinance(symbol),
       () => this.scrapeMarketWatch(symbol)
@@ -379,10 +395,31 @@ export class WebScraperService {
   }
 
   /**
-   * Scrape futures data (MNQ, SPX) using Tastytrade as primary source
+   * Scrape SPX index data using Polygon/Tastytrade as primary sources
    */
   static async scrapeFuturesPrice(symbol: string): Promise<StockData> {
-    // Try Tastytrade futures quotes FIRST (primary source)
+    // Only SPX is supported - MNQ removed due to lack of reliable live data
+    if (symbol !== 'SPX') {
+      console.error(`❌ ${symbol}: Only SPX index is supported`);
+      return this.getDefaultData(symbol);
+    }
+
+    // Try Polygon FIRST
+    try {
+      const polygonQuote = await polygonService.getStockQuote(symbol);
+      if (polygonQuote && polygonQuote.price > 0) {
+        return {
+          symbol,
+          price: polygonQuote.price,
+          change: 0,
+          changePercent: polygonQuote.changePercent || 0
+        };
+      }
+    } catch (error) {
+      console.log(`⚠️ ${symbol}: Polygon unavailable, trying Tastytrade`);
+    }
+
+    // Try Tastytrade SECOND
     try {
       const tastyQuote = await tastytradeService.getFuturesQuote(symbol);
       if (tastyQuote && tastyQuote.price > 0) {
@@ -398,8 +435,8 @@ export class WebScraperService {
       console.log(`⚠️ ${symbol}: Tastytrade error, falling back to proxy: ${error instanceof Error ? error.message : 'Unknown'}`);
     }
 
-    // FALLBACK PATH: Use proxy estimation
-    const fallbackSymbol = symbol === 'SPX' ? '^GSPC' : symbol === 'MNQ' ? 'QQQ' : symbol;
+    // FINAL FALLBACK: Use ^GSPC proxy for SPX
+    const fallbackSymbol = '^GSPC';
     console.log(`⚠️ ${symbol}: FALLBACK MODE - Using ${fallbackSymbol} proxy (not live futures data)`);
     
     const sources = [
@@ -409,23 +446,13 @@ export class WebScraperService {
 
     for (const scraper of sources) {
       try {
-        let data = await scraper();
-        
-        // Apply conversion if using QQQ proxy for MNQ
-        if (symbol === 'MNQ' && fallbackSymbol === 'QQQ' && data.price > 0) {
-          const conversionFactor = 41.2; // Updated conversion: QQQ * 41.2 ≈ MNQ
-          console.log(`⚠️ ${symbol}: PROXY CONVERSION - QQQ $${data.price.toFixed(2)} × ${conversionFactor} = $${(data.price * conversionFactor).toFixed(2)}`);
-          console.log(`⚠️ ${symbol}: WARNING - This is an ESTIMATE, not real-time MNQ futures data`);
-          data = {
-            ...data,
-            symbol,
-            price: data.price * conversionFactor
-          };
-        }
-        
+        const data = await scraper();
         if (data.price > 0) {
           console.log(`✅ ${symbol}: Fallback price from ${fallbackSymbol}: $${data.price.toFixed(2)}`);
-          return data;
+          return {
+            ...data,
+            symbol
+          };
         }
       } catch (error) {
         console.warn(`❌ Source ${scraper.name} failed for ${symbol}:`, error instanceof Error ? error.message : 'Unknown error');
@@ -433,7 +460,7 @@ export class WebScraperService {
       }
     }
     
-    console.error(`❌ All sources failed for futures ${symbol}`);
+    console.error(`❌ All sources failed for ${symbol}`);
     return this.getDefaultData(symbol);
   }
 
