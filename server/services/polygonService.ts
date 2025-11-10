@@ -735,23 +735,26 @@ class PolygonService {
    * @param from Start date (YYYY-MM-DD)
    * @param to End date (YYYY-MM-DD)
    * @param timespan 'day' or 'hour'
+   * @param multiplier Number of units (1 = 1 day/hour, 4 = 4 hours, etc.)
    * @returns Array of historical bars or null on error
    */
   async getHistoricalBars(
     symbol: string,
     from: string,
     to: string,
-    timespan: 'day' | 'hour' = 'day'
+    timespan: 'day' | 'hour' = 'day',
+    multiplier: number = 1
   ): Promise<HistoricalBar[] | null> {
     try {
-      const url = `https://api.polygon.io/v2/aggs/ticker/${symbol}/range/1/${timespan}/${from}/${to}?adjusted=true&sort=asc&apiKey=${this.apiKey}`;
+      const url = `https://api.polygon.io/v2/aggs/ticker/${symbol}/range/${multiplier}/${timespan}/${from}/${to}?adjusted=true&sort=asc&apiKey=${this.apiKey}`;
       
       const response = await axios.get(url, {
         timeout: 10000
       });
 
       if (response.data?.results && Array.isArray(response.data.results)) {
-        console.log(`${symbol}: Retrieved ${response.data.results.length} historical ${timespan} bars from ${from} to ${to}`);
+        const timeframeLabel = multiplier > 1 ? `${multiplier}-${timespan}` : timespan;
+        console.log(`${symbol}: Retrieved ${response.data.results.length} historical ${timeframeLabel} bars from ${from} to ${to}`);
         return response.data.results;
       }
 

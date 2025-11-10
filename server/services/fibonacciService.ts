@@ -19,7 +19,7 @@ interface BounceDetection {
 export class FibonacciService {
   private static cache = new Map<string, FibonacciLevels>();
   private static CACHE_TTL = 3600000; // 1 hour TTL
-  private static LOOKBACK_DAYS = 60;
+  private static LOOKBACK_DAYS = 60; // 60 days of 4-hour bars = ~360 candles
   private static BOUNCE_TOLERANCE = 0.01; // ±1% tolerance
 
   static async calculateFibonacciLevels(symbol: string): Promise<FibonacciLevels | null> {
@@ -33,11 +33,13 @@ export class FibonacciService {
       const fromDate = new Date();
       fromDate.setDate(fromDate.getDate() - this.LOOKBACK_DAYS);
 
+      // Use 4-hour chart data for Fibonacci calculations (as per trading strategy)
       const bars = await polygonService.getHistoricalBars(
         symbol,
         fromDate.toISOString().split('T')[0],
         toDate.toISOString().split('T')[0],
-        'day'
+        'hour',
+        4 // 4-hour bars
       );
 
       if (!bars || bars.length < 10) {
@@ -78,7 +80,7 @@ export class FibonacciService {
 
       this.cache.set(symbol, levels);
       
-      console.log(`${symbol}: Fibonacci calculated - High: ${high.toFixed(2)}, Low: ${low.toFixed(2)}, 0.618: ${level_0_618.toFixed(2)}, 0.707: ${level_0_707.toFixed(2)}, Trend: ${trend}`);
+      console.log(`${symbol}: Fibonacci (4H chart) - High: ${high.toFixed(2)}, Low: ${low.toFixed(2)}, 0.618: ${level_0_618.toFixed(2)}, 0.707: ${level_0_707.toFixed(2)}, Trend: ${trend}`);
       
       return levels;
     } catch (error) {

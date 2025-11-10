@@ -60,7 +60,8 @@ Preferred communication style: Simple, everyday language.
 - **Fresh Scan**: Each refresh triggers new analysis.
 
 ### Fibonacci Retracement Validation (Elite Scanner Only)
-- **Technical Analysis**: Validates entry points using 0.707 (Golden) and 0.618 (Classic) Fibonacci retracement levels based on 60-day historical data from Polygon.
+- **Technical Analysis**: Validates entry points using 0.707 (Golden) and 0.618 (Classic) Fibonacci retracement levels based on **4-hour chart** data from Polygon.
+- **Chart Timeframe**: Uses 4-hour bars over 60-day lookback period (~360 candles) for accurate technical analysis.
 - **Confidence Boost**: Fibonacci bounces add +10% AI confidence.
 - **Caching**: 1-hour TTL per symbol to reduce API calls.
 - **Graceful Fallback**: Handles Polygon rate limits by still displaying trades without Fibonacci metadata.
