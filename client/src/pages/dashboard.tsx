@@ -2,7 +2,6 @@ import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { MarketOverview } from "@/components/MarketOverview";
 import { OptionsTraderAI } from "@/components/OptionsTraderAI";
-import { PortfolioTracker } from "@/components/PortfolioTracker";
 import { Navigation } from "@/components/Navigation";
 import { Card, CardContent } from "@/components/ui/card";
 import { 
@@ -285,7 +284,14 @@ export default function Dashboard() {
         )}
         
         {activeView === 'portfolio' && (
-          <PortfolioTracker />
+          <div className="text-center py-12">
+            <h2 className="text-2xl font-bold text-muted-foreground">Portfolio Moved</h2>
+            <p className="text-muted-foreground mt-2">
+              Portfolio tracking now shows real Tastytrade data.
+              <br />
+              Use the "Portfolio" link in the navigation menu to view your positions.
+            </p>
+          </div>
         )}
         
         {activeView === 'analytics' && (

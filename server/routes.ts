@@ -517,42 +517,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Portfolio positions endpoints
-  app.get('/api/positions', async (req, res) => {
-    try {
-      const positions = await storage.getPositions();
-      res.json(positions);
-    } catch (error) {
-      console.error('Error fetching positions:', error);
-      res.status(500).json({ message: 'Failed to fetch positions' });
-    }
-  });
-  
-  app.get('/api/positions/performance', async (req, res) => {
-    try {
-      const performance = await storage.getPositionPerformance();
-      res.json(performance);
-    } catch (error) {
-      console.error('Error fetching position performance:', error);
-      res.status(500).json({ message: 'Failed to fetch position performance' });
-    }
-  });
-  
-  app.post('/api/positions/:id/close', async (req, res) => {
-    try {
-      const { id } = req.params;
-      const success = await storage.closePosition(id);
-      
-      if (success) {
-        res.json({ message: 'Position closed successfully' });
-      } else {
-        res.status(404).json({ message: 'Position not found' });
-      }
-    } catch (error) {
-      console.error('Error closing position:', error);
-      res.status(500).json({ message: 'Failed to close position' });
-    }
-  });
+  // Mock endpoints removed - use /api/portfolio/positions for real Tastytrade data
   
   // Trade history endpoints
   app.get('/api/trade-history', async (req, res) => {
@@ -712,92 +677,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Position Management endpoints
-  app.post('/api/positions', async (req, res) => {
-    try {
-      console.log('Creating new position...');
-      const validatedData = insertPortfolioPositionSchema.parse(req.body);
-      const position = await storage.createPosition(validatedData);
-      res.status(201).json(position);
-    } catch (error) {
-      console.error('Error creating position:', error);
-      res.status(500).json({ message: 'Failed to create position' });
-    }
-  });
-
-  app.get('/api/positions', async (req, res) => {
-    try {
-      const positions = await storage.getPositions();
-      res.json(positions);
-    } catch (error) {
-      console.error('Error fetching positions:', error);
-      res.status(500).json({ message: 'Failed to fetch positions' });
-    }
-  });
-
-  app.get('/api/positions/analysis', async (req, res) => {
-    try {
-      console.log('Analyzing all positions...');
-      const positions = await storage.getPositions();
-      const analysis = await PositionAnalysisService.analyzePortfolio(positions.filter(p => p.status === 'open'));
-      res.json(analysis);
-    } catch (error) {
-      console.error('Error analyzing positions:', error);
-      res.status(500).json({ message: 'Failed to analyze positions' });
-    }
-  });
-
-  app.get('/api/positions/:id/analysis', async (req, res) => {
-    try {
-      const { id } = req.params;
-      console.log(`Analyzing position ${id}...`);
-      
-      const positions = await storage.getPositions();
-      const position = positions.find(p => p.id === id);
-      
-      if (!position) {
-        return res.status(404).json({ message: 'Position not found' });
-      }
-      
-      const analysis = await PositionAnalysisService.analyzePosition(position);
-      res.json(analysis);
-    } catch (error) {
-      console.error('Error analyzing position:', error);
-      res.status(500).json({ message: 'Failed to analyze position' });
-    }
-  });
-
-  app.patch('/api/positions/:id', async (req, res) => {
-    try {
-      const { id } = req.params;
-      const position = await storage.updatePosition(id, req.body);
-      
-      if (position) {
-        res.json(position);
-      } else {
-        res.status(404).json({ message: 'Position not found' });
-      }
-    } catch (error) {
-      console.error('Error updating position:', error);
-      res.status(500).json({ message: 'Failed to update position' });
-    }
-  });
-
-  app.post('/api/positions/:id/close', async (req, res) => {
-    try {
-      const { id } = req.params;
-      const success = await storage.closePosition(id);
-      
-      if (success) {
-        res.json({ message: 'Position closed successfully' });
-      } else {
-        res.status(404).json({ message: 'Position not found' });
-      }
-    } catch (error) {
-      console.error('Error closing position:', error);
-      res.status(500).json({ message: 'Failed to close position' });
-    }
-  });
+  // Mock position endpoints removed - use /api/portfolio/positions for real Tastytrade data
 
   // Ticker symbol search endpoint
   app.get('/api/symbols', async (req, res) => {
