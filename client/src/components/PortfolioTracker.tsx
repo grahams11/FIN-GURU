@@ -22,13 +22,13 @@ export function PortfolioTracker() {
   const [activeTab, setActiveTab] = useState("input");
 
   const { data: positions, isLoading: positionsLoading } = useQuery<PortfolioPosition[]>({
-    queryKey: ['/api/positions'],
-    refetchInterval: 30000 // Refresh every 30 seconds
+    queryKey: ['/api/portfolio/positions'],
+    refetchInterval: 5000 // Refresh every 5 seconds for real-time Tastytrade data
   });
 
   const { data: portfolioAnalysis, isLoading: portfolioAnalysisLoading } = useQuery<PortfolioAnalysis>({
-    queryKey: ['/api/positions/analysis'],
-    refetchInterval: 30000,
+    queryKey: ['/api/portfolio/analysis'],
+    refetchInterval: 10000, // Refresh every 10 seconds
     enabled: positions && positions.length > 0
   });
 
