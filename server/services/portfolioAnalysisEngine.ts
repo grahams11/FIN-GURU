@@ -103,6 +103,11 @@ export class PortfolioAnalysisEngine {
 
   /**
    * Generate strategic recommendations based on comprehensive analysis
+   * 
+   * Constraints:
+   * - 24-hour hold requirement: Cannot close positions opened today (day trade rule)
+   * - 24-hour settlement period: Funds from closed positions unavailable for 24h
+   * - Max $2000 per SPX trade, $1000 per other trades
    */
   private generateStrategicRecommendations(
     positionAnalyses: any[],
@@ -112,8 +117,9 @@ export class PortfolioAnalysisEngine {
     marketCondition: MarketCondition
   ): StrategicRecommendation[] {
     const recs: StrategicRecommendation[] = [];
+    const now = new Date();
 
-    // 1. Analyze positions requiring immediate action
+    // 1. Analyze positions requiring immediate action (stop loss)
     const urgentExits = positionAnalyses.filter(p => 
       p.exitStrategy.recommendation === 'CUT_LOSS' || 
       p.unrealizedPnLPercent <= -40
@@ -121,16 +127,31 @@ export class PortfolioAnalysisEngine {
 
     if (urgentExits.length > 0) {
       urgentExits.forEach(pos => {
+        // Check 24-hour hold requirement
+        const position = pos as any; // Get access to openDate
+        const openDate = position.openDate ? new Date(position.openDate) : null;
+        const hoursSinceOpen = openDate ? (now.getTime() - openDate.getTime()) / (1000 * 60 * 60) : 24;
+        const canClose = hoursSinceOpen >= 24;
+
+        const reasoning = [
+          `Position down ${Math.abs(pos.unrealizedPnLPercent).toFixed(1)}% - stop loss triggered`,
+          canClose 
+            ? 'Immediate exit required to preserve capital'
+            : `⚠️ Day trade rule: Must hold ${(24 - hoursSinceOpen).toFixed(1)} more hours before closing`,
+          `Current loss: $${Math.abs(pos.unrealizedPnL).toFixed(2)}`
+        ];
+
+        if (!canClose) {
+          reasoning.push('Prepare to exit immediately once 24-hour period expires');
+        }
+
         recs.push({
           type: 'EXIT_POSITION',
           ticker: pos.ticker,
           urgency: 'HIGH',
           action: 'CLOSE',
-          reasoning: [
-            `Position down ${Math.abs(pos.unrealizedPnLPercent).toFixed(1)}% - stop loss triggered`,
-            'Immediate exit required to preserve capital',
-            `Current loss: $${Math.abs(pos.unrealizedPnL).toFixed(2)}`
-          ],
+          canExecuteNow: canClose,
+          reasoning,
           expectedImpact: {
             capitalFreed: pos.currentValue,
             pnlRealized: pos.unrealizedPnL
@@ -390,6 +411,7 @@ export interface StrategicRecommendation {
   ticker: string;
   urgency: 'LOW' | 'MEDIUM' | 'HIGH';
   action: 'CLOSE' | 'TRIM' | 'REALLOCATE' | 'ENTER';
+  canExecuteNow?: boolean; // 24-hour hold/settlement constraint
   trimPercentage?: number;
   targetTicker?: string;
   reasoning: string[];
