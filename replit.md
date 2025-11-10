@@ -70,7 +70,9 @@ Preferred communication style: Simple, everyday language.
 - **Fibonacci Badge**: Displays "FIB 0.707" or "FIB 0.618" with tooltip.
 - **Estimated Profit**: Prominent display of projected dollar profit.
 
-### Portfolio Exit Analysis System
+### Portfolio Exit Analysis System (Real Tastytrade Data Only)
+- **Data Source**: ALL portfolio positions are fetched from real Tastytrade API - NO mock data exists.
+- **API Endpoints**: Single source of truth via `/api/portfolio/positions` (all `/api/positions` mock endpoints removed).
 - **Risk Management**: Automated stop loss recommendations at 45% loss threshold to protect capital.
 - **Profit-Taking Strategy**: Incremental exit recommendations starting at 100% ROI:
   - +100% ROI: Trim 50% of position
@@ -79,14 +81,11 @@ Preferred communication style: Simple, everyday language.
 - **Opportunity Comparison**: Identifies better trade opportunities from current scanner results for capital reallocation.
 - **Real-Time P&L**: Live profit/loss tracking with SSE-powered price updates and 100x contract multiplier for options.
 - **Greeks Monitoring**: Displays real-time Greeks (delta, gamma, theta, vega, rho) for options positions with time decay alerts.
-- **Position Management**: Full CRUD operations for portfolio positions via REST API.
-- **API Routes**:
-  - `GET /api/portfolio/positions` - Fetch open positions
-  - `POST /api/portfolio/positions` - Add new position
-  - `DELETE /api/portfolio/positions/:id` - Close position
-  - `GET /api/portfolio/analysis` - Get exit analysis and recommendations
-  - `GET /api/portfolio/opportunities` - Compare against current top opportunities
+- **Position Management**: Read-only view of Tastytrade account positions (no local position creation/deletion).
 - **Contract Multiplier**: Options P&L calculations apply 100x multiplier (1 contract = 100 shares) for accurate pricing.
+- **UI Structure**: 
+  - Dashboard "Portfolio" tab: Shows redirect message to standalone Portfolio page
+  - `/portfolio` page: Single source of truth for viewing real Tastytrade positions
 
 # External Dependencies
 
