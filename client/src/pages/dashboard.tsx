@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { MarketOverview } from "@/components/MarketOverview";
 import { OptionsTraderAI } from "@/components/OptionsTraderAI";
 import { PortfolioTracker } from "@/components/PortfolioTracker";
+import { Navigation } from "@/components/Navigation";
 import { Card, CardContent } from "@/components/ui/card";
 import { 
   PieChart, 

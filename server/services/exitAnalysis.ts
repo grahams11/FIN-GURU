@@ -22,9 +22,10 @@ export class ExitAnalysisService {
     const metadata = position.metadata as OptionsMetadata | null;
     const isOptions = position.positionType === 'options';
     
-    // Calculate P&L
-    const totalCost = position.avgCost * position.quantity;
-    const currentValue = currentPrice * position.quantity;
+    // Calculate P&L with proper contract multiplier for options
+    const contractMultiplier = isOptions ? 100 : 1; // Options contracts control 100 shares
+    const totalCost = position.avgCost * position.quantity * contractMultiplier;
+    const currentValue = currentPrice * position.quantity * contractMultiplier;
     const unrealizedPnL = currentValue - totalCost;
     const unrealizedPnLPercent = (unrealizedPnL / totalCost) * 100;
     

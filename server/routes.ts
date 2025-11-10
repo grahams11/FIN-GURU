@@ -7,6 +7,7 @@ import { PositionAnalysisService } from "./services/positionAnalysis";
 import { polygonService } from "./services/polygonService";
 import { tastytradeService } from "./services/tastytradeService";
 import { BlackScholesCalculator } from "./services/financialCalculations";
+import { exitAnalysisService } from "./services/exitAnalysis";
 import { insertMarketDataSchema, insertOptionsTradeSchema, insertAiInsightsSchema, insertPortfolioPositionSchema, type OptionsTrade } from "@shared/schema";
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -864,6 +865,308 @@ export async function registerRoutes(app: Express): Promise<Server> {
         success: false, 
         message: error.message 
       });
+    }
+  });
+
+  // =========================
+  // Portfolio Management Routes
+  // =========================
+
+  // Create new portfolio position
+  app.post('/api/portfolio/positions', async (req, res) => {
+    try {
+      const validated = insertPortfolioPositionSchema.parse(req.body);
+      const position = await storage.createPosition(validated);
+      res.json(position);
+    } catch (error: any) {
+      console.error('Error creating position:', error);
+      res.status(400).json({ message: error.message || 'Failed to create position' });
+    }
+  });
+
+  // Get all open portfolio positions
+  app.get('/api/portfolio/positions', async (req, res) => {
+    try {
+      const userId = req.query.userId as string | undefined;
+      const positions = await storage.getPositions(userId);
+      
+      // Filter to only open positions
+      const openPositions = positions.filter(p => p.status === 'open');
+      
+      res.json(openPositions);
+    } catch (error: any) {
+      console.error('Error fetching positions:', error);
+      res.status(500).json({ message: 'Failed to fetch positions' });
+    }
+  });
+
+  // Update portfolio position
+  app.patch('/api/portfolio/positions/:id', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const updates = req.body;
+      
+      const updated = await storage.updatePosition(id, updates);
+      
+      if (!updated) {
+        return res.status(404).json({ message: 'Position not found' });
+      }
+      
+      res.json(updated);
+    } catch (error: any) {
+      console.error('Error updating position:', error);
+      res.status(400).json({ message: error.message || 'Failed to update position' });
+    }
+  });
+
+  // Close portfolio position
+  app.delete('/api/portfolio/positions/:id', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const success = await storage.closePosition(id);
+      
+      if (!success) {
+        return res.status(404).json({ message: 'Position not found' });
+      }
+      
+      res.json({ success: true, message: 'Position closed successfully' });
+    } catch (error: any) {
+      console.error('Error closing position:', error);
+      res.status(500).json({ message: 'Failed to close position' });
+    }
+  });
+
+  // Get full portfolio analysis with exit recommendations
+  app.get('/api/portfolio/analysis', async (req, res) => {
+    try {
+      const userId = req.query.userId as string | undefined;
+      
+      // Get open positions
+      const positions = await storage.getPositions(userId);
+      const openPositions = positions.filter(p => p.status === 'open');
+      
+      // Get current prices from quote caches
+      const currentPrices = new Map<string, number>();
+      
+      for (const position of openPositions) {
+        // Try Polygon first
+        const polygonQuote = await polygonService.getCachedQuote(position.ticker);
+        if (polygonQuote && polygonQuote.lastPrice > 0) {
+          currentPrices.set(position.ticker, polygonQuote.lastPrice);
+          continue;
+        }
+        
+        // Fallback to Tastytrade
+        const tastyQuote = await tastytradeService.getCachedQuote(position.ticker);
+        if (tastyQuote && tastyQuote.lastPrice > 0) {
+          currentPrices.set(position.ticker, tastyQuote.lastPrice);
+          continue;
+        }
+        
+        // Final fallback to entry price
+        currentPrices.set(position.ticker, position.avgCost);
+      }
+      
+      // Get current trade recommendations for opportunity comparison
+      const topTrades = await storage.getTopTrades();
+      const opportunities = topTrades.map(trade => ({
+        ticker: trade.ticker,
+        optionType: (trade.optionType || 'call') as 'call' | 'put',
+        currentPrice: trade.currentPrice,
+        strikePrice: trade.strikePrice,
+        expiry: trade.expiry,
+        stockEntryPrice: trade.stockEntryPrice || trade.currentPrice,
+        stockExitPrice: trade.stockExitPrice ?? undefined,
+        premium: trade.premium || trade.entryPrice,
+        entryPrice: trade.entryPrice,
+        exitPrice: trade.exitPrice || 0,
+        totalCost: trade.totalCost || (trade.contracts * (trade.premium || trade.entryPrice) * 100),
+        contracts: trade.contracts,
+        projectedROI: trade.projectedROI,
+        aiConfidence: trade.aiConfidence,
+        greeks: trade.greeks as any,
+        sentiment: trade.sentiment || 0,
+        score: trade.score,
+        holdDays: trade.holdDays || 0,
+        fibonacciLevel: trade.fibonacciLevel ?? undefined,
+        fibonacciColor: (trade.fibonacciColor ?? undefined) as 'gold' | 'green' | undefined,
+        estimatedProfit: trade.estimatedProfit ?? undefined
+      }));
+      
+      // Perform portfolio analysis
+      const analysis = exitAnalysisService.analyzePortfolio(
+        openPositions,
+        currentPrices,
+        opportunities
+      );
+      
+      res.json(analysis);
+    } catch (error: any) {
+      console.error('Error performing portfolio analysis:', error);
+      res.status(500).json({ message: 'Failed to analyze portfolio' });
+    }
+  });
+
+  // Get single position analysis
+  app.get('/api/portfolio/positions/:id/analysis', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const userId = req.query.userId as string | undefined;
+      
+      // Get all positions and find the specific one
+      const positions = await storage.getPositions(userId);
+      const position = positions.find(p => p.id === id);
+      
+      if (!position) {
+        return res.status(404).json({ message: 'Position not found' });
+      }
+      
+      // Get current price
+      let currentPrice = position.avgCost;
+      
+      const polygonQuote = await polygonService.getCachedQuote(position.ticker);
+      if (polygonQuote && polygonQuote.lastPrice > 0) {
+        currentPrice = polygonQuote.lastPrice;
+      } else {
+        const tastyQuote = await tastytradeService.getCachedQuote(position.ticker);
+        if (tastyQuote && tastyQuote.lastPrice > 0) {
+          currentPrice = tastyQuote.lastPrice;
+        }
+      }
+      
+      // Get current trade recommendations
+      const topTrades = await storage.getTopTrades();
+      const opportunities = topTrades.map(trade => ({
+        ticker: trade.ticker,
+        optionType: (trade.optionType || 'call') as 'call' | 'put',
+        currentPrice: trade.currentPrice,
+        strikePrice: trade.strikePrice,
+        expiry: trade.expiry,
+        stockEntryPrice: trade.stockEntryPrice || trade.currentPrice,
+        stockExitPrice: trade.stockExitPrice ?? undefined,
+        premium: trade.premium || trade.entryPrice,
+        entryPrice: trade.entryPrice,
+        exitPrice: trade.exitPrice || 0,
+        totalCost: trade.totalCost || (trade.contracts * (trade.premium || trade.entryPrice) * 100),
+        contracts: trade.contracts,
+        projectedROI: trade.projectedROI,
+        aiConfidence: trade.aiConfidence,
+        greeks: trade.greeks as any,
+        sentiment: trade.sentiment || 0,
+        score: trade.score,
+        holdDays: trade.holdDays || 0,
+        fibonacciLevel: trade.fibonacciLevel ?? undefined,
+        fibonacciColor: (trade.fibonacciColor ?? undefined) as 'gold' | 'green' | undefined,
+        estimatedProfit: trade.estimatedProfit ?? undefined
+      }));
+      
+      // Analyze single position
+      const analysis = exitAnalysisService.analyzePosition(
+        position,
+        currentPrice,
+        opportunities
+      );
+      
+      res.json(analysis);
+    } catch (error: any) {
+      console.error('Error analyzing position:', error);
+      res.status(500).json({ message: 'Failed to analyze position' });
+    }
+  });
+
+  // Get better opportunities compared to current positions
+  app.get('/api/portfolio/opportunities', async (req, res) => {
+    try {
+      const positionId = req.query.positionId as string | undefined;
+      const userId = req.query.userId as string | undefined;
+      
+      // Get positions to analyze
+      const positions = await storage.getPositions(userId);
+      let positionsToAnalyze = positions.filter(p => p.status === 'open');
+      
+      if (positionId) {
+        positionsToAnalyze = positionsToAnalyze.filter(p => p.id === positionId);
+      }
+      
+      // Get current trade recommendations
+      const topTrades = await storage.getTopTrades();
+      const opportunities = topTrades.map(trade => ({
+        ticker: trade.ticker,
+        optionType: (trade.optionType || 'call') as 'call' | 'put',
+        currentPrice: trade.currentPrice,
+        strikePrice: trade.strikePrice,
+        expiry: trade.expiry,
+        stockEntryPrice: trade.stockEntryPrice || trade.currentPrice,
+        stockExitPrice: trade.stockExitPrice ?? undefined,
+        premium: trade.premium || trade.entryPrice,
+        entryPrice: trade.entryPrice,
+        exitPrice: trade.exitPrice || 0,
+        totalCost: trade.totalCost || (trade.contracts * (trade.premium || trade.entryPrice) * 100),
+        contracts: trade.contracts,
+        projectedROI: trade.projectedROI,
+        aiConfidence: trade.aiConfidence,
+        greeks: trade.greeks as any,
+        sentiment: trade.sentiment || 0,
+        score: trade.score,
+        holdDays: trade.holdDays || 0,
+        fibonacciLevel: trade.fibonacciLevel ?? undefined,
+        fibonacciColor: (trade.fibonacciColor ?? undefined) as 'gold' | 'green' | undefined,
+        estimatedProfit: trade.estimatedProfit ?? undefined
+      }));
+      
+      // Get current prices
+      const currentPrices = new Map<string, number>();
+      for (const position of positionsToAnalyze) {
+        const polygonQuote = await polygonService.getCachedQuote(position.ticker);
+        if (polygonQuote && polygonQuote.lastPrice > 0) {
+          currentPrices.set(position.ticker, polygonQuote.lastPrice);
+        } else {
+          const tastyQuote = await tastytradeService.getCachedQuote(position.ticker);
+          if (tastyQuote && tastyQuote.lastPrice > 0) {
+            currentPrices.set(position.ticker, tastyQuote.lastPrice);
+          } else {
+            currentPrices.set(position.ticker, position.avgCost);
+          }
+        }
+      }
+      
+      // Analyze each position and find better opportunities
+      const betterOpportunities = positionsToAnalyze.map(position => {
+        const currentPrice = currentPrices.get(position.ticker) || position.avgCost;
+        const totalCost = position.avgCost * position.quantity;
+        const currentValue = currentPrice * position.quantity;
+        const unrealizedPnLPercent = ((currentValue - totalCost) / totalCost) * 100;
+        
+        // Find better opportunities (different ticker, >100% better ROI, >80% confidence)
+        const betterOpps = opportunities.filter(opp => {
+          if (opp.ticker === position.ticker) return false;
+          const currentExpectedROI = 50;
+          if (opp.projectedROI < currentExpectedROI + 100) return false;
+          if (opp.aiConfidence < 80) return false;
+          return true;
+        });
+        
+        const bestOpp = betterOpps.length > 0 
+          ? betterOpps.sort((a, b) => b.score - a.score)[0]
+          : null;
+        
+        return {
+          positionId: position.id,
+          ticker: position.ticker,
+          currentPnLPercent: unrealizedPnLPercent,
+          betterOpportunity: bestOpp,
+          shouldReallocate: bestOpp !== null && unrealizedPnLPercent > -20
+        };
+      });
+      
+      res.json({
+        opportunities: betterOpportunities.filter(o => o.betterOpportunity !== null),
+        totalPositions: positionsToAnalyze.length,
+        betterOpportunitiesCount: betterOpportunities.filter(o => o.shouldReallocate).length
+      });
+    } catch (error: any) {
+      console.error('Error finding better opportunities:', error);
+      res.status(500).json({ message: 'Failed to find better opportunities' });
     }
   });
 
