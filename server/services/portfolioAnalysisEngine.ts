@@ -95,14 +95,24 @@ export class PortfolioAnalysisEngine {
     // 1. Risk level is HIGH or CRITICAL
     // 2. Have urgent exit recommendations
     // 3. Major rebalancing decisions needed
+    // 4. Low-confidence opportunities from dashboard scanner (<70%)
+    const lowConfidenceOpportunities = dashboardOpportunities.filter(opp => opp.aiConfidence < 70);
+    
     const needsGrokEnhancement = 
       overallRisk === 'HIGH' || 
       overallRisk === 'CRITICAL' ||
       recommendations.some(r => r.urgency === 'HIGH' && r.type === 'EXIT_POSITION') ||
-      recommendations.some(r => r.type === 'REBALANCE');
+      recommendations.some(r => r.type === 'REBALANCE') ||
+      lowConfidenceOpportunities.length > 0;
 
     if (needsGrokEnhancement) {
-      console.log('🤖 Consulting Grok AI for portfolio enhancement...');
+      const reason = 
+        overallRisk === 'HIGH' || overallRisk === 'CRITICAL' ? 'HIGH/CRITICAL risk detected' :
+        recommendations.some(r => r.urgency === 'HIGH' && r.type === 'EXIT_POSITION') ? 'Urgent exit recommendation' :
+        recommendations.some(r => r.type === 'REBALANCE') ? 'Rebalancing needed' :
+        `${lowConfidenceOpportunities.length} low-confidence opportunities (<70%)`;
+      
+      console.log(`🤖 Consulting Grok AI for portfolio enhancement (${reason})...`);
       const grokEnhancement = await grokAI.enhancePortfolioAnalysis(
         baseAnalysis,
         positions,
@@ -460,3 +470,6 @@ interface ActionableInsight {
   message: string;
   action: string;
 }
+
+// Singleton instance
+export const portfolioAnalysisEngine = new PortfolioAnalysisEngine();

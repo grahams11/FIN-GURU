@@ -8,6 +8,7 @@ import { polygonService } from "./services/polygonService";
 import { tastytradeService } from "./services/tastytradeService";
 import { BlackScholesCalculator } from "./services/financialCalculations";
 import { exitAnalysisService } from "./services/exitAnalysis";
+import { portfolioAnalysisEngine } from "./services/portfolioAnalysisEngine";
 import { insertMarketDataSchema, insertOptionsTradeSchema, insertAiInsightsSchema, insertPortfolioPositionSchema, type OptionsTrade } from "@shared/schema";
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -888,7 +889,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Get full portfolio analysis with exit recommendations
+  // Get full portfolio analysis with exit recommendations (legacy endpoint)
   app.get('/api/portfolio/analysis', async (req, res) => {
     try {
       // Get real positions from Tastytrade
@@ -959,6 +960,109 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error('Error performing portfolio analysis:', error);
       res.status(500).json({ message: 'Failed to analyze portfolio' });
+    }
+  });
+
+  // Get AI-powered portfolio analysis (Hybrid: Internal AI + Grok enhancement)
+  app.get('/api/portfolio/ai-analysis', async (req, res) => {
+    try {
+      console.log('🤖 AI Portfolio Analysis requested...');
+      
+      // Get real positions from Tastytrade
+      const openPositions = await tastytradeService.fetchPositions();
+      console.log(`📊 Fetched ${openPositions.length} positions from Tastytrade`);
+      
+      // Get account balance
+      const balance = await tastytradeService.fetchAccountBalance();
+      const accountValue = balance.netLiquidatingValue || 0;
+      console.log(`💰 Account Value: $${accountValue.toFixed(2)}`);
+      
+      // Get current prices for all positions (Polygon → Tastytrade → fallback)
+      const currentPrices: Record<string, number> = {};
+      for (const position of openPositions) {
+        // For options, Tastytrade already provides the correct option premium as currentPrice
+        if (position.positionType === 'options' && position.currentPrice && position.currentPrice > 0) {
+          currentPrices[position.ticker] = position.currentPrice;
+          continue;
+        }
+        
+        // For stocks, get live stock quote from Polygon
+        const polygonQuote = await polygonService.getCachedQuote(position.ticker);
+        if (polygonQuote && polygonQuote.lastPrice > 0) {
+          currentPrices[position.ticker] = polygonQuote.lastPrice;
+          continue;
+        }
+        
+        // Fallback to Tastytrade
+        const tastyQuote = await tastytradeService.getCachedQuote(position.ticker);
+        if (tastyQuote && tastyQuote.lastPrice > 0) {
+          currentPrices[position.ticker] = tastyQuote.lastPrice;
+          continue;
+        }
+        
+        // Final fallback to entry price
+        currentPrices[position.ticker] = position.avgCost;
+      }
+      console.log(`📈 Got current prices for ${Object.keys(currentPrices).length} positions`);
+      
+      // Fetch VIX level for market condition assessment
+      let vixLevel = 20; // Default VIX level
+      try {
+        const vixData = await WebScraperService.scrapeStockPrice('%5EVIX');
+        vixLevel = vixData.price || 20;
+        console.log(`📊 VIX Level: ${vixLevel.toFixed(2)}`);
+      } catch (error) {
+        console.warn('⚠️ Failed to fetch VIX, using default 20');
+      }
+      
+      // Get current trade recommendations from dashboard scanner
+      const topTrades = await storage.getTopTrades();
+      const dashboardOpportunities = topTrades.map(trade => ({
+        ticker: trade.ticker,
+        optionType: (trade.optionType || 'call') as 'call' | 'put',
+        currentPrice: trade.currentPrice,
+        strikePrice: trade.strikePrice,
+        expiry: trade.expiry,
+        stockEntryPrice: trade.stockEntryPrice || trade.currentPrice,
+        stockExitPrice: trade.stockExitPrice ?? undefined,
+        premium: trade.premium || trade.entryPrice,
+        entryPrice: trade.entryPrice,
+        exitPrice: trade.exitPrice || 0,
+        totalCost: trade.totalCost || (trade.contracts * (trade.premium || trade.entryPrice) * 100),
+        contracts: trade.contracts,
+        projectedROI: trade.projectedROI,
+        aiConfidence: trade.aiConfidence,
+        greeks: trade.greeks as any,
+        sentiment: trade.sentiment || 0,
+        score: trade.score,
+        holdDays: trade.holdDays || 0,
+        fibonacciLevel: trade.fibonacciLevel ?? undefined,
+        fibonacciColor: (trade.fibonacciColor ?? undefined) as 'gold' | 'green' | undefined,
+        estimatedProfit: trade.estimatedProfit ?? undefined
+      }));
+      console.log(`🎯 ${dashboardOpportunities.length} opportunities from scanner`);
+      
+      // Run AI portfolio analysis (Internal AI + Grok enhancement)
+      const analysis = await portfolioAnalysisEngine.analyzePortfolio(
+        openPositions,
+        currentPrices,
+        dashboardOpportunities,
+        accountValue,
+        vixLevel
+      );
+      
+      console.log(`✅ AI Analysis complete - ${analysis.recommendations.length} recommendations generated`);
+      if (analysis.grokEnhancement) {
+        console.log('🚀 Grok AI enhancement included in analysis');
+      }
+      
+      res.json(analysis);
+    } catch (error: any) {
+      console.error('❌ Error performing AI portfolio analysis:', error);
+      res.status(500).json({ 
+        message: 'Failed to analyze portfolio',
+        error: error.message 
+      });
     }
   });
 
