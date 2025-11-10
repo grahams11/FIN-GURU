@@ -247,10 +247,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const marketData = await WebScraperService.scrapeMarketIndices();
       
       // Get today's opening prices from Polygon API
+      // Use SPY as proxy for SPX (more reliable data availability)
       const [sp500Open, nasdaqOpen, vixOpen] = await Promise.all([
-        polygonService.getTodayOpenPrice('SPX'),    // S&P 500
-        polygonService.getTodayOpenPrice('NDX'),    // NASDAQ-100 (closest to NASDAQ Composite)
-        polygonService.getTodayOpenPrice('VIX')     // VIX Volatility Index
+        polygonService.getTodayOpenPrice('SPY'),    // S&P 500 ETF (proxy for SPX)
+        polygonService.getTodayOpenPrice('NDX'),    // NASDAQ-100
+        polygonService.getTodayOpenPrice('VXX')     // VIX ETF (proxy for VIX index)
       ]);
       
       // Calculate change and changePercent based on today's opening price
