@@ -813,6 +813,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get account balance
+  app.get('/api/portfolio/balance', async (req, res) => {
+    try {
+      const balance = await tastytradeService.fetchAccountBalance();
+      res.json(balance);
+    } catch (error: any) {
+      console.error('Error fetching account balance:', error);
+      res.status(500).json({ message: 'Failed to fetch balance' });
+    }
+  });
+
+  // Get lifetime realized P/L
+  app.get('/api/portfolio/pnl-lifetime', async (req, res) => {
+    try {
+      const lifetimePnL = await tastytradeService.fetchLifetimeRealizedPnL();
+      res.json({ lifetimeRealized: lifetimePnL });
+    } catch (error: any) {
+      console.error('Error fetching lifetime P/L:', error);
+      res.status(500).json({ message: 'Failed to fetch lifetime P/L' });
+    }
+  });
+
   // Get today's P/L (realized + unrealized)
   app.get('/api/portfolio/pnl-day', async (req, res) => {
     try {

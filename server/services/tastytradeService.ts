@@ -997,6 +997,146 @@ class TastytradeService {
   }
   
   /**
+   * Fetch account balance information
+   */
+  async fetchAccountBalance(): Promise<{
+    netLiquidatingValue: number;
+    cashBalance: number;
+    totalValue: number;
+  }> {
+    try {
+      await this.ensureAuthenticated();
+      
+      if (!this.accountNumber) {
+        console.error('❌ No account number available');
+        return { netLiquidatingValue: 0, cashBalance: 0, totalValue: 0 };
+      }
+
+      const response = await this.apiClient.get(`/accounts/${this.accountNumber}/balances`);
+      
+      if (!response.data || !response.data.data) {
+        return { netLiquidatingValue: 0, cashBalance: 0, totalValue: 0 };
+      }
+
+      const data = response.data.data;
+      const netLiquidatingValue = parseFloat(data['net-liquidating-value'] || '0');
+      const cashBalance = parseFloat(data['cash-balance'] || '0');
+
+      return {
+        netLiquidatingValue,
+        cashBalance,
+        totalValue: netLiquidatingValue
+      };
+    } catch (error: any) {
+      console.error('❌ Error fetching account balance:', error.response?.data || error.message);
+      return { netLiquidatingValue: 0, cashBalance: 0, totalValue: 0 };
+    }
+  }
+
+  /**
+   * Fetch lifetime realized P/L from all closed positions
+   */
+  async fetchLifetimeRealizedPnL(): Promise<number> {
+    try {
+      await this.ensureAuthenticated();
+      
+      if (!this.accountNumber) {
+        console.error('❌ No account number available');
+        return 0;
+      }
+
+      // Fetch all transactions with pagination
+      let allTransactions: any[] = [];
+      let page = 0;
+      const perPage = 250;
+      let hasMore = true;
+
+      while (hasMore) {
+        const response = await this.apiClient.get(`/accounts/${this.accountNumber}/transactions`, {
+          params: {
+            'per-page': perPage,
+            'page-offset': page * perPage,
+            'sort': 'Asc'
+          }
+        });
+
+        if (!response.data || !response.data.data || !response.data.data.items) {
+          break;
+        }
+
+        const items = response.data.data.items;
+        allTransactions = allTransactions.concat(items);
+
+        // Check if there are more pages
+        hasMore = items.length === perPage;
+        page++;
+      }
+
+      if (allTransactions.length === 0) {
+        return 0;
+      }
+
+      console.log(`📊 Processing ${allTransactions.length} transactions for lifetime P/L`);
+
+      // Build cost basis map: symbol -> { totalCost, totalQuantity }
+      const costBasis = new Map<string, { totalCost: number; totalQuantity: number }>();
+      let totalRealizedPnL = 0;
+      
+      allTransactions.forEach((tx: any) => {
+        const symbol = tx.symbol;
+        const subType = tx['transaction-sub-type'];
+        const netValue = parseFloat(tx['net-value'] || 0);
+        const quantity = Math.abs(parseFloat(tx.quantity || 0));
+        
+        // Track opening transactions for cost basis
+        if (subType === 'Buy to Open' || subType === 'Sell to Open') {
+          if (!costBasis.has(symbol)) {
+            costBasis.set(symbol, { totalCost: 0, totalQuantity: 0 });
+          }
+          const basis = costBasis.get(symbol)!;
+          
+          if (subType === 'Buy to Open') {
+            basis.totalCost += netValue;
+            basis.totalQuantity += quantity;
+          } else {
+            // Sell to Open: credit (short position)
+            basis.totalCost -= netValue;
+            basis.totalQuantity += quantity;
+          }
+        }
+        
+        // Calculate realized P/L for closing transactions
+        if (subType === 'Sell to Close' || subType === 'Buy to Close') {
+          const basis = costBasis.get(symbol);
+          
+          if (basis && basis.totalQuantity > 0) {
+            const costPerContract = basis.totalCost / basis.totalQuantity;
+            const costOfClosedPosition = costPerContract * quantity;
+            
+            if (subType === 'Sell to Close') {
+              // Closed long: P/L = proceeds - cost
+              totalRealizedPnL += (netValue - costOfClosedPosition);
+            } else {
+              // Closed short: P/L = cost - buy price
+              totalRealizedPnL += (costOfClosedPosition - netValue);
+            }
+            
+            // Update cost basis after close
+            basis.totalCost -= costOfClosedPosition;
+            basis.totalQuantity -= quantity;
+          }
+        }
+      });
+      
+      console.log(`📊 Lifetime Realized P/L: $${totalRealizedPnL.toFixed(2)}`);
+      return totalRealizedPnL;
+    } catch (error: any) {
+      console.error('❌ Error fetching lifetime realized P/L:', error.response?.data || error.message);
+      return 0;
+    }
+  }
+
+  /**
    * Fetch today's P/L (realized + unrealized day change)
    */
   async fetchTodayPnL(): Promise<{ realized: number; unrealized: number; total: number }> {

@@ -28,6 +28,18 @@ export default function Portfolio() {
     refetchInterval: 10000, // Refresh every 10 seconds
   });
   
+  // Fetch account balance
+  const { data: accountBalance } = useQuery<{ netLiquidatingValue: number; cashBalance: number; totalValue: number }>({
+    queryKey: ["/api/portfolio/balance"],
+    refetchInterval: 5000, // Refresh every 5 seconds
+  });
+  
+  // Fetch lifetime realized P/L
+  const { data: lifetimePnL } = useQuery<{ lifetimeRealized: number }>({
+    queryKey: ["/api/portfolio/pnl-lifetime"],
+    refetchInterval: 30000, // Refresh every 30 seconds
+  });
+  
   // Fetch today's P/L
   const { data: pnlDay } = useQuery<{ realized: number; unrealized: number; total: number }>({
     queryKey: ["/api/portfolio/pnl-day"],
@@ -94,54 +106,19 @@ export default function Portfolio() {
       </div>
 
       {/* Portfolio Summary Cards */}
-      {analysis && (
+      {(analysis || accountBalance || pnlDay) && (
         <div className="grid gap-4 md:grid-cols-4">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Value</CardTitle>
+              <CardTitle className="text-sm font-medium">Account Net Liq</CardTitle>
               <DollarSign className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">
-                ${analysis.totalValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                ${(accountBalance?.netLiquidatingValue ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
               <p className="text-xs text-muted-foreground mt-1">
-                Cost: ${analysis.totalCost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total P&L</CardTitle>
-              {analysis.totalPnL >= 0 ? (
-                <TrendingUp className="h-4 w-4 text-green-500" />
-              ) : (
-                <TrendingDown className="h-4 w-4 text-red-500" />
-              )}
-            </CardHeader>
-            <CardContent>
-              <div className={`text-2xl font-bold ${analysis.totalPnL >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                {analysis.totalPnL >= 0 ? '+' : ''}${analysis.totalPnL.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </div>
-              <p className={`text-xs mt-1 ${analysis.totalPnLPercent >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                {analysis.totalPnLPercent >= 0 ? '+' : ''}{analysis.totalPnLPercent.toFixed(2)}%
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Open Positions</CardTitle>
-              <Activity className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{analysis.positions.length}</div>
-              <p className="text-xs text-muted-foreground mt-1">
-                Portfolio Risk: <span className={`font-medium ${
-                  analysis.riskLevel === 'HIGH' ? 'text-red-500' :
-                  analysis.riskLevel === 'MEDIUM' ? 'text-yellow-500' : 'text-green-500'
-                }`}>{analysis.riskLevel}</span>
+                Cash: ${(accountBalance?.cashBalance ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </p>
             </CardContent>
           </Card>
@@ -159,11 +136,46 @@ export default function Portfolio() {
               <div className={`text-2xl font-bold ${(pnlDay?.total ?? 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
                 {(pnlDay?.total ?? 0) >= 0 ? '+' : ''}${(pnlDay?.total ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
-              {pnlDay && (
-                <p className="text-xs text-muted-foreground mt-1">
-                  Realized: ${pnlDay.realized.toFixed(2)} | Unrealized: ${pnlDay.unrealized.toFixed(2)}
+              {pnlDay && accountBalance && (
+                <p className={`text-xs mt-1 ${(pnlDay.total / accountBalance.netLiquidatingValue * 100) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                  {((pnlDay.total / accountBalance.netLiquidatingValue) * 100).toFixed(1)}% today
                 </p>
               )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Open Positions</CardTitle>
+              <Activity className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{analysis?.positions.length ?? 0}</div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Portfolio Risk: <span className={`font-medium ${
+                  analysis?.riskLevel === 'HIGH' ? 'text-red-500' :
+                  analysis?.riskLevel === 'MEDIUM' ? 'text-yellow-500' : 'text-green-500'
+                }`}>{analysis?.riskLevel ?? 'N/A'}</span>
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Total P&L</CardTitle>
+              {(lifetimePnL?.lifetimeRealized ?? 0) >= 0 ? (
+                <TrendingUp className="h-4 w-4 text-green-500" />
+              ) : (
+                <TrendingDown className="h-4 w-4 text-red-500" />
+              )}
+            </CardHeader>
+            <CardContent>
+              <div className={`text-2xl font-bold ${(lifetimePnL?.lifetimeRealized ?? 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                {(lifetimePnL?.lifetimeRealized ?? 0) >= 0 ? '+' : ''}${(lifetimePnL?.lifetimeRealized ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Lifetime realized
+              </p>
             </CardContent>
           </Card>
         </div>
