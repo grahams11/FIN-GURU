@@ -1313,10 +1313,38 @@ export class AIAnalysisService {
       const momentumBoost = Math.abs(stockData.changePercent) / 100;
       const impliedVolatility = Math.min(0.9, baseIV + vixBoost + momentumBoost);
       
-      // Calculate option price
-      const timeToExpiry = targetDays / 365;
-      const estimatedPrice = this.estimateEliteOptionPrice(currentPrice, strikePrice, timeToExpiry, impliedVolatility, strategyType);
-      const finalEntryPrice = Math.max(0.10, estimatedPrice);
+      // Try to fetch real option data from Polygon first
+      const polygonService = (await import('./polygonService')).default;
+      const expiryDateString = expiryDate.toISOString().split('T')[0]; // Format: YYYY-MM-DD
+      const realOptionData = await polygonService.getOptionQuote(ticker, strikePrice, expiryDateString, strategyType);
+      
+      let finalEntryPrice: number;
+      let actualImpliedVolatility: number;
+      let realGreeks: any = null;
+      
+      // Validate Polygon response has complete data (premium, IV, delta all required for solver)
+      const hasCompletePolygonData = realOptionData && 
+        realOptionData.premium > 0 && 
+        realOptionData.impliedVolatility > 0 && 
+        Math.abs(realOptionData.greeks.delta) > 0.001;
+      
+      if (hasCompletePolygonData) {
+        // Use REAL market data from Polygon (complete and valid)
+        finalEntryPrice = realOptionData.premium;
+        actualImpliedVolatility = realOptionData.impliedVolatility;
+        realGreeks = realOptionData.greeks;
+        console.log(`${ticker}: ✅ Using REAL Polygon option data - Premium $${finalEntryPrice.toFixed(2)}, IV ${(actualImpliedVolatility * 100).toFixed(1)}%, Delta ${realGreeks.delta.toFixed(4)}`);
+      } else {
+        if (realOptionData) {
+          console.warn(`${ticker}: ⚠️ Polygon data incomplete (Premium: ${realOptionData.premium}, IV: ${realOptionData.impliedVolatility}, Delta: ${realOptionData.greeks?.delta}) - falling back to Black-Scholes`);
+        }
+        // Fall back to Black-Scholes estimate
+        const timeToExpiry = targetDays / 365;
+        const estimatedPrice = this.estimateEliteOptionPrice(currentPrice, strikePrice, timeToExpiry, impliedVolatility, strategyType);
+        finalEntryPrice = Math.max(0.10, estimatedPrice);
+        actualImpliedVolatility = impliedVolatility;
+        console.log(`${ticker}: ⚠️ Using Black-Scholes estimate - Premium $${finalEntryPrice.toFixed(2)} (Polygon data unavailable or incomplete)`);
+      }
       
       // Contract sizing: maximize leverage within $1000 budget
       const maxTradeAmount = 1000;
@@ -1347,12 +1375,61 @@ export class AIAnalysisService {
       // Stock entry price: current market price ±1%
       const stockEntryPrice = currentPrice * (1 + (Math.random() * 0.02 - 0.01));
       
-      // Stock exit target based on option profitability
-      const stockExitPrice = strategyType === 'call' 
-        ? strikePrice + (exitPrice * 0.7)
-        : strikePrice - (exitPrice * 0.7);
+      // Calculate stock exit price target using Black-Scholes solver
+      const { BlackScholesCalculator } = await import('./financialCalculations');
+      let stockExitPrice: number = currentPrice; // Initialize to current price as fallback
       
-      console.log(`${ticker}: Momentum ${strategyType.toUpperCase()} - Strike $${strikePrice.toFixed(2)}, Premium $${finalEntryPrice.toFixed(2)}, ${contracts} contracts, Target ROI ${targetROI.toFixed(0)}%`);
+      if (actualImpliedVolatility > 0.001 && targetDays > 0) {
+        // Use Black-Scholes solver to find stock price that yields target exit premium
+        const timeToExpiry = targetDays / 365;
+        const solvedPrice = BlackScholesCalculator.solveStockPriceForTargetPremium(
+          exitPrice,
+          strikePrice,
+          timeToExpiry,
+          this.RISK_FREE_RATE,
+          actualImpliedVolatility,
+          strategyType,
+          currentPrice
+        );
+        
+        if (solvedPrice && solvedPrice > 0) {
+          stockExitPrice = solvedPrice;
+          console.log(`${ticker}: ✅ Solved stock exit price: $${stockExitPrice.toFixed(2)} for target premium $${exitPrice.toFixed(2)}`);
+        } else {
+          // Solver failed, use delta fallback (ALWAYS succeeds)
+          const delta = (realGreeks?.delta && Math.abs(realGreeks.delta) > 0.001) ? realGreeks.delta : 0.5;
+          stockExitPrice = BlackScholesCalculator.estimateStockPriceFromDelta(
+            finalEntryPrice,
+            exitPrice,
+            delta,
+            currentPrice,
+            strategyType,
+            contractMultiplier
+          );
+          console.log(`${ticker}: ⚠️ Solver failed, using delta fallback: $${stockExitPrice.toFixed(2)} (delta: ${delta.toFixed(4)})`);
+        }
+      } else {
+        // No valid IV available, use delta-based estimate (ALWAYS succeeds)
+        const delta = (realGreeks?.delta && Math.abs(realGreeks.delta) > 0.001) ? realGreeks.delta : 0.5;
+        stockExitPrice = BlackScholesCalculator.estimateStockPriceFromDelta(
+          finalEntryPrice,
+          exitPrice,
+          delta,
+          currentPrice,
+          strategyType,
+          contractMultiplier
+        );
+        console.log(`${ticker}: ⚠️ No valid IV (${actualImpliedVolatility}), using delta estimate: $${stockExitPrice.toFixed(2)} (delta: ${delta.toFixed(4)})`);
+      }
+      
+      // Final safety check: ensure stockExitPrice is valid and within reasonable bounds
+      if (!stockExitPrice || stockExitPrice <= 0 || isNaN(stockExitPrice)) {
+        // Ultimate fallback: strike ± 5% for calls/puts
+        stockExitPrice = strategyType === 'call' ? strikePrice * 1.05 : strikePrice * 0.95;
+        console.warn(`${ticker}: ⚠️ Invalid exit price detected, using fallback: $${stockExitPrice.toFixed(2)}`);
+      }
+      
+      console.log(`${ticker}: Momentum ${strategyType.toUpperCase()} - Strike $${strikePrice.toFixed(2)}, Entry Premium $${finalEntryPrice.toFixed(2)}, Exit Premium $${exitPrice.toFixed(2)}, Stock Exit $${stockExitPrice.toFixed(2)}, ${contracts} contracts, Target ROI ${targetROI.toFixed(0)}%`);
       
       return {
         strikePrice: Math.round(strikePrice * 100) / 100,
@@ -1410,10 +1487,38 @@ export class AIAnalysisService {
       
       console.log(`${ticker}: Day trading IV: ${(impliedVolatility * 100).toFixed(1)}% (VIX ${vixValue.toFixed(1)}, RSI ${rsi.toFixed(0)})`);
       
-      // Calculate option price for day trading
-      const timeToExpiry = targetDays / 365;
-      const estimatedPrice = this.estimateEliteOptionPrice(currentPrice, strikePrice, timeToExpiry, impliedVolatility, strategyType);
-      const finalEntryPrice = Math.max(0.25, estimatedPrice); // Day trading minimum $0.25 premium
+      // Try to fetch real option data from Polygon first
+      const polygonService = (await import('./polygonService')).default;
+      const expiryDateString = expiryDate.toISOString().split('T')[0]; // Format: YYYY-MM-DD
+      const realOptionData = await polygonService.getOptionQuote(ticker, strikePrice, expiryDateString, strategyType);
+      
+      let finalEntryPrice: number;
+      let actualImpliedVolatility: number;
+      let realGreeks: any = null;
+      
+      // Validate Polygon response has complete data (premium, IV, delta all required for solver)
+      const hasCompletePolygonData = realOptionData && 
+        realOptionData.premium > 0 && 
+        realOptionData.impliedVolatility > 0 && 
+        Math.abs(realOptionData.greeks.delta) > 0.001;
+      
+      if (hasCompletePolygonData) {
+        // Use REAL market data from Polygon (complete and valid)
+        finalEntryPrice = realOptionData.premium;
+        actualImpliedVolatility = realOptionData.impliedVolatility;
+        realGreeks = realOptionData.greeks;
+        console.log(`${ticker}: ✅ Using REAL Polygon option data - Premium $${finalEntryPrice.toFixed(2)}, IV ${(actualImpliedVolatility * 100).toFixed(1)}%, Delta ${realGreeks.delta.toFixed(4)}`);
+      } else {
+        if (realOptionData) {
+          console.warn(`${ticker}: ⚠️ Polygon data incomplete (Premium: ${realOptionData.premium}, IV: ${realOptionData.impliedVolatility}, Delta: ${realOptionData.greeks?.delta}) - falling back to Black-Scholes`);
+        }
+        // Fall back to Black-Scholes estimate
+        const timeToExpiry = targetDays / 365;
+        const estimatedPrice = this.estimateEliteOptionPrice(currentPrice, strikePrice, timeToExpiry, impliedVolatility, strategyType);
+        finalEntryPrice = Math.max(0.25, estimatedPrice);
+        actualImpliedVolatility = impliedVolatility;
+        console.log(`${ticker}: ⚠️ Using Black-Scholes estimate - Premium $${finalEntryPrice.toFixed(2)} (Polygon data unavailable or incomplete)`);
+      }
       
       // Contract sizing for day trading ($2000 budget for high-priced instruments like SPX)
       // Use instrument-specific contract multipliers
@@ -1461,14 +1566,61 @@ export class AIAnalysisService {
         console.log(`${ticker}: Using current market entry $${stockEntryPrice.toFixed(2)} (no 52w range available)`);
       }
       
-      // Calculate stock exit price target for day trading
-      // For CALL: stock needs to be above strike + exitPrice for max profit
-      // For PUT: stock needs to be below strike - exitPrice for max profit
-      const stockExitPrice = strategyType === 'call' 
-        ? strikePrice + (exitPrice * 0.5) // Day trading: 50% of premium gain
-        : strikePrice - (exitPrice * 0.5);
+      // Calculate stock exit price target using Black-Scholes solver
+      const { BlackScholesCalculator } = await import('./financialCalculations');
+      let stockExitPrice: number = currentPrice; // Initialize to current price as fallback
       
-      console.log(`${ticker}: Day Trade ${strategyType.toUpperCase()} - Strike $${strikePrice.toFixed(2)}, Premium $${finalEntryPrice.toFixed(2)}, ${contracts} contracts, ${holdDays}d hold, Exit $${exitPrice.toFixed(2)}`);
+      if (actualImpliedVolatility > 0.001 && targetDays > 0) {
+        // Use Black-Scholes solver to find stock price that yields target exit premium
+        const timeToExpiry = targetDays / 365;
+        const solvedPrice = BlackScholesCalculator.solveStockPriceForTargetPremium(
+          exitPrice,
+          strikePrice,
+          timeToExpiry,
+          this.RISK_FREE_RATE,
+          actualImpliedVolatility,
+          strategyType,
+          currentPrice
+        );
+        
+        if (solvedPrice && solvedPrice > 0) {
+          stockExitPrice = solvedPrice;
+          console.log(`${ticker}: ✅ Solved stock exit price: $${stockExitPrice.toFixed(2)} for target premium $${exitPrice.toFixed(2)}`);
+        } else {
+          // Solver failed, use delta fallback (ALWAYS succeeds)
+          const delta = (realGreeks?.delta && Math.abs(realGreeks.delta) > 0.001) ? realGreeks.delta : 0.5;
+          stockExitPrice = BlackScholesCalculator.estimateStockPriceFromDelta(
+            finalEntryPrice,
+            exitPrice,
+            delta,
+            currentPrice,
+            strategyType,
+            contractMultiplier
+          );
+          console.log(`${ticker}: ⚠️ Solver failed, using delta fallback: $${stockExitPrice.toFixed(2)} (delta: ${delta.toFixed(4)})`);
+        }
+      } else {
+        // No valid IV available, use delta-based estimate (ALWAYS succeeds)
+        const delta = (realGreeks?.delta && Math.abs(realGreeks.delta) > 0.001) ? realGreeks.delta : 0.5;
+        stockExitPrice = BlackScholesCalculator.estimateStockPriceFromDelta(
+          finalEntryPrice,
+          exitPrice,
+          delta,
+          currentPrice,
+          strategyType,
+          contractMultiplier
+        );
+        console.log(`${ticker}: ⚠️ No valid IV (${actualImpliedVolatility}), using delta estimate: $${stockExitPrice.toFixed(2)} (delta: ${delta.toFixed(4)})`);
+      }
+      
+      // Final safety check: ensure stockExitPrice is valid and within reasonable bounds
+      if (!stockExitPrice || stockExitPrice <= 0 || isNaN(stockExitPrice)) {
+        // Ultimate fallback: strike ± 5% for calls/puts
+        stockExitPrice = strategyType === 'call' ? strikePrice * 1.05 : strikePrice * 0.95;
+        console.warn(`${ticker}: ⚠️ Invalid exit price detected, using fallback: $${stockExitPrice.toFixed(2)}`);
+      }
+      
+      console.log(`${ticker}: Day Trade ${strategyType.toUpperCase()} - Strike $${strikePrice.toFixed(2)}, Entry Premium $${finalEntryPrice.toFixed(2)}, Exit Premium $${exitPrice.toFixed(2)}, Stock Exit $${stockExitPrice.toFixed(2)}, ${contracts} contracts, ${holdDays}d hold`);
       
       return {
         strikePrice: Math.round(strikePrice * 100) / 100,
@@ -1481,7 +1633,7 @@ export class AIAnalysisService {
         totalCost: Math.round(totalTradeCost * 100) / 100,
         contracts: Math.max(1, contracts),
         holdDays: Math.max(1, holdDays),
-        impliedVolatility: Math.round(impliedVolatility * 10000) / 10000
+        impliedVolatility: Math.round(actualImpliedVolatility * 10000) / 10000
       };
       
     } catch (error) {

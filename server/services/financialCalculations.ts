@@ -175,6 +175,186 @@ export class BlackScholesCalculator {
     return this.roundToDecimalPlaces(sigma, 4);
   }
 
+  /**
+   * Solve for stock price that yields a target option premium
+   * Uses bisection + Newton-Raphson hybrid approach for robust convergence
+   * @param targetPremium - Desired option premium/price
+   * @param K - Strike price
+   * @param T - Time to expiration (in years)
+   * @param r - Risk-free rate
+   * @param sigma - Implied volatility
+   * @param optionType - 'call' or 'put'
+   * @param currentStockPrice - Current stock price (for initial bracket)
+   * @returns Stock price that produces the target premium, or null if not solvable
+   */
+  static solveStockPriceForTargetPremium(
+    targetPremium: number,
+    K: number,
+    T: number,
+    r: number,
+    sigma: number,
+    optionType: 'call' | 'put',
+    currentStockPrice: number
+  ): number | null {
+    // Input validation
+    if (sigma <= 0 || T <= 0.0005 || targetPremium <= 0) {
+      return null;
+    }
+
+    // Check if target premium is achievable (must be >= intrinsic value)
+    const intrinsicValue = optionType === 'call' ? 
+      Math.max(0, currentStockPrice - K) : 
+      Math.max(0, K - currentStockPrice);
+    
+    if (targetPremium < intrinsicValue * 0.5) {
+      // Target premium too low to be realistic
+      return null;
+    }
+
+    // Adaptive bracketing: start with [0.4×S, 2.2×S]
+    let lowerBound = currentStockPrice * 0.4;
+    let upperBound = currentStockPrice * 2.2;
+    
+    // Calculate prices at boundaries
+    let lowerPrice = this.calculateOptionPrice(lowerBound, K, T, r, sigma, optionType);
+    let upperPrice = this.calculateOptionPrice(upperBound, K, T, r, sigma, optionType);
+    
+    // Expand bracket if target is outside
+    let attempts = 0;
+    while ((targetPremium < lowerPrice || targetPremium > upperPrice) && attempts < 5) {
+      if (targetPremium < lowerPrice) {
+        upperBound = lowerBound;
+        upperPrice = lowerPrice;
+        lowerBound *= 0.5;
+        lowerPrice = this.calculateOptionPrice(lowerBound, K, T, r, sigma, optionType);
+      } else {
+        lowerBound = upperBound;
+        lowerPrice = upperPrice;
+        upperBound *= 1.5;
+        upperPrice = this.calculateOptionPrice(upperBound, K, T, r, sigma, optionType);
+      }
+      attempts++;
+    }
+    
+    // If still can't bracket, return null
+    if (targetPremium < lowerPrice || targetPremium > upperPrice) {
+      return null;
+    }
+
+    // Bisection method for first 8 iterations (robust)
+    const bisectionIterations = 8;
+    for (let i = 0; i < bisectionIterations; i++) {
+      const mid = (lowerBound + upperBound) / 2;
+      const midPrice = this.calculateOptionPrice(mid, K, T, r, sigma, optionType);
+      
+      if (Math.abs(midPrice - targetPremium) < 0.01) {
+        return this.roundToDecimalPlaces(mid, 2);
+      }
+      
+      if (midPrice < targetPremium) {
+        if (optionType === 'call') {
+          lowerBound = mid;
+        } else {
+          upperBound = mid;
+        }
+      } else {
+        if (optionType === 'call') {
+          upperBound = mid;
+        } else {
+          lowerBound = mid;
+        }
+      }
+    }
+
+    // Newton-Raphson refinement (faster convergence)
+    let S = (lowerBound + upperBound) / 2;
+    const maxIterations = 20;
+    const tolerance = 0.01;
+    
+    for (let i = 0; i < maxIterations; i++) {
+      const price = this.calculateOptionPrice(S, K, T, r, sigma, optionType);
+      const diff = price - targetPremium;
+      
+      if (Math.abs(diff) < tolerance) {
+        return this.roundToDecimalPlaces(S, 2);
+      }
+      
+      // Use delta as derivative (dPrice/dS)
+      const delta = this.calculateGreeks(S, K, T, r, sigma, optionType).delta;
+      
+      if (Math.abs(delta) < 0.0001) break;
+      
+      S = S - diff / delta;
+      
+      // Keep S in reasonable bounds
+      S = Math.max(lowerBound, Math.min(upperBound, S));
+    }
+    
+    return this.roundToDecimalPlaces(S, 2);
+  }
+
+  /**
+   * Delta-based fallback approximation when IV is unavailable
+   * @param entryPremium - Current option premium
+   * @param exitPremium - Target exit premium
+   * @param delta - Option delta
+   * @param currentStockPrice - Current stock price
+   * @param optionType - 'call' or 'put'
+   * @param contractMultiplier - Contract size (usually 100)
+   * @returns Estimated stock exit price (always returns valid positive number)
+   */
+  static estimateStockPriceFromDelta(
+    entryPremium: number,
+    exitPremium: number,
+    delta: number,
+    currentStockPrice: number,
+    optionType: 'call' | 'put',
+    contractMultiplier: number = 100
+  ): number {
+    // Validate inputs
+    if (!entryPremium || !exitPremium || !delta || !currentStockPrice || currentStockPrice <= 0) {
+      // Fallback: return current price if inputs invalid
+      return this.roundToDecimalPlaces(Math.max(1, currentStockPrice || 100), 2);
+    }
+    
+    // Premium change per contract
+    const premiumChange = exitPremium - entryPremium;
+    
+    // Ensure delta is reasonable (0.001 to 1.0 for absolute value)
+    const safeDelta = Math.max(0.001, Math.min(1.0, Math.abs(delta)));
+    
+    // Stock price change needed (delta represents price change per $1 stock move)
+    // Delta relates premium change to stock price: Δpremium ≈ delta × ΔstockPrice
+    const stockPriceChange = premiumChange / safeDelta;
+    
+    // Calculate exit price based on option type
+    let stockExitPrice: number;
+    if (optionType === 'call') {
+      // CALL: stock needs to rise for premium to increase
+      stockExitPrice = currentStockPrice + stockPriceChange;
+    } else {
+      // PUT: stock needs to fall for premium to increase
+      stockExitPrice = currentStockPrice - stockPriceChange;
+    }
+    
+    // Multi-layer safety clamping:
+    // 1. Must be positive (minimum $1)
+    stockExitPrice = Math.max(1, stockExitPrice);
+    
+    // 2. Clamp to ±15% of current price (realistic day/swing trade range)
+    const maxChangePercent = 0.15;
+    const lowerBound = currentStockPrice * (1 - maxChangePercent);
+    const upperBound = currentStockPrice * (1 + maxChangePercent);
+    stockExitPrice = Math.max(lowerBound, Math.min(upperBound, stockExitPrice));
+    
+    // 3. Final sanity check: if somehow still invalid, return current price ± 5%
+    if (isNaN(stockExitPrice) || stockExitPrice <= 0) {
+      stockExitPrice = currentStockPrice * (optionType === 'call' ? 1.05 : 0.95);
+    }
+    
+    return this.roundToDecimalPlaces(stockExitPrice, 2);
+  }
+
   // Calculate portfolio Greeks for multiple positions
   static calculatePortfolioGreeks(positions: Array<{
     quantity: number;

@@ -117,17 +117,26 @@ Preferred communication style: Simple, everyday language.
 
 **Priority Order**: Polygon → Tastytrade → Google Finance → MarketWatch
 
-- **Polygon/Massive.com** (PRIMARY): Real-time market data via WebSocket
+- **Polygon/Massive.com** (PRIMARY): Real-time market data via WebSocket + REST API
   - **Plan**: Options Advanced ($199/month) - Unlimited API calls, 5+ years historical data, 100% market coverage
-  - **WebSocket**: Real-time streaming for stocks AND options via wss://socket.massive.com/options
-  - **Stock Data Source**: WebSocket provides real-time stock quotes (bid/ask/last price/volume)
-  - **REST API**: Reference endpoints for ticker lists (/v3/reference/tickers) - stock quote REST endpoints require separate Stocks plan
+  - **Stock Quotes**: WebSocket streaming via wss://socket.massive.com/options for real-time bid/ask/last price/volume
+  - **Options Quotes**: REST API via `/v3/snapshot/options/{underlying}/{contract}` for on-demand premiums, Greeks, and IV
+  - **Architectural Decision**: Use REST API for options (not WebSocket) because:
+    - Scans only need 3-5 option contracts on-demand (when user clicks refresh)
+    - REST provides complete data (premiums, IV, Greeks) in single call
+    - WebSocket would require complex dynamic subscriptions without providing Greeks
+    - Hybrid approach: WebSocket for continuous stock quotes, REST for occasional options quotes
+  - **Options Quote Reliability**: 3-attempt retry with exponential backoff (1s, 2s, 4s), 1-minute caching per contract
   - **Authentication**: API key authentication (POLYGON_API_KEY secret)
-  - **Features**: Real-time stock quotes, options data, ticker reference API, WebSocket subscriptions
-  - **Caching**: In-memory quote cache with 10-second freshness threshold
-  - **Coverage**: 100% US stocks and options via WebSocket
-  - **Connection Stability**: Automatic reconnection with 5 max retry attempts
-  - **Architecture**: WebSocket-first for stock quotes → Falls back to Tastytrade → Final fallback to web scraping
+  - **Features**: Real-time stock quotes (WebSocket), options premiums/Greeks/IV (REST), ticker reference API
+  - **Caching**: 
+    - Stock quotes: In-memory with 10-second freshness threshold
+    - Options quotes: In-memory with 1-minute TTL for scan optimization
+  - **Coverage**: 100% US stocks and options
+  - **Connection Stability**: WebSocket auto-reconnect (5 max attempts), REST retry with backoff
+  - **Architecture**: 
+    - Stock quotes: WebSocket-first → Tastytrade fallback → Web scraping final
+    - Options quotes: REST API with Black-Scholes fallback when Polygon unavailable
 
 - **Tastytrade API** (FALLBACK): Real-time market data via DXLink WebSocket streaming
   - **Authentication**: OAuth-based login with session tokens (stored in TASTYTRADE_USERNAME and TASTYTRADE_PASSWORD secrets)

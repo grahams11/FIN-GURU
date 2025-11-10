@@ -69,6 +69,10 @@ class PolygonService {
   private lastHeartbeatTimestamp: number = 0;
   private connectionStatus: ConnectionStatus = ConnectionStatus.DISCONNECTED;
   private quoteFreshnessThreshold = 10000; // 10 seconds - quotes older than this are considered stale
+  
+  // Options quote caching (short-lived cache for scan optimization)
+  private optionsQuoteCache: Map<string, { data: any; timestamp: number }> = new Map();
+  private optionsCacheTTL = 60000; // 1 minute cache for options quotes
 
   constructor() {
     // Use the main Polygon API key for WebSocket authentication
@@ -579,6 +583,137 @@ class PolygonService {
       return null;
     } catch (error: any) {
       // Silently fail for individual ticker details (avoid log spam)
+      return null;
+    }
+  }
+
+  /**
+   * Fetch real option quote with premium, Greeks, and implied volatility
+   * Includes retry logic and short-lived caching for reliability
+   * @param underlying - Underlying symbol (e.g., "SPX", "AAPL")
+   * @param strikePrice - Strike price (e.g., 6800)
+   * @param expiryDate - Expiry date in YYYY-MM-DD format
+   * @param optionType - 'call' or 'put'
+   * @returns Option data with premium, greeks, and IV, or null if not found
+   */
+  async getOptionQuote(
+    underlying: string,
+    strikePrice: number,
+    expiryDate: string,
+    optionType: 'call' | 'put'
+  ): Promise<{
+    premium: number;
+    bid: number;
+    ask: number;
+    greeks: {
+      delta: number;
+      gamma: number;
+      theta: number;
+      vega: number;
+    };
+    impliedVolatility: number;
+    openInterest: number;
+  } | null> {
+    try {
+      // Format option ticker: O:{underlying}{YYMMDD}{C/P}{strike*1000}
+      // Example: O:SPX250117C06800000 for SPX Jan 17, 2025 $6800 Call
+      const date = new Date(expiryDate);
+      const yy = date.getFullYear().toString().slice(-2);
+      const mm = (date.getMonth() + 1).toString().padStart(2, '0');
+      const dd = date.getDate().toString().padStart(2, '0');
+      const callPut = optionType.toLowerCase() === 'call' ? 'C' : 'P'; // Normalize to uppercase
+      const strike = Math.round(strikePrice * 1000).toString().padStart(8, '0');
+      
+      const optionTicker = `O:${underlying.toUpperCase()}${yy}${mm}${dd}${callPut}${strike}`;
+      const cacheKey = optionTicker; // Already normalized (uppercase underlying + C/P)
+      
+      // Check cache first (1-minute TTL)
+      const cached = this.optionsQuoteCache.get(cacheKey);
+      if (cached && Date.now() - cached.timestamp < this.optionsCacheTTL) {
+        console.log(`💾 Using cached option quote: ${optionTicker}`);
+        return cached.data;
+      }
+      
+      console.log(`📊 Fetching Polygon option quote: ${optionTicker}`);
+      
+      // Retry logic: 3 attempts with exponential backoff
+      const maxRetries = 3;
+      let lastError: any = null;
+      
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          const response = await axios.get(
+            `https://api.polygon.io/v3/snapshot/options/${underlying}/${optionTicker}`,
+            {
+              params: { apiKey: this.apiKey },
+              timeout: 5000
+            }
+          );
+          
+          if (response.data?.results) {
+            const result = response.data.results;
+            const quote = result.last_quote;
+            const greeks = result.greeks;
+            
+            if (!quote || !greeks) {
+              console.warn(`⚠️ ${optionTicker}: Missing quote or greeks data`);
+              return null;
+            }
+            
+            const premium = quote.midpoint || ((quote.bid + quote.ask) / 2);
+            
+            const optionData = {
+              premium,
+              bid: quote.bid,
+              ask: quote.ask,
+              greeks: {
+                delta: greeks.delta || 0,
+                gamma: greeks.gamma || 0,
+                theta: greeks.theta || 0,
+                vega: greeks.vega || 0
+              },
+              impliedVolatility: result.implied_volatility || 0,
+              openInterest: result.open_interest || 0
+            };
+            
+            // Cache the successful result
+            this.optionsQuoteCache.set(cacheKey, {
+              data: optionData,
+              timestamp: Date.now()
+            });
+            
+            console.log(`✅ ${optionTicker}: Premium $${premium.toFixed(2)}, Delta ${greeks.delta?.toFixed(4)}, IV ${(result.implied_volatility * 100).toFixed(1)}%`);
+            
+            return optionData;
+          }
+          
+          // No results found
+          return null;
+          
+        } catch (error: any) {
+          lastError = error;
+          
+          // Don't retry on 404 or other client errors
+          if (error.response?.status && error.response.status >= 400 && error.response.status < 500) {
+            console.warn(`⚠️ ${optionTicker}: Client error ${error.response.status}, not retrying`);
+            return null;
+          }
+          
+          // Retry on network/server errors
+          if (attempt < maxRetries) {
+            const backoffMs = Math.pow(2, attempt - 1) * 1000; // 1s, 2s, 4s
+            console.warn(`⚠️ ${optionTicker}: Attempt ${attempt}/${maxRetries} failed, retrying in ${backoffMs}ms...`);
+            await new Promise(resolve => setTimeout(resolve, backoffMs));
+          }
+        }
+      }
+      
+      // All retries exhausted
+      console.error(`❌ Error fetching option quote for ${underlying} after ${maxRetries} attempts:`, lastError?.message);
+      return null;
+      
+    } catch (error: any) {
+      console.error(`❌ Unexpected error in getOptionQuote for ${underlying}:`, error.message);
       return null;
     }
   }
