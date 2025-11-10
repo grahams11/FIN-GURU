@@ -153,14 +153,21 @@ class PolygonService {
       return;
     }
 
+    // Trim any whitespace from API key
+    const trimmedKey = this.apiKey.trim();
+    
     console.log('🔐 Authenticating with Polygon...');
+    console.log(`🔑 Polygon credential detected: ${Boolean(trimmedKey)}`);
+    console.log(`🔑 Credential length: ${trimmedKey.length} chars`);
+    console.log(`🔑 Credential starts with: ${trimmedKey.substring(0, 4)}...`);
     
     const authMessage = {
       action: 'auth',
-      params: this.apiKey
+      params: trimmedKey
     };
 
     this.ws.send(JSON.stringify(authMessage));
+    console.log(`📤 Auth message sent with action: ${authMessage.action}`);
   }
 
   /**
