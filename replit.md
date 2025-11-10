@@ -70,6 +70,24 @@ Preferred communication style: Simple, everyday language.
 - **Fibonacci Badge**: Displays "FIB 0.707" or "FIB 0.618" with tooltip.
 - **Estimated Profit**: Prominent display of projected dollar profit.
 
+### Portfolio Exit Analysis System
+- **Risk Management**: Automated stop loss recommendations at 45% loss threshold to protect capital.
+- **Profit-Taking Strategy**: Incremental exit recommendations starting at 100% ROI:
+  - +100% ROI: Trim 50% of position
+  - +150% ROI: Trim additional 25%
+  - +200% ROI: Close remaining position
+- **Opportunity Comparison**: Identifies better trade opportunities from current scanner results for capital reallocation.
+- **Real-Time P&L**: Live profit/loss tracking with SSE-powered price updates and 100x contract multiplier for options.
+- **Greeks Monitoring**: Displays real-time Greeks (delta, gamma, theta, vega, rho) for options positions with time decay alerts.
+- **Position Management**: Full CRUD operations for portfolio positions via REST API.
+- **API Routes**:
+  - `GET /api/portfolio/positions` - Fetch open positions
+  - `POST /api/portfolio/positions` - Add new position
+  - `DELETE /api/portfolio/positions/:id` - Close position
+  - `GET /api/portfolio/analysis` - Get exit analysis and recommendations
+  - `GET /api/portfolio/opportunities` - Compare against current top opportunities
+- **Contract Multiplier**: Options P&L calculations apply 100x multiplier (1 contract = 100 shares) for accurate pricing.
+
 # External Dependencies
 
 ## Database Services
