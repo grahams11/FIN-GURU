@@ -8,6 +8,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Separator } from "@/components/ui/separator";
 import { TrendingUp, TrendingDown, AlertTriangle, DollarSign, Activity, Clock, Target } from "lucide-react";
 import type { PortfolioPosition, PositionAnalysis, PortfolioAnalysis } from "@shared/schema";
+import { getContractMultiplier } from "@shared/constants";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useLiveQuotes } from "@/hooks/use-live-quotes";
 import { Navigation } from "@/components/Navigation";
@@ -196,8 +197,8 @@ export default function Portfolio() {
               {openPositions.map((position) => {
                 const liveQuote = quotes[position.ticker];
                 const currentPrice = liveQuote?.price || position.currentPrice || position.avgCost;
-                // Apply 100x contract multiplier for options
-                const contractMultiplier = position.positionType === 'options' ? 100 : 1;
+                // Apply contract multiplier (100x for options, 1x for stocks)
+                const contractMultiplier = getContractMultiplier(position.positionType);
                 const totalCost = position.avgCost * position.quantity * contractMultiplier;
                 const currentValue = currentPrice * position.quantity * contractMultiplier;
                 const pnl = currentValue - totalCost;

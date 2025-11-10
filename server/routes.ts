@@ -884,16 +884,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Get all open portfolio positions
+  // Get all open portfolio positions from Tastytrade account
   app.get('/api/portfolio/positions', async (req, res) => {
     try {
-      const userId = req.query.userId as string | undefined;
-      const positions = await storage.getPositions(userId);
+      // Fetch real positions from Tastytrade API
+      const positions = await tastytradeService.fetchPositions();
       
-      // Filter to only open positions
-      const openPositions = positions.filter(p => p.status === 'open');
-      
-      res.json(openPositions);
+      res.json(positions);
     } catch (error: any) {
       console.error('Error fetching positions:', error);
       res.status(500).json({ message: 'Failed to fetch positions' });
@@ -939,11 +936,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Get full portfolio analysis with exit recommendations
   app.get('/api/portfolio/analysis', async (req, res) => {
     try {
-      const userId = req.query.userId as string | undefined;
-      
-      // Get open positions
-      const positions = await storage.getPositions(userId);
-      const openPositions = positions.filter(p => p.status === 'open');
+      // Get real positions from Tastytrade
+      const openPositions = await tastytradeService.fetchPositions();
       
       // Get current prices from quote caches
       const currentPrices = new Map<string, number>();

@@ -1,4 +1,5 @@
 import type { PortfolioPosition, PositionAnalysis, PortfolioAnalysis, Greeks, TradeRecommendation, OptionsMetadata } from '@shared/schema';
+import { getContractMultiplier } from '@shared/constants';
 import { BlackScholesCalculator } from './financialCalculations';
 
 interface ExitRecommendation {
@@ -23,7 +24,7 @@ export class ExitAnalysisService {
     const isOptions = position.positionType === 'options';
     
     // Calculate P&L with proper contract multiplier for options
-    const contractMultiplier = isOptions ? 100 : 1; // Options contracts control 100 shares
+    const contractMultiplier = getContractMultiplier(position.positionType);
     const totalCost = position.avgCost * position.quantity * contractMultiplier;
     const currentValue = currentPrice * position.quantity * contractMultiplier;
     const unrealizedPnL = currentValue - totalCost;
