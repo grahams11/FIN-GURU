@@ -66,10 +66,17 @@ Preferred communication style: Simple, everyday language.
 - **Priority**: SPX day trading play ALWAYS appears in position #1
 
 ### Elite Dual-Strategy Scanner (Positions 3-5)
-- **Stock Universe**: Only scans Tastytrade-supported symbols for real-time data accuracy:
-  - **Tech Stocks**: AAPL, TSLA, NVDA, MSFT, GOOGL, META, AMZN
-  - **Major ETFs**: QQQ, SPY
-  - All symbols have continuous WebSocket price updates from Tastytrade DXLink
+- **Stock Universe**: Full market scanner covering 100+ stocks across all sectors:
+  - **Tech Giants**: AAPL, MSFT, GOOGL, AMZN, META, NVDA, TSLA, AMD, INTC, CRM, ORCL, ADBE, NFLX
+  - **Semiconductors & AI**: TSM, AVGO, QCOM, MU, AMAT, LRCX, KLAC, ARM, MRVL, ASML
+  - **Finance**: JPM, BAC, WFC, GS, MS, C, BLK, SCHW, V, MA, AXP
+  - **Healthcare**: JNJ, UNH, PFE, ABBV, MRK, TMO, LLY, AMGN, GILD, MRNA
+  - **Energy**: XOM, CVX, COP, SLB, EOG, MPC, PSX, VLO, OXY, HAL
+  - **Consumer**: WMT, HD, COST, NKE, SBUX, MCD, DIS, TGT, LOW, BKNG
+  - **Industrial**: BA, CAT, GE, HON, LMT, RTX, UPS, DE, MMM, EMR
+  - **EVs & Auto**: F, GM, RIVN, LCID, NIO, XPEV, LI
+  - **Communication**: T, VZ, TMUS, CMCSA, CHTR
+  - **Major ETFs**: SPY, QQQ, IWM, DIA, VTI, VOO, XLF, XLE, XLK, XLV
 - **RSI-Only Momentum Scanner**: No longer reliant on 52-week data or changePercent (Google Finance limitation)
 - **CALL Strategy**: RSI < 48 (oversold/pullback) + market not bearish → Bullish reversal plays
 - **PUT Strategy**: RSI > 62 (overbought/reversal) + market not bullish → Bearish reversal plays

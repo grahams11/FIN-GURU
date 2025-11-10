@@ -264,11 +264,39 @@ export class AIAnalysisService {
     return fibEntry;
   }
   
-  // SWING TRADING TICKERS (Regular scanner)
-  // Only include stocks with Tastytrade real-time data support
+  // SWING TRADING TICKERS (Full market scanner)
+  // Comprehensive list of popular stocks across all sectors
   private static readonly TICKERS = [
-    'AAPL', 'TSLA', 'NVDA', 'MSFT', 'GOOGL', 'META', 'AMZN',
-    'QQQ', 'SPY'  // Major ETFs with live data
+    // Major Tech
+    'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'NVDA', 'TSLA', 'AMD', 'INTC', 'CRM',
+    'ORCL', 'ADBE', 'NFLX', 'PYPL', 'SQ', 'SHOP', 'SNOW', 'PLTR', 'COIN', 'RBLX',
+    
+    // Semiconductors & AI
+    'TSM', 'AVGO', 'QCOM', 'MU', 'AMAT', 'LRCX', 'KLAC', 'ARM', 'MRVL', 'ASML',
+    
+    // Finance
+    'JPM', 'BAC', 'WFC', 'GS', 'MS', 'C', 'BLK', 'SCHW', 'V', 'MA', 'AXP',
+    
+    // Healthcare & Biotech
+    'JNJ', 'UNH', 'PFE', 'ABBV', 'MRK', 'TMO', 'LLY', 'AMGN', 'GILD', 'MRNA',
+    
+    // Energy
+    'XOM', 'CVX', 'COP', 'SLB', 'EOG', 'MPC', 'PSX', 'VLO', 'OXY', 'HAL',
+    
+    // Consumer & Retail
+    'WMT', 'HD', 'COST', 'NKE', 'SBUX', 'MCD', 'DIS', 'TGT', 'LOW', 'BKNG',
+    
+    // Industrial & Aerospace
+    'BA', 'CAT', 'GE', 'HON', 'LMT', 'RTX', 'UPS', 'DE', 'MMM', 'EMR',
+    
+    // Electric Vehicles & Auto
+    'F', 'GM', 'RIVN', 'LCID', 'NIO', 'XPEV', 'LI',
+    
+    // Communication & Media
+    'T', 'VZ', 'TMUS', 'CMCSA', 'CHTR', 'DIS', 'PARA',
+    
+    // Major ETFs
+    'SPY', 'QQQ', 'IWM', 'DIA', 'VTI', 'VOO', 'XLF', 'XLE', 'XLK', 'XLV'
   ];
   private static readonly RISK_FREE_RATE = 0.045;
 
