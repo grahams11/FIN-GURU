@@ -770,7 +770,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Fetch real positions from Tastytrade API
       const positions = await tastytradeService.fetchPositions();
       
-      res.json(positions);
+      // Update each position with live market prices
+      const updatedPositions = await Promise.all(positions.map(async (position) => {
+        let livePrice = position.currentPrice;
+        
+        // For options, try to get live options quote from Tastytrade
+        if (position.positionType === 'options' && position.metadata) {
+          const { strike, expiryDate, optionType } = position.metadata;
+          if (strike && expiryDate && optionType) {
+            const optionQuote = await tastytradeService.getOptionQuote(
+              position.ticker,
+              strike,
+              expiryDate,
+              optionType
+            );
+            if (optionQuote && optionQuote.premium > 0) {
+              livePrice = optionQuote.premium;
+            }
+          }
+        } else {
+          // For stocks, try Polygon first, then Tastytrade
+          const polygonQuote = await polygonService.getCachedQuote(position.ticker);
+          if (polygonQuote && polygonQuote.lastPrice > 0) {
+            livePrice = polygonQuote.lastPrice;
+          } else {
+            const tastyQuote = await tastytradeService.getCachedQuote(position.ticker);
+            if (tastyQuote && tastyQuote.lastPrice > 0) {
+              livePrice = tastyQuote.lastPrice;
+            }
+          }
+        }
+        
+        // Calculate fresh P/L with live price
+        const multiplier = position.positionType === 'options' ? 100 : 1;
+        const unrealizedPnL = (livePrice - position.avgCost) * position.quantity * multiplier;
+        
+        return {
+          ...position,
+          currentPrice: livePrice,
+          unrealizedPnL
+        };
+      }));
+      
+      res.json(updatedPositions);
     } catch (error: any) {
       console.error('Error fetching positions:', error);
       res.status(500).json({ message: 'Failed to fetch positions' });
