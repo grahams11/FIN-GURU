@@ -15,7 +15,7 @@ import { useLiveQuotes } from "@/hooks/use-live-quotes";
 import type { MarketOverviewData, AiInsights, OptionsTrade, PortfolioSummary, SectorData } from "@shared/schema";
 
 export default function Dashboard() {
-  const [activeView, setActiveView] = useState<'dashboard' | 'portfolio' | 'analytics'>('dashboard');
+  const [activeView, setActiveView] = useState<'dashboard' | 'analytics'>('dashboard');
 
   const { data: marketData, isLoading: marketLoading } = useQuery<MarketOverviewData>({
     queryKey: ["/api/market-overview"],
@@ -58,78 +58,7 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
-      <header className="bg-card border-b border-border">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16">
-            <div className="flex items-center space-x-4">
-              <div className="flex items-center space-x-2">
-                <div className="w-8 h-8 bg-primary rounded-md flex items-center justify-center">
-                  <span className="text-primary-foreground font-bold text-lg">1</span>
-                </div>
-                <h1 className="text-xl font-bold text-foreground">The 1 App</h1>
-              </div>
-              <div className="hidden md:block">
-                <nav className="flex space-x-8">
-                  <button 
-                    onClick={() => setActiveView('dashboard')}
-                    className={`${
-                      activeView === 'dashboard' 
-                        ? 'text-primary font-medium border-b-2 border-primary pb-2' 
-                        : 'text-muted-foreground hover:text-foreground transition-colors'
-                    }`}
-                    data-testid="nav-dashboard"
-                  >
-                    Dashboard
-                  </button>
-                  <button 
-                    onClick={() => setActiveView('portfolio')}
-                    className={`${
-                      activeView === 'portfolio' 
-                        ? 'text-primary font-medium border-b-2 border-primary pb-2' 
-                        : 'text-muted-foreground hover:text-foreground transition-colors'
-                    }`}
-                    data-testid="nav-portfolio"
-                  >
-                    Portfolio
-                  </button>
-                  <button 
-                    onClick={() => setActiveView('analytics')}
-                    className={`${
-                      activeView === 'analytics' 
-                        ? 'text-primary font-medium border-b-2 border-primary pb-2' 
-                        : 'text-muted-foreground hover:text-foreground transition-colors'
-                    }`}
-                    data-testid="nav-analytics"
-                  >
-                    Analytics
-                  </button>
-                  <a 
-                    href="#" 
-                    className="text-muted-foreground hover:text-foreground transition-colors"
-                    data-testid="nav-settings"
-                  >
-                    Settings
-                  </a>
-                </nav>
-              </div>
-            </div>
-            <div className="flex items-center space-x-4">
-              <div className="flex items-center space-x-2 text-sm">
-                <div className={`w-2 h-2 rounded-full ${isLiveDataConnected ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`}></div>
-                <span className="text-muted-foreground" data-testid="status-live-data">
-                  {isLiveDataConnected ? 'Live Data' : 'Connecting...'}
-                </span>
-              </div>
-              <button 
-                className="text-muted-foreground hover:text-foreground"
-                data-testid="button-settings"
-              >
-                <Settings className="w-5 h-5" />
-              </button>
-            </div>
-          </div>
-        </div>
-      </header>
+      <Navigation />
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -281,17 +210,6 @@ export default function Dashboard() {
           </Card>
         </div>
           </>
-        )}
-        
-        {activeView === 'portfolio' && (
-          <div className="text-center py-12">
-            <h2 className="text-2xl font-bold text-muted-foreground">Portfolio Moved</h2>
-            <p className="text-muted-foreground mt-2">
-              Portfolio tracking now shows real Tastytrade data.
-              <br />
-              Use the "Portfolio" link in the navigation menu to view your positions.
-            </p>
-          </div>
         )}
         
         {activeView === 'analytics' && (
