@@ -6,10 +6,11 @@ import { AIAnalysisService } from "./services/aiAnalysis";
 import { PositionAnalysisService } from "./services/positionAnalysis";
 import { polygonService } from "./services/polygonService";
 import { tastytradeService } from "./services/tastytradeService";
+import { BlackScholesCalculator } from "./services/financialCalculations";
 import { insertMarketDataSchema, insertOptionsTradeSchema, insertAiInsightsSchema, insertPortfolioPositionSchema, type OptionsTrade } from "@shared/schema";
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  // Server-Sent Events endpoint for real-time quote streaming
+  // Server-Sent Events endpoint for real-time quote streaming with live Greeks
   app.get('/api/quotes/stream', async (req, res) => {
     const symbols = (req.query.symbols as string)?.split(',').filter(Boolean) || ['AAPL', 'TSLA', 'NVDA', 'MSFT'];
     
@@ -41,6 +42,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const SCRAPER_CACHE_TTL = 30000; // 30 seconds
     const SCRAPER_ERROR_BACKOFF = 60000; // Wait 60s before retrying failed symbols
     
+    // Fetch current top trades to enable live Greeks calculation
+    const topTrades = await storage.getTopTrades();
+    const tradeMap = new Map<string, OptionsTrade>();
+    topTrades.forEach(trade => tradeMap.set(trade.ticker, trade));
+    
+    // Helper function to calculate live Greeks for a trade
+    const calculateLiveGreeks = (trade: OptionsTrade, currentPrice: number) => {
+      try {
+        // Extract trade parameters
+        const strikePrice = trade.strikePrice;
+        const expirationDate = new Date(trade.expiry);
+        const today = new Date();
+        
+        // Calculate days to expiration
+        expirationDate.setHours(0, 0, 0, 0);
+        today.setHours(0, 0, 0, 0);
+        const daysToExpiration = Math.max(0, Math.ceil((expirationDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)));
+        const timeToExpiration = daysToExpiration / 365; // Convert to years
+        
+        // Use standard market assumptions
+        const riskFreeRate = 0.045; // 4.5%
+        const impliedVolatility = (trade as any).volatility || 0.30; // 30% default
+        const optionType = (trade as any).optionType || 'call';
+        
+        // Calculate Greeks using Black-Scholes
+        const greeks = BlackScholesCalculator.calculateGreeks(
+          currentPrice,
+          strikePrice,
+          timeToExpiration,
+          riskFreeRate,
+          impliedVolatility,
+          optionType as 'call' | 'put'
+        );
+        
+        return greeks;
+      } catch (error) {
+        console.error(`Error calculating Greeks for ${trade.ticker}:`, error);
+        return null;
+      }
+    };
+    
     // Send initial quotes immediately
     const sendQuotes = async () => {
       const quotes: Record<string, any> = {};
@@ -51,7 +93,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // 1. Try Polygon cache first (primary source - Options Advanced plan)
         const polygonQuote = await polygonService.getCachedQuote(symbol);
         if (polygonQuote && polygonQuote.lastPrice > 0) {
-          quotes[symbol] = {
+          const quote: any = {
             price: polygonQuote.lastPrice,
             bid: polygonQuote.bidPrice,
             ask: polygonQuote.askPrice,
@@ -59,13 +101,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
             timestamp: Date.now(),
             source: 'polygon'
           };
+          
+          // Calculate live Greeks if this symbol has an active trade
+          const trade = tradeMap.get(symbol);
+          if (trade) {
+            const liveGreeks = calculateLiveGreeks(trade, polygonQuote.lastPrice);
+            if (liveGreeks) {
+              quote.greeks = liveGreeks;
+            }
+          }
+          
+          quotes[symbol] = quote;
           continue;
         }
         
         // 2. Fallback to Tastytrade cache (secondary source)
         const tastyQuote = await tastytradeService.getCachedQuote(symbol);
         if (tastyQuote && tastyQuote.lastPrice > 0) {
-          quotes[symbol] = {
+          const quote: any = {
             price: tastyQuote.lastPrice,
             bid: tastyQuote.bidPrice,
             ask: tastyQuote.askPrice,
@@ -73,6 +126,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
             timestamp: Date.now(),
             source: 'tastytrade'
           };
+          
+          // Calculate live Greeks if this symbol has an active trade
+          const trade = tradeMap.get(symbol);
+          if (trade) {
+            const liveGreeks = calculateLiveGreeks(trade, tastyQuote.lastPrice);
+            if (liveGreeks) {
+              quote.greeks = liveGreeks;
+            }
+          }
+          
+          quotes[symbol] = quote;
           continue;
         }
         
@@ -91,7 +155,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 price: scraped.price,
                 timestamp: now
               };
-              quotes[symbol] = {
+              const quote: any = {
                 price: scraped.price,
                 bid: 0,
                 ask: 0,
@@ -99,6 +163,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 timestamp: now,
                 source: 'scraper'
               };
+              
+              // Calculate live Greeks if this symbol has an active trade
+              const trade = tradeMap.get(symbol);
+              if (trade) {
+                const liveGreeks = calculateLiveGreeks(trade, scraped.price);
+                if (liveGreeks) {
+                  quote.greeks = liveGreeks;
+                }
+              }
+              
+              quotes[symbol] = quote;
               // Clear error on success
               delete scrapedErrors[symbol];
             } else {
@@ -111,7 +186,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         } else if (cachedScrape) {
           // Use cached scraped data
-          quotes[symbol] = {
+          const quote: any = {
             price: cachedScrape.price,
             bid: 0,
             ask: 0,
@@ -119,6 +194,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
             timestamp: cachedScrape.timestamp,
             source: 'scraper_cached'
           };
+          
+          // Calculate live Greeks if this symbol has an active trade
+          const trade = tradeMap.get(symbol);
+          if (trade) {
+            const liveGreeks = calculateLiveGreeks(trade, cachedScrape.price);
+            if (liveGreeks) {
+              quote.greeks = liveGreeks;
+            }
+          }
+          
+          quotes[symbol] = quote;
         }
       }
       
