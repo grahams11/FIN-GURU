@@ -11,6 +11,7 @@ import { getContractMultiplier } from "@shared/constants";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useLiveQuotes } from "@/hooks/use-live-quotes";
 import { Navigation } from "@/components/Navigation";
+import { PortfolioAIInsights } from "@/components/PortfolioAIInsights";
 
 export default function Portfolio() {
 
@@ -179,19 +180,8 @@ export default function Portfolio() {
         </div>
       )}
 
-      {/* Portfolio Recommendations */}
-      {analysis && analysis.recommendations.length > 0 && (
-        <Alert className="border-yellow-500/50 bg-yellow-500/10">
-          <AlertTriangle className="h-4 w-4" />
-          <AlertDescription>
-            <div className="space-y-1">
-              {analysis.recommendations.map((rec, idx) => (
-                <p key={idx} className="text-sm">{rec}</p>
-              ))}
-            </div>
-          </AlertDescription>
-        </Alert>
-      )}
+      {/* AI Portfolio Insights (Hybrid Internal + Grok) */}
+      <PortfolioAIInsights />
 
       {/* Portfolio Positions with Integrated Analysis */}
       {openPositions.length === 0 ? (
