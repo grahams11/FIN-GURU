@@ -1305,6 +1305,7 @@ class TastytradeService {
           
           const matchQty = Math.min(closingQuantity, opening.quantity);
           const costPerContract = opening.netValue / opening.quantity;
+          console.log(`   Opening: qty=${opening.quantity}, netValue=${opening.netValue.toFixed(2)}, costPerContract=${costPerContract.toFixed(2)}`);
           matchedCost += costPerContract * matchQty;
           matchedQuantity += matchQty;
           closingQuantity -= matchQty;
@@ -1315,9 +1316,9 @@ class TastytradeService {
           console.warn(`⚠️ ${symbol}: INCOMPLETE COST BASIS - Closed ${closing.quantity}, only matched ${matchedQuantity}. Missing ${closingQuantity} contracts. P/L may be inaccurate!`);
         }
         
-        // P/L = closing proceeds + matched opening cost (both are signed)
-        const pnl = closing.netValue + matchedCost;
-        console.log(`📈 ${symbol}: Closed ${closing.quantity} @ ${closing.netValue.toFixed(2)}, Matched Cost=${matchedCost.toFixed(2)}, P/L=${pnl.toFixed(2)}`);
+        // P/L = closing proceeds - opening cost (both should be positive values from Tastytrade)
+        const pnl = closing.netValue - Math.abs(matchedCost);
+        console.log(`📈 ${symbol}: Closed ${closing.quantity} @ ${closing.netValue.toFixed(2)}, Matched Cost=${Math.abs(matchedCost).toFixed(2)}, P/L=${pnl.toFixed(2)}`);
         realizedDayPnL += pnl;
       });
       
