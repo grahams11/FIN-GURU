@@ -1248,7 +1248,7 @@ class TastytradeService {
   }
 
   /**
-   * Fetch today's P/L from cached DXLink ACCOUNTS data
+   * Fetch today's P/L by comparing current balance to yesterday's EOD snapshot
    */
   async fetchTodayPnL(): Promise<{ realized: number; unrealized: number; total: number }> {
     try {
@@ -1257,30 +1257,74 @@ class TastytradeService {
         return { realized: 0, unrealized: 0, total: 0 };
       }
 
-      // Read from cached account summary (populated by DXLink ACCOUNTS stream)
-      const snapshot = this.accountSummary.get(this.accountNumber);
-      
-      if (!snapshot) {
-        console.warn('⚠️ No account summary data available yet - waiting for DXLink ACCOUNTS stream');
+      // Get current net liquidation value
+      const currentBalance = await this.fetchAccountBalance();
+      const currentNetLiq = currentBalance.netLiquidatingValue;
+
+      // Calculate yesterday's date in YYYY-MM-DD format
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const yesterdayStr = yesterday.toISOString().split('T')[0];
+
+      console.log(`📅 Fetching EOD balance snapshot for ${yesterdayStr}...`);
+
+      // Get yesterday's end-of-day balance snapshot
+      const snapshotResponse = await this.apiClient.get(
+        `/accounts/${this.accountNumber}/balance-snapshots`,
+        {
+          params: {
+            'snapshot-date': yesterdayStr,
+            'time-of-day': 'EOD'
+          }
+        }
+      );
+
+      if (!snapshotResponse.data || !snapshotResponse.data.data) {
+        console.warn('⚠️ No balance snapshot available for yesterday');
+        
+        // Fallback: Try net-liq history
+        const historyResponse = await this.apiClient.get(
+          `/accounts/${this.accountNumber}/net-liq/history`,
+          {
+            params: {
+              'time-back': '3d'
+            }
+          }
+        );
+
+        if (historyResponse.data && historyResponse.data.data && historyResponse.data.data.length > 0) {
+          const history = historyResponse.data.data;
+          // Get second-to-last entry (yesterday's close)
+          const yesterdayClose = parseFloat(history[history.length - 2]?.close || history[history.length - 1]?.close || currentNetLiq);
+          const dailyPnL = currentNetLiq - yesterdayClose;
+          
+          console.log(`💰 Daily P/L (from history): $${dailyPnL.toFixed(2)} (Current: $${currentNetLiq.toFixed(2)}, Yesterday Close: $${yesterdayClose.toFixed(2)})`);
+          
+          return {
+            realized: 0,
+            unrealized: dailyPnL,
+            total: dailyPnL
+          };
+        }
+        
         return { realized: 0, unrealized: 0, total: 0 };
       }
-      
-      const { numericSummary } = snapshot;
-      
-      // Use day-equity-change as the total (absolute dollar change)
-      const total = numericSummary.dayEquityChange ?? 0;
-      const realized = numericSummary.todaysRealizedPnL ?? 0;
-      const unrealized = numericSummary.todaysUnrealizedPnL ?? 0;
-      
-      console.log(`📊 Today's P/L from DXLink: Total $${total.toFixed(2)} (Realized: $${realized.toFixed(2)}, Unrealized: $${unrealized.toFixed(2)})`);
-      
+
+      const snapshotData = snapshotResponse.data.data;
+      const yesterdayClose = parseFloat(snapshotData['net-liquidating-value'] || currentNetLiq);
+
+      // Calculate daily P/L (same as Tastytrade dashboard)
+      const dailyPnL = currentNetLiq - yesterdayClose;
+
+      console.log(`💰 Daily P/L: $${dailyPnL.toFixed(2)} (Current: $${currentNetLiq.toFixed(2)}, Yesterday EOD: $${yesterdayClose.toFixed(2)})`);
+
       return {
-        realized,
-        unrealized,
-        total
+        realized: 0,
+        unrealized: dailyPnL,
+        total: dailyPnL
       };
     } catch (error: any) {
-      console.error('❌ Error fetching today P/L:', error.message);
+      console.error('❌ Error fetching today P/L:', error.response?.data || error.message);
       return { realized: 0, unrealized: 0, total: 0 };
     }
   }
