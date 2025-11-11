@@ -79,14 +79,20 @@ export class BacktestingEngine {
       console.log(`  Generated ${recommendations.length} recommendations`);
 
       // Process each recommendation as a trade
-      for (const rec of recommendations.slice(0, 5)) { // Limit to top 5 per day
+      for (const rec of recommendations.slice(0, 3)) { // Limit to top 3 per day
+        // Check if we have enough capital for this trade
+        const positionSize = Math.min(config.maxPositionSize, capital * 0.1); // Max 10% per position
+        if (positionSize < 100) continue; // Skip if insufficient capital
+        
         const trade = await this.simulateTrade(rec, day, tradingDays);
         
         if (trade) {
+          // Update trade with actual position sizing
+          trade.totalCost = positionSize;
           trades.push(trade);
           
-          // Update capital
-          const pnl = (trade.totalCost || 0) * (trade.actualROI / 100);
+          // Update capital with P&L
+          const pnl = positionSize * (trade.actualROI / 100);
           capital += pnl;
 
           // Track drawdown
@@ -142,9 +148,11 @@ export class BacktestingEngine {
    * Simulate market scan for a historical day
    */
   private async simulateMarketScan(date: string): Promise<OptionsTrade[]> {
-    // Note: In a real backtest, we'd need historical scanner data
-    // For now, we'll use a simplified approach focusing on known liquid symbols
-    const symbols = ['SPY', 'QQQ', 'AAPL', 'TSLA', 'NVDA', 'META', 'MSFT'];
+    // Focus on 10 most liquid stocks to minimize API calls
+    const symbols = [
+      'SPY', 'QQQ', 'AAPL', 'NVDA', 'META',
+      'MSFT', 'AMZN', 'GOOGL', 'AMD', 'TSLA'
+    ];
     const recommendations: OptionsTrade[] = [];
 
     for (const symbol of symbols) {
@@ -201,8 +209,25 @@ export class BacktestingEngine {
     if (bars.length < 2) return null;
 
     const entryPrice = recommendation.stockEntryPrice || bars[0].close;
-    const profitTarget = recommendation.stockExitPrice || entryPrice * 1.05; // 5% target if not set
-    const stopLoss = entryPrice * 0.55; // 45% stop loss
+    const isCall = (recommendation.optionType || 'call') === 'call';
+    
+    // Calculate profit targets and stop losses based on option type
+    // For CALLS: profit when stock goes UP, stop loss when stock goes DOWN
+    // For PUTS: profit when stock goes DOWN, stop loss when stock goes UP
+    let profitTarget: number;
+    let stopLoss: number;
+    
+    if (isCall) {
+      // Call: +35% stock move = +175% option ROI (5x multiplier)
+      profitTarget = recommendation.stockExitPrice || entryPrice * 1.07; // 7% stock move
+      // Call: -9% stock move = -45% option loss
+      stopLoss = entryPrice * 0.91; // 9% stock drop triggers stop
+    } else {
+      // Put: -7% stock move = +35% option profit
+      profitTarget = recommendation.stockExitPrice || entryPrice * 0.93; // 7% stock drop
+      // Put: +9% stock move = -45% option loss
+      stopLoss = entryPrice * 1.09; // 9% stock rise triggers stop
+    }
     
     let exitPrice = 0;
     let exitReason: 'profit_target' | 'stop_loss' | 'expiry' = 'expiry';
@@ -219,8 +244,8 @@ export class BacktestingEngine {
       troughPrice = Math.min(troughPrice || Number.MAX_VALUE, dayLow);
 
       // Check for exits
-      if ((recommendation.optionType || 'call') === 'call') {
-        // For calls, we profit when stock goes up
+      if (isCall) {
+        // For calls, profit when stock goes UP, stop when stock goes DOWN
         if (dayHigh >= profitTarget) {
           exitPrice = profitTarget;
           exitReason = 'profit_target';
@@ -231,7 +256,7 @@ export class BacktestingEngine {
           break;
         }
       } else {
-        // For puts, we profit when stock goes down
+        // For puts, profit when stock goes DOWN, stop when stock goes UP
         if (dayLow <= profitTarget) {
           exitPrice = profitTarget;
           exitReason = 'profit_target';
@@ -250,14 +275,14 @@ export class BacktestingEngine {
       }
     }
 
-    // Calculate actual ROI
-    // For options, ROI is based on premium changes
-    // Simplified: stock movement translates to option premium movement
+    // Calculate actual ROI based on stock movement and option type
     const stockMove = ((exitPrice - entryPrice) / entryPrice) * 100;
     
-    // Options amplify stock moves (simplified multiplier)
-    const optionMultiplier = 5; // Options typically move 5x the underlying
-    let actualROI = (recommendation.optionType || 'call') === 'call' 
+    // Options amplify stock moves (simplified 5x multiplier)
+    // CALL: positive stock move = positive option ROI
+    // PUT: negative stock move = positive option ROI
+    const optionMultiplier = 5;
+    let actualROI = isCall 
       ? stockMove * optionMultiplier
       : -stockMove * optionMultiplier;
 

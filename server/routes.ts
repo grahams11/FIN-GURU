@@ -1432,6 +1432,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ message: 'Failed to fetch recommendations' });
     }
   });
+  
+  // Run historical backtest
+  app.post('/api/strategy/backtest', async (req, res) => {
+    try {
+      const { BacktestingEngine } = await import('./services/backtestingEngine');
+      
+      const { startDate, endDate, initialCapital = 10000, maxPositionSize = 1000, scanInterval = 'weekly' } = req.body;
+      
+      if (!startDate || !endDate) {
+        return res.status(400).json({ message: 'startDate and endDate are required' });
+      }
+      
+      const engine = new BacktestingEngine();
+      const result = await engine.runBacktest({
+        startDate,
+        endDate,
+        initialCapital,
+        maxPositionSize,
+        scanInterval
+      });
+      
+      res.json(result);
+    } catch (error: any) {
+      console.error('Error running backtest:', error);
+      res.status(500).json({ message: `Backtest failed: ${error.message}` });
+    }
+  });
 
   const httpServer = createServer(app);
   return httpServer;
