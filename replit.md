@@ -54,6 +54,14 @@ Preferred communication style: Simple, everyday language.
 - **Fibonacci Retracement Validation**: Validates entry points using 0.707 and 0.618 Fibonacci retracement levels based on 4-hour chart data, adding +10% AI confidence. Incorporates 5-bar fractal swing detection to identify meaningful support/resistance.
 - **Dashboard Market Overview**: Displays S&P 500, NASDAQ, and VIX % and point changes from open to close, with real-time intraday updates.
 
+### Self-Learning System (Elite Strategy Engine)
+- **Architecture**: Singleton pattern ensures single shared EliteStrategyEngine instance across AIAnalysisService and RecommendationTracker, enabling parameter adjustments to immediately affect live recommendations.
+- **Database Initialization**: Server startup loads active strategy parameters (v1.0.0) from strategy_parameters table, ensuring settings persist across restarts.
+- **Elite Filters**: Delta 0.35-0.45 (liquid sweet spot), Theta < -0.5 (quality decay), IV Rank > 30 (elevated volatility), VIX-based market regime detection.
+- **Recommendation Tracking**: Automatically tracks all generated recommendations to database with initial metrics (confidence, projected ROI, Greeks) for outcome analysis.
+- **Strategy Analytics Dashboard**: Full-featured page at /strategy route displaying live metrics, win rate trends, parameter evolution history, and tracked recommendation outcomes.
+- **Learning Loop**: RecommendationTracker.finalizeRecommendation() updates outcomes, StrategyOptimizer analyzes performance weekly, EliteStrategyEngine adjusts parameters automatically to maintain 80%+ win rate target.
+
 ### Portfolio Management (Hybrid AI)
 - **Data Source**: Fetches ALL portfolio positions from real Tastytrade API.
 - **Risk Management**: Automated stop loss at 45% loss, incremental profit-taking (50% at +100% ROI, 25% at +150% ROI, close at +200% ROI).
