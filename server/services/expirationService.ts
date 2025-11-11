@@ -21,13 +21,60 @@ class ExpirationService {
   private polygonApiKey: string;
   private tastytradeBaseUrl = 'https://api.tastyworks.com';
 
+  // Circuit breaker for rate limiting (429 responses)
+  private rateLimitBackoff: Map<string, { count: number; backoffUntil: number }> = new Map();
+  private maxRetries = 3;
+  private baseBackoffMs = 5000; // 5 seconds
+
   constructor() {
     this.polygonApiKey = process.env.POLYGON_API_KEY || '';
   }
 
   /**
+   * Check if service is in backoff for a given API provider
+   */
+  private isInBackoff(provider: 'polygon' | 'tastytrade'): boolean {
+    const backoffData = this.rateLimitBackoff.get(provider);
+    if (!backoffData) return false;
+
+    if (Date.now() < backoffData.backoffUntil) {
+      console.warn(`⏳ [ExpirationService] ${provider} in backoff until ${new Date(backoffData.backoffUntil).toISOString()}`);
+      return true;
+    }
+
+    // Backoff expired, reset
+    this.rateLimitBackoff.delete(provider);
+    return false;
+  }
+
+  /**
+   * Record rate limit hit and apply exponential backoff
+   */
+  private recordRateLimit(provider: 'polygon' | 'tastytrade'): void {
+    const backoffData = this.rateLimitBackoff.get(provider) || { count: 0, backoffUntil: 0 };
+    backoffData.count++;
+    
+    // Exponential backoff: 5s, 10s, 20s, 40s...
+    const backoffMs = this.baseBackoffMs * Math.pow(2, backoffData.count - 1);
+    backoffData.backoffUntil = Date.now() + backoffMs;
+    
+    this.rateLimitBackoff.set(provider, backoffData);
+    console.warn(`⚠️ [ExpirationService] ${provider} rate limit hit ${backoffData.count} times, backing off for ${backoffMs}ms`);
+  }
+
+  /**
+   * Clear rate limit backoff (on success)
+   */
+  private clearRateLimit(provider: 'polygon' | 'tastytrade'): void {
+    if (this.rateLimitBackoff.has(provider)) {
+      this.rateLimitBackoff.delete(provider);
+      console.log(`✅ [ExpirationService] ${provider} rate limit backoff cleared`);
+    }
+  }
+
+  /**
    * Get available expiration dates for a symbol
-   * Tries API first, falls back to calculation if API fails
+   * Unions multiple API sources, dedupes, and falls back to calculation if APIs fail
    */
   async getExpirations(
     symbol: string,
@@ -44,47 +91,73 @@ class ExpirationService {
     // Check cache first
     const cached = this.cache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < this.cacheTTL) {
-      console.log(`💾 Using cached expirations for ${symbol}`);
+      console.log(`💾 [ExpirationService] Cache hit for ${symbol}`);
+      this.logMetrics('cache_hit', symbol);
       return cached.expirations;
     }
 
+    this.logMetrics('cache_miss', symbol);
+
     try {
+      const allExpirations: ExpirationDate[] = [];
+
       // Try Tastytrade for SPX (better for index options)
-      if (symbol === 'SPX' && options.sessionToken) {
-        const expirations = await this.fetchFromTastytrade(symbol, options.sessionToken, minDays, maxDays);
-        if (expirations.length > 0) {
-          this.cache.set(cacheKey, { expirations, timestamp: Date.now() });
-          console.log(`✅ Fetched ${expirations.length} expirations for ${symbol} from Tastytrade API`);
-          return this.filterByType(expirations, filterType);
+      if (symbol === 'SPX' && options.sessionToken && !this.isInBackoff('tastytrade')) {
+        const tastyExpirations = await this.fetchFromTastytrade(symbol, options.sessionToken, minDays, maxDays);
+        if (tastyExpirations.length > 0) {
+          allExpirations.push(...tastyExpirations);
+          this.clearRateLimit('tastytrade'); // Success, clear any backoff
+          this.logMetrics('tastytrade_success', symbol, tastyExpirations.length);
+          console.log(`✅ [ExpirationService] Tastytrade: ${tastyExpirations.length} expirations for ${symbol}`);
+        } else {
+          this.logMetrics('tastytrade_empty', symbol);
         }
       }
 
-      // Try Polygon for all symbols (fallback for SPX, primary for stocks)
-      if (this.polygonApiKey) {
-        const expirations = await this.fetchFromPolygon(symbol, minDays, maxDays);
-        if (expirations.length > 0) {
-          this.cache.set(cacheKey, { expirations, timestamp: Date.now() });
-          console.log(`✅ Fetched ${expirations.length} expirations for ${symbol} from Polygon API`);
-          return this.filterByType(expirations, filterType);
+      // Try Polygon for all symbols (union with Tastytrade for SPX)
+      if (this.polygonApiKey && !this.isInBackoff('polygon')) {
+        const polygonExpirations = await this.fetchFromPolygon(symbol, minDays, maxDays);
+        if (polygonExpirations.length > 0) {
+          allExpirations.push(...polygonExpirations);
+          this.clearRateLimit('polygon'); // Success, clear any backoff
+          this.logMetrics('polygon_success', symbol, polygonExpirations.length);
+          console.log(`✅ [ExpirationService] Polygon: ${polygonExpirations.length} expirations for ${symbol}`);
+        } else {
+          this.logMetrics('polygon_empty', symbol);
         }
       }
 
-      // Fallback to calculated expirations
-      console.warn(`⚠️ API calls failed for ${symbol}, using calculated expirations`);
-      const expirations = this.calculateExpirations(minDays, maxDays);
+      // Union and dedupe API results
+      if (allExpirations.length > 0) {
+        const dedupedExpirations = this.dedupeExpirations(allExpirations);
+        const filteredExpirations = this.filterByType(dedupedExpirations, filterType);
+        
+        // Cache the FILTERED results (cache key includes filterType)
+        this.cache.set(cacheKey, { expirations: filteredExpirations, timestamp: Date.now() });
+        console.log(`✅ [ExpirationService] Combined ${allExpirations.length} → ${dedupedExpirations.length} unique → ${filteredExpirations.length} filtered (${filterType})`);
+        return filteredExpirations;
+      }
+
+      // Fallback to calculated expirations (already filtered by filterType)
+      console.warn(`⚠️ [ExpirationService] API calls failed for ${symbol}, using calculated expirations`);
+      this.logMetrics('fallback_triggered', symbol);
+      const expirations = this.calculateExpirations(minDays, maxDays, filterType);
+      
+      // Cache the filtered fallback results
       this.cache.set(cacheKey, { expirations, timestamp: Date.now() });
-      return this.filterByType(expirations, filterType);
+      return expirations;
 
     } catch (error: any) {
-      console.error(`❌ Error fetching expirations for ${symbol}:`, error.message);
+      console.error(`❌ [ExpirationService] Error for ${symbol}:`, error.message);
+      this.logMetrics('error', symbol);
       // Always provide fallback
-      const expirations = this.calculateExpirations(minDays, maxDays);
-      return this.filterByType(expirations, filterType);
+      const expirations = this.calculateExpirations(minDays, maxDays, filterType);
+      return expirations;
     }
   }
 
   /**
-   * Fetch expiration dates from Polygon API
+   * Fetch expiration dates from Polygon API (with pagination support)
    */
   private async fetchFromPolygon(symbol: string, minDays: number, maxDays: number): Promise<ExpirationDate[]> {
     try {
@@ -94,10 +167,15 @@ class ExpirationService {
       const maxDate = new Date(today);
       maxDate.setDate(today.getDate() + maxDays);
 
-      const response = await axios.get(
-        'https://api.polygon.io/v3/reference/options/contracts',
-        {
-          params: {
+      const expirationSet = new Set<string>();
+      let nextUrl: string | null = `https://api.polygon.io/v3/reference/options/contracts`;
+      let pageCount = 0;
+      const maxPages = 10; // Safety limit to prevent infinite loops
+
+      // Paginate through all results
+      while (nextUrl && pageCount < maxPages) {
+        const response: any = await axios.get(nextUrl, {
+          params: pageCount === 0 ? {
             underlying_ticker: symbol,
             'expiration_date.gte': this.formatDate(minDate),
             'expiration_date.lte': this.formatDate(maxDate),
@@ -105,23 +183,36 @@ class ExpirationService {
             sort: 'expiration_date',
             limit: 1000,
             apiKey: this.polygonApiKey
-          },
+          } : { apiKey: this.polygonApiKey }, // next_url already has params
           timeout: 10000
-        }
-      );
+        });
 
-      if (!response.data?.results || response.data.results.length === 0) {
+        if (!response.data?.results || response.data.results.length === 0) {
+          break;
+        }
+
+        // Extract unique expiration dates from this page
+        response.data.results.forEach((contract: any) => {
+          if (contract.expiration_date) {
+            expirationSet.add(contract.expiration_date);
+          }
+        });
+
+        // Check for next page
+        nextUrl = response.data.next_url || null;
+        pageCount++;
+        
+        if (nextUrl) {
+          console.log(`📄 [ExpirationService] Polygon pagination: page ${pageCount} fetched, continuing...`);
+        }
+      }
+
+      if (expirationSet.size === 0) {
         console.warn(`⚠️ No Polygon option contracts found for ${symbol}`);
         return [];
       }
 
-      // Extract unique expiration dates
-      const expirationSet = new Set<string>();
-      response.data.results.forEach((contract: any) => {
-        if (contract.expiration_date) {
-          expirationSet.add(contract.expiration_date);
-        }
-      });
+      console.log(`✅ [ExpirationService] Polygon: ${expirationSet.size} unique expirations from ${pageCount} pages`);
 
       // Convert to ExpirationDate objects
       const expirations: ExpirationDate[] = Array.from(expirationSet)
@@ -143,7 +234,8 @@ class ExpirationService {
     } catch (error: any) {
       // Check for rate limiting
       if (error.response?.status === 429) {
-        console.warn(`⚠️ Polygon API rate limit hit for ${symbol}`);
+        this.recordRateLimit('polygon');
+        this.logMetrics('polygon_rate_limit', symbol);
       } else {
         console.error(`❌ Polygon API error for ${symbol}:`, error.message);
       }
@@ -198,41 +290,109 @@ class ExpirationService {
       return expirations;
 
     } catch (error: any) {
-      console.error(`❌ Tastytrade API error for ${symbol}:`, error.message);
+      // Check for rate limiting
+      if (error.response?.status === 429) {
+        this.recordRateLimit('tastytrade');
+        this.logMetrics('tastytrade_rate_limit', symbol);
+      } else {
+        console.error(`❌ Tastytrade API error for ${symbol}:`, error.message);
+      }
       return [];
     }
   }
 
   /**
-   * Calculate expiration dates using third Friday logic (fallback)
+   * Calculate expiration dates using Friday logic (fallback)
+   * Includes BOTH weeklies (next 8 weeks) AND monthlies (next 12 months)
    */
-  private calculateExpirations(minDays: number, maxDays: number): ExpirationDate[] {
+  private calculateExpirations(minDays: number, maxDays: number, filterType: 'weekly' | 'monthly' | 'all'): ExpirationDate[] {
     const expirations: ExpirationDate[] = [];
     const today = new Date();
 
-    // Generate next 12 months of third Friday expirations
-    for (let i = 0; i < 12; i++) {
-      const targetDate = new Date(today);
-      targetDate.setMonth(today.getMonth() + i);
-      
-      const year = targetDate.getFullYear();
-      const month = targetDate.getMonth();
-      
-      const thirdFriday = this.calculateThirdFriday(year, month);
-      const daysToExpiration = Math.ceil((thirdFriday.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+    // Generate weekly Fridays for next 8 weeks (for day trading)
+    if (filterType === 'all' || filterType === 'weekly') {
+      for (let i = 0; i < 8; i++) {
+        const targetDate = new Date(today);
+        targetDate.setDate(today.getDate() + (i * 7));
+        
+        // Find next Friday from target date
+        const daysUntilFriday = (5 - targetDate.getDay() + 7) % 7;
+        const friday = new Date(targetDate);
+        friday.setDate(targetDate.getDate() + daysUntilFriday);
+        
+        const daysToExpiration = Math.ceil((friday.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 
-      // Filter by days range
-      if (daysToExpiration >= minDays && daysToExpiration <= maxDays) {
-        expirations.push({
-          date: this.formatDate(thirdFriday),
-          daysToExpiration,
-          expiryType: 'monthly',
-          source: 'calculated'
-        });
+        // Filter by days range
+        if (daysToExpiration >= minDays && daysToExpiration <= maxDays && daysToExpiration > 0) {
+          expirations.push({
+            date: this.formatDate(friday),
+            daysToExpiration,
+            expiryType: 'weekly',
+            source: 'calculated'
+          });
+        }
       }
     }
 
-    return expirations.sort((a, b) => a.daysToExpiration - b.daysToExpiration);
+    // Generate monthly third Friday expirations for next 12 months (for swing trading)
+    if (filterType === 'all' || filterType === 'monthly') {
+      for (let i = 0; i < 12; i++) {
+        const targetDate = new Date(today);
+        targetDate.setMonth(today.getMonth() + i);
+        
+        const year = targetDate.getFullYear();
+        const month = targetDate.getMonth();
+        
+        const thirdFriday = this.calculateThirdFriday(year, month);
+        const daysToExpiration = Math.ceil((thirdFriday.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+
+        // Filter by days range
+        if (daysToExpiration >= minDays && daysToExpiration <= maxDays && daysToExpiration > 0) {
+          expirations.push({
+            date: this.formatDate(thirdFriday),
+            daysToExpiration,
+            expiryType: 'monthly',
+            source: 'calculated'
+          });
+        }
+      }
+    }
+
+    // Dedupe and sort
+    return this.dedupeExpirations(expirations);
+  }
+
+  /**
+   * Deduplicate expirations by date, preferring API sources over calculated
+   */
+  private dedupeExpirations(expirations: ExpirationDate[]): ExpirationDate[] {
+    const dateMap = new Map<string, ExpirationDate>();
+
+    // Sort by source priority: tastytrade > polygon > calculated
+    const sourcePriority = { tastytrade: 3, polygon: 2, calculated: 1 };
+    
+    for (const exp of expirations) {
+      const existing = dateMap.get(exp.date);
+      if (!existing || sourcePriority[exp.source] > sourcePriority[existing.source]) {
+        dateMap.set(exp.date, exp);
+      }
+    }
+
+    // Convert back to array and sort by days to expiration
+    return Array.from(dateMap.values()).sort((a, b) => a.daysToExpiration - b.daysToExpiration);
+  }
+
+  /**
+   * Log metrics for monitoring API usage, cache hits, and fallback triggers
+   */
+  private logMetrics(event: string, symbol: string, count?: number): void {
+    const timestamp = new Date().toISOString();
+    const logMessage = count !== undefined 
+      ? `[ExpirationService] ${timestamp} - ${event}: ${symbol} (${count} items)`
+      : `[ExpirationService] ${timestamp} - ${event}: ${symbol}`;
+    
+    // Console logging for now - can be replaced with proper metrics system
+    console.log(logMessage);
   }
 
   /**
@@ -308,16 +468,20 @@ class ExpirationService {
 
   /**
    * Detect expiration type based on date
+   * Handles mid-week weeklies (common on SPX), Friday weeklies, and monthly/quarterly expirations
    */
   private detectExpirationType(date: Date): 'weekly' | 'monthly' | 'quarterly' | 'leap' {
-    const thirdFriday = this.calculateThirdFriday(date.getFullYear(), date.getMonth());
-    const isThirdFriday = date.getDate() === thirdFriday.getDate();
-    
     // LEAPS: More than 1 year out
     const daysAway = (date.getTime() - Date.now()) / (1000 * 60 * 60 * 24);
     if (daysAway > 365) {
       return 'leap';
     }
+    
+    // Check if this is the third Friday of the month
+    const thirdFriday = this.calculateThirdFriday(date.getFullYear(), date.getMonth());
+    const isThirdFriday = date.getFullYear() === thirdFriday.getFullYear() &&
+                          date.getMonth() === thirdFriday.getMonth() &&
+                          date.getDate() === thirdFriday.getDate();
     
     // Quarterly: Third Friday in March, June, September, December
     if (isThirdFriday && [2, 5, 8, 11].includes(date.getMonth())) {
@@ -329,12 +493,13 @@ class ExpirationService {
       return 'monthly';
     }
     
-    // Weekly: Any other Friday
+    // Weekly: Any other day (includes mid-week expirations Mon-Thu and non-monthly Fridays)
+    // SPX commonly has Monday/Wednesday/Friday weeklies
     return 'weekly';
   }
 
   /**
-   * Filter expirations by type
+   * Filter expirations by type (strictly based on expiryType classification)
    */
   private filterByType(expirations: ExpirationDate[], filterType: 'weekly' | 'monthly' | 'all'): ExpirationDate[] {
     if (filterType === 'all') {
@@ -342,13 +507,17 @@ class ExpirationService {
     }
     
     if (filterType === 'weekly') {
-      // For day trading, prefer weeklies (1-7 days out)
-      return expirations.filter(exp => exp.daysToExpiration <= 7);
+      // Strictly weeklies only (not monthlies/quarterlies within 7 days)
+      return expirations.filter(exp => exp.expiryType === 'weekly');
     }
     
     if (filterType === 'monthly') {
-      // For swing trading, prefer monthlies (>7 days out)
-      return expirations.filter(exp => exp.expiryType === 'monthly' || exp.daysToExpiration > 7);
+      // Monthlies, quarterlies, and LEAPs (not weeklies)
+      return expirations.filter(exp => 
+        exp.expiryType === 'monthly' || 
+        exp.expiryType === 'quarterly' || 
+        exp.expiryType === 'leap'
+      );
     }
     
     return expirations;
