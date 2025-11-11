@@ -62,6 +62,16 @@ interface DXLinkToken {
   'ws-url'?: string;
 }
 
+interface AccountSnapshot {
+  numericSummary: {
+    dayEquityChange: number | undefined;
+    todaysRealizedPnL: number | undefined;
+    todaysUnrealizedPnL: number | undefined;
+  };
+  rawSummary: any;
+  timestamp: number;
+}
+
 class TastytradeService {
   private baseURL = 'https://api.tastyworks.com';
   private certURL = 'https://api.cert.tastyworks.com'; // For testing
@@ -77,6 +87,7 @@ class TastytradeService {
   private pendingGreeks: Map<string, { resolve: (data: OptionGreeksData) => void; reject: (error: Error) => void }> = new Map();
   private subscribedSymbols: Set<string> = new Set();
   private isConnected = false;
+  private accountSummary: Map<string, AccountSnapshot> = new Map(); // Store latest account summary with daily P/L
 
   constructor() {
     this.apiClient = axios.create({
@@ -278,13 +289,42 @@ class TastytradeService {
               }));
               console.log('✅ Feed setup complete');
               
+              // Now request ACCOUNTS channel for daily P/L
+              this.ws?.send(JSON.stringify({
+                type: 'CHANNEL_REQUEST',
+                channel: 2,
+                service: 'ACCOUNTS'
+              }));
+              console.log('📡 Requested ACCOUNTS channel for daily P/L');
+              
               this.isConnected = true;
               resolve(true);
+            }
+            
+            // Handle ACCOUNTS channel opened
+            if (message.type === 'CHANNEL_OPENED' && message.channel === 2) {
+              console.log('✅ ACCOUNTS channel opened');
+              
+              // Subscribe to account summary with daily P/L fields
+              this.ws?.send(JSON.stringify({
+                type: 'ACCOUNTS_SUBSCRIPTION',
+                channel: 2,
+                add: [{
+                  account: this.accountNumber,
+                  fields: ['day-equity-change', 'todays-realized-profit-loss', 'todays-unrealized-profit-loss']
+                }]
+              }));
+              console.log(`✅ Subscribed to account summary for ${this.accountNumber}`);
             }
 
             // Handle market data
             if (message.type === 'FEED_DATA' && message.data) {
               this.handleFeedData(message.data);
+            }
+            
+            // Handle ACCOUNTS data (daily P/L)
+            if (message.type === 'ACCOUNTS_DATA' && message.data) {
+              this.handleAccountsData(message.data);
             }
 
             // Handle config messages
@@ -466,6 +506,71 @@ class TastytradeService {
       }
     } catch (error: any) {
       console.error('Error handling feed data:', error.message);
+    }
+  }
+
+  /**
+   * Normalize account field value (handles both plain numbers and { value } objects)
+   */
+  private normalizeAccountField(field: any): number | undefined {
+    if (field === null || field === undefined) {
+      return undefined;
+    }
+    
+    // Handle { value, change-format } object format
+    if (typeof field === 'object' && 'value' in field) {
+      const num = Number(field.value);
+      return isNaN(num) ? undefined : num;
+    }
+    
+    // Handle plain number
+    const num = Number(field);
+    return isNaN(num) ? undefined : num;
+  }
+
+  /**
+   * Handle incoming ACCOUNTS_DATA messages from DXLink
+   */
+  private handleAccountsData(data: any): void {
+    try {
+      // ACCOUNTS_DATA format: { account, dataType, data }
+      if (!data || typeof data !== 'object') {
+        console.warn('⚠️ Invalid ACCOUNTS_DATA format:', data);
+        return;
+      }
+      
+      const { account, dataType, data: accountData } = data;
+      
+      if (!account || !accountData || typeof accountData !== 'object') {
+        console.warn('⚠️ Missing account or data in ACCOUNTS_DATA');
+        return;
+      }
+      
+      // Extract and normalize daily P/L fields
+      const dayEquityChange = this.normalizeAccountField(accountData['day-equity-change']);
+      const todaysRealizedPnL = this.normalizeAccountField(accountData['todays-realized-profit-loss']);
+      const todaysUnrealizedPnL = this.normalizeAccountField(accountData['todays-unrealized-profit-loss']);
+      
+      // Store snapshot
+      const snapshot: AccountSnapshot = {
+        numericSummary: {
+          dayEquityChange,
+          todaysRealizedPnL,
+          todaysUnrealizedPnL
+        },
+        rawSummary: accountData,
+        timestamp: Date.now()
+      };
+      
+      this.accountSummary.set(account, snapshot);
+      
+      // Log summary at INFO level
+      console.log(`💰 Account ${account} Daily P/L: Total $${(dayEquityChange || 0).toFixed(2)} (Realized: $${(todaysRealizedPnL || 0).toFixed(2)}, Unrealized: $${(todaysUnrealizedPnL || 0).toFixed(2)})`);
+      
+      // Optionally log raw data at DEBUG level (commented out to reduce noise)
+      // console.log('🔍 Raw AccountSummary:', JSON.stringify(accountData, null, 2));
+    } catch (error: any) {
+      console.error('❌ Error handling ACCOUNTS_DATA:', error.message);
     }
   }
 
@@ -1143,47 +1248,39 @@ class TastytradeService {
   }
 
   /**
-   * Fetch today's P/L directly from Tastytrade balance API
+   * Fetch today's P/L from cached DXLink ACCOUNTS data
    */
   async fetchTodayPnL(): Promise<{ realized: number; unrealized: number; total: number }> {
     try {
-      await this.ensureAuthenticated();
-      
       if (!this.accountNumber) {
         console.error('❌ No account number available');
         return { realized: 0, unrealized: 0, total: 0 };
       }
 
-      // Get account balance which includes today's P/L
-      const balanceResponse = await this.apiClient.get(`/accounts/${this.accountNumber}/balances`);
+      // Read from cached account summary (populated by DXLink ACCOUNTS stream)
+      const snapshot = this.accountSummary.get(this.accountNumber);
       
-      if (!balanceResponse.data || !balanceResponse.data.data) {
+      if (!snapshot) {
+        console.warn('⚠️ No account summary data available yet - waiting for DXLink ACCOUNTS stream');
         return { realized: 0, unrealized: 0, total: 0 };
       }
-
-      const data = balanceResponse.data.data;
       
-      // DEBUG: Log the full balance response to understand structure
-      console.log('🔍 TASTYTRADE BALANCE API FULL RESPONSE:', JSON.stringify(data, null, 2));
+      const { numericSummary } = snapshot;
       
-      // Tastytrade provides today's P/L in the day-equity-change field
-      const dayEquityChange = data['day-equity-change'];
-      const todayPnL = dayEquityChange?.absolute ? parseFloat(dayEquityChange.absolute) : 0;
+      // Use day-equity-change as the total (absolute dollar change)
+      const total = numericSummary.dayEquityChange ?? 0;
+      const realized = numericSummary.todaysRealizedPnL ?? 0;
+      const unrealized = numericSummary.todaysUnrealizedPnL ?? 0;
       
-      // Also get realized/unrealized breakdown if available
-      const todayRealized = data['todays-realized-profit-loss'] ? parseFloat(data['todays-realized-profit-loss']) : 0;
-      const todayUnrealized = data['todays-unrealized-profit-loss'] ? parseFloat(data['todays-unrealized-profit-loss']) : 0;
-      
-      console.log(`📊 Today's P/L from Tastytrade: $${todayPnL.toFixed(2)} (Realized: $${todayRealized.toFixed(2)}, Unrealized: $${todayUnrealized.toFixed(2)})`);
-      console.log(`🔍 day-equity-change field:`, dayEquityChange);
+      console.log(`📊 Today's P/L from DXLink: Total $${total.toFixed(2)} (Realized: $${realized.toFixed(2)}, Unrealized: $${unrealized.toFixed(2)})`);
       
       return {
-        realized: todayRealized,
-        unrealized: todayUnrealized,
-        total: todayPnL
+        realized,
+        unrealized,
+        total
       };
     } catch (error: any) {
-      console.error('❌ Error fetching today P/L:', error.response?.data || error.message);
+      console.error('❌ Error fetching today P/L:', error.message);
       return { realized: 0, unrealized: 0, total: 0 };
     }
   }
