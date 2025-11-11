@@ -32,7 +32,7 @@ export default function Dashboard() {
   const { data: topTrades, isLoading: tradesLoading } = useQuery<OptionsTrade[]>({
     queryKey: ["/api/top-trades"],
     refetchInterval: 180000, // Refresh every 3 minutes
-    enabled: activeView === 'dashboard',
+    // Always enabled to ensure trades load on dashboard
   });
 
   const { data: portfolioData } = useQuery<PortfolioSummary>({
