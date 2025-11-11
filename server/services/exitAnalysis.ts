@@ -126,6 +126,7 @@ export class ExitAnalysisService {
   ): PositionAnalysis['exitStrategy'] {
     const reasoning: string[] = [];
     let recommendation: 'HOLD' | 'TAKE_PROFIT' | 'CUT_LOSS' | 'MONITOR' = 'HOLD';
+    let trimPercentage: number | undefined;
     
     // STOP LOSS: Recommend exit at -45% loss
     if (pnlPercent <= -45) {
@@ -139,33 +140,35 @@ export class ExitAnalysisService {
       reasoning.push(`Position down ${Math.abs(pnlPercent).toFixed(1)}% - approaching stop loss level`);
       reasoning.push('Monitor closely, consider cutting losses if downtrend continues');
     }
-    // TAKE PROFIT: Starting at 100% ROI
-    else if (pnlPercent >= 100) {
+    // PARTIAL PROFIT-TAKING STRATEGY: Aggressive early profit capture
+    // Take 50% at +35% ROI, close remaining 50% at +65% ROI
+    else if (pnlPercent >= 65) {
       recommendation = 'TAKE_PROFIT';
-      
-      // Incremental profit-taking strategy
-      if (pnlPercent >= 250) {
-        reasoning.push(`Excellent 250%+ gain - trim 75% of position, let 25% run`);
-      } else if (pnlPercent >= 200) {
-        reasoning.push(`Strong 200%+ gain - trim 50% of position, secure profits`);
-      } else if (pnlPercent >= 150) {
-        reasoning.push(`Great 150%+ gain - trim 30% of position to lock in profits`);
-      } else {
-        reasoning.push(`Position up ${pnlPercent.toFixed(1)}% - begin trimming 25% to secure gains`);
-      }
-      
-      reasoning.push('Let remaining position run to maximize upside');
+      trimPercentage = 100; // Close entire remaining position
+      reasoning.push(`Excellent ${pnlPercent.toFixed(1)}% gain - CLOSE ENTIRE POSITION`);
+      reasoning.push('🎯 Target achieved: 65%+ ROI - take full profits and redeploy capital');
+      reasoning.push('Already secured 50% at +35% ROI - lock in remaining 50% now');
     }
-    // MODERATE GAINS: 50-100%
-    else if (pnlPercent >= 50) {
+    // FIRST PROFIT LEVEL: Take half at 35%
+    else if (pnlPercent >= 35) {
+      recommendation = 'TAKE_PROFIT';
+      trimPercentage = 50; // Trim half the position
+      reasoning.push(`Strong ${pnlPercent.toFixed(1)}% gain - TRIM 50% OF POSITION`);
+      reasoning.push('🎯 First profit target: Secure 50% gains at +35% ROI');
+      reasoning.push('Hold remaining 50% for +65% ROI target to maximize returns');
+    }
+    // APPROACHING FIRST PROFIT TARGET: 25-35%
+    else if (pnlPercent >= 25) {
       recommendation = 'MONITOR';
-      reasoning.push(`Solid ${pnlPercent.toFixed(1)}% gain - hold for 100% profit target`);
-      reasoning.push('Consider taking 10-20% off if approaching resistance');
+      reasoning.push(`Good ${pnlPercent.toFixed(1)}% gain - approaching first profit target`);
+      reasoning.push('Prepare to trim 50% at +35% ROI level');
+      reasoning.push('Watch for resistance levels and momentum signals');
     }
     
     // Time decay warning for options
+    // Only override recommendation if we haven't already triggered profit-taking or stop loss
     if (timeToExpiry !== undefined) {
-      if (timeToExpiry < 3 && pnlPercent < 50) {
+      if (timeToExpiry < 3 && pnlPercent < 50 && recommendation !== 'TAKE_PROFIT' && recommendation !== 'CUT_LOSS') {
         recommendation = 'MONITOR';
         reasoning.push(`Only ${timeToExpiry.toFixed(0)} days until expiry - theta decay accelerating`);
         if (pnlPercent < 0) {
@@ -199,11 +202,11 @@ export class ExitAnalysisService {
     // Default holding guidance
     if (reasoning.length === 0) {
       reasoning.push('Position within normal range - continue holding');
-      reasoning.push('Monitor for 100% profit target or -45% stop loss');
+      reasoning.push('Monitor for +35% profit target (50% trim) or -45% stop loss');
     }
     
     // Set profit targets and stop loss
-    const profitTarget = position.avgCost * 2.0; // 100% gain
+    const profitTarget = position.avgCost * 1.35; // 35% first target (50% trim), 65% full exit
     const stopLoss = position.avgCost * 0.55; // 45% loss
     const timeBasedExit = timeToExpiry 
       ? `${timeToExpiry.toFixed(0)} days to expiry`
@@ -214,7 +217,8 @@ export class ExitAnalysisService {
       stopLoss,
       timeBasedExit,
       recommendation,
-      reasoning
+      reasoning,
+      trimPercentage
     };
   }
   

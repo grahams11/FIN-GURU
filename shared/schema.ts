@@ -498,6 +498,7 @@ export interface PositionAnalysis {
     timeBasedExit: string;
     recommendation: 'HOLD' | 'TAKE_PROFIT' | 'CUT_LOSS' | 'MONITOR';
     reasoning: string[];
+    trimPercentage?: number; // Percentage of position to trim (e.g., 50 for 50%)
   };
 }
 
