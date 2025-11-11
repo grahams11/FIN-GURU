@@ -33,9 +33,9 @@ interface EliteStrategyConfig {
   atrMultiplier: number; // Default: 1.2 (short ATR must be > 1.2x long ATR)
   
   // Greeks quality filters
-  deltaMin: number; // Default: 0.35
-  deltaMax: number; // Default: 0.45
-  thetaMax: number; // Default: -0.5 (less than -0.5 per day)
+  deltaMin: number; // Default: 0.10
+  deltaMax: number; // Default: 0.80
+  thetaMax: number; // Default: 999 (disabled - too restrictive for stock options)
   ivRankMin: number; // Default: 30 (percentile)
   
   // Fibonacci proximity
@@ -91,9 +91,9 @@ export class EliteStrategyEngine {
       atrShort: 5,
       atrLong: 30,
       atrMultiplier: 1.2,
-      deltaMin: 0.25,  // Widened from 0.35 for stock options
-      deltaMax: 0.60,  // Widened from 0.45 for stock options
-      thetaMax: -0.5,
+      deltaMin: 0.10,  // Wide range to allow more stock options
+      deltaMax: 0.80,  // Wide range to allow more stock options
+      thetaMax: 999,   // Disabled - too restrictive for low-priced stock options
       ivRankMin: 30,
       fibProximity: 0.005,
       ...config
@@ -139,9 +139,9 @@ export class EliteStrategyEngine {
           atrShort: 5,
           atrLong: 30,
           atrMultiplier: activeParams.atrMultiplier || 1.2,
-          deltaMin: activeParams.deltaMin || 0.35,
-          deltaMax: activeParams.deltaMax || 0.45,
-          thetaMax: -0.5,
+          deltaMin: activeParams.deltaMin || 0.10,
+          deltaMax: activeParams.deltaMax || 0.80,
+          thetaMax: 999,  // Disabled theta filter
           ivRankMin: 30,
           fibProximity: 0.005,
         };
