@@ -1172,44 +1172,7 @@ class TastytradeService {
       }
 
       // 2. Calculate realized P/L from today's closed positions
-      // Get all transactions and build cost basis
-      const allTxResponse = await this.apiClient.get(`/accounts/${this.accountNumber}/transactions`, {
-        params: {
-          'per-page': 250,
-          'sort': 'Desc'
-        }
-      });
-      
-      // Build cost basis map: symbol -> { totalCost, totalQuantity }
-      const costBasis = new Map<string, { totalCost: number; totalQuantity: number }>();
-      
-      if (allTxResponse.data && allTxResponse.data.data && allTxResponse.data.data.items) {
-        allTxResponse.data.data.items.forEach((tx: any) => {
-          const symbol = tx.symbol;
-          const subType = tx['transaction-sub-type'];
-          const netValue = parseFloat(tx['net-value'] || 0);
-          const quantity = Math.abs(parseFloat(tx.quantity || 0));
-          
-          if (subType === 'Buy to Open' || subType === 'Sell to Open') {
-            if (!costBasis.has(symbol)) {
-              costBasis.set(symbol, { totalCost: 0, totalQuantity: 0 });
-            }
-            const basis = costBasis.get(symbol)!;
-            
-            if (subType === 'Buy to Open') {
-              // Debit: we paid this amount
-              basis.totalCost += netValue;
-              basis.totalQuantity += quantity;
-            } else {
-              // Sell to Open: credit (short position)
-              basis.totalCost -= netValue;
-              basis.totalQuantity += quantity;
-            }
-          }
-        });
-      }
-
-      // 3. Calculate realized P/L from today's closing transactions
+      // Use quantity-aware matching to only include the cost of contracts actually closed
       const today = new Date().toISOString().split('T')[0];
       const todayTxResponse = await this.apiClient.get(`/accounts/${this.accountNumber}/transactions`, {
         params: {
@@ -1220,33 +1183,143 @@ class TastytradeService {
       
       let realizedDayPnL = 0;
       
+      // Track today's closing transactions: symbol -> { netValue, quantity }
+      const closingTxMap = new Map<string, { netValue: number; quantity: number }>();
+      
       if (todayTxResponse.data && todayTxResponse.data.data && todayTxResponse.data.data.items) {
         todayTxResponse.data.data.items.forEach((tx: any) => {
           const subType = tx['transaction-sub-type'];
+          const symbol = tx.symbol;
+          const netValue = parseFloat(tx['net-value'] || 0);
+          const quantity = Math.abs(parseFloat(tx.quantity || 0));
           
+          // Track closing transactions
           if (subType === 'Sell to Close' || subType === 'Buy to Close') {
-            const symbol = tx.symbol;
-            const netValue = parseFloat(tx['net-value'] || 0);
-            const quantity = Math.abs(parseFloat(tx.quantity || 0));
-            
-            const basis = costBasis.get(symbol);
-            
-            if (basis && basis.totalQuantity > 0) {
-              // Calculate cost per contract
-              const costPerContract = basis.totalCost / basis.totalQuantity;
-              const costOfClosedPosition = costPerContract * quantity;
-              
-              if (subType === 'Sell to Close') {
-                // We sold (closed long): P/L = proceeds - cost
-                realizedDayPnL += (netValue - costOfClosedPosition);
-              } else {
-                // Buy to Close (closed short): P/L = cost - buy price
-                realizedDayPnL += (costOfClosedPosition - netValue);
-              }
-            }
+            const current = closingTxMap.get(symbol) || { netValue: 0, quantity: 0 };
+            closingTxMap.set(symbol, {
+              netValue: current.netValue + netValue,
+              quantity: current.quantity + quantity
+            });
           }
         });
       }
+      
+      // Fetch ALL transactions to build cost basis (pagination using cursor/page-offset)
+      const allTransactions: any[] = [];
+      let pageOffset = 0;
+      let hasMore = true;
+      const maxPages = 20; // Up to 5000 transactions
+      
+      while (hasMore && pageOffset < maxPages) {
+        try {
+          const txResponse = await this.apiClient.get(`/accounts/${this.accountNumber}/transactions`, {
+            params: {
+              'per-page': 250,
+              'offset': pageOffset * 250, // Tastytrade uses 'offset' parameter
+              'sort': 'Desc'
+            }
+          });
+          
+          if (txResponse.data && txResponse.data.data && txResponse.data.data.items) {
+            const items = txResponse.data.data.items;
+            
+            // Stop if no items returned
+            if (items.length === 0) {
+              hasMore = false;
+              break;
+            }
+            
+            allTransactions.push(...items);
+            
+            // Check if we have enough transactions
+            hasMore = items.length === 250;
+            pageOffset++;
+            
+            // Early exit: if we've covered all symbols closed today with sufficient quantity
+            const coveredSymbols = new Set<string>();
+            const qtyTracker = new Map<string, number>(); // symbol -> total opening qty found
+            
+            for (const tx of allTransactions) {
+              const symbol = tx.symbol;
+              const subType = tx['transaction-sub-type'];
+              const quantity = Math.abs(parseFloat(tx.quantity || 0));
+              
+              if (closingTxMap.has(symbol) && (subType === 'Buy to Open' || subType === 'Sell to Open')) {
+                const current = qtyTracker.get(symbol) || 0;
+                qtyTracker.set(symbol, current + quantity);
+                
+                // Mark covered if we have enough opening quantity
+                if (qtyTracker.get(symbol)! >= closingTxMap.get(symbol)!.quantity) {
+                  coveredSymbols.add(symbol);
+                }
+              }
+            }
+            
+            // All symbols covered - can stop fetching
+            if (coveredSymbols.size === closingTxMap.size) {
+              console.log(`✅ Cost basis fully covered after ${pageOffset} pages (${allTransactions.length} transactions)`);
+              break;
+            }
+          } else {
+            hasMore = false;
+          }
+        } catch (error: any) {
+          console.error(`Error fetching transaction page ${pageOffset}:`, error.message);
+          hasMore = false;
+        }
+      }
+      
+      console.log(`📋 Fetched ${allTransactions.length} transactions for cost basis matching (${pageOffset} pages)`);
+      
+      // Build quantity-aware cost basis: symbol -> { netValue, quantity }[]
+      const costBasisQueue = new Map<string, Array<{ netValue: number; quantity: number }>>();
+      
+      // Process in reverse (oldest first) for FIFO
+      const txs = allTransactions.reverse();
+      
+      txs.forEach((tx: any) => {
+        const symbol = tx.symbol;
+        const subType = tx['transaction-sub-type'];
+        const netValue = parseFloat(tx['net-value'] || 0);
+        const quantity = Math.abs(parseFloat(tx.quantity || 0));
+        
+        // Only track opening transactions for symbols closed today
+        if (closingTxMap.has(symbol) && (subType === 'Buy to Open' || subType === 'Sell to Open')) {
+          if (!costBasisQueue.has(symbol)) {
+            costBasisQueue.set(symbol, []);
+          }
+          costBasisQueue.get(symbol)!.push({ netValue, quantity });
+        }
+      });
+      
+      // Calculate realized P/L using FIFO matching
+      closingTxMap.forEach((closing, symbol) => {
+        const queue = costBasisQueue.get(symbol) || [];
+        let closingQuantity = closing.quantity;
+        let matchedCost = 0;
+        let matchedQuantity = 0;
+        
+        // Match closing quantity to opening transactions (FIFO)
+        for (const opening of queue) {
+          if (closingQuantity <= 0) break;
+          
+          const matchQty = Math.min(closingQuantity, opening.quantity);
+          const costPerContract = opening.netValue / opening.quantity;
+          matchedCost += costPerContract * matchQty;
+          matchedQuantity += matchQty;
+          closingQuantity -= matchQty;
+        }
+        
+        // Warn if we couldn't match all closed quantity
+        if (closingQuantity > 0) {
+          console.warn(`⚠️ ${symbol}: INCOMPLETE COST BASIS - Closed ${closing.quantity}, only matched ${matchedQuantity}. Missing ${closingQuantity} contracts. P/L may be inaccurate!`);
+        }
+        
+        // P/L = closing proceeds + matched opening cost (both are signed)
+        const pnl = closing.netValue + matchedCost;
+        console.log(`📈 ${symbol}: Closed ${closing.quantity} @ ${closing.netValue.toFixed(2)}, Matched Cost=${matchedCost.toFixed(2)}, P/L=${pnl.toFixed(2)}`);
+        realizedDayPnL += pnl;
+      });
       
       const total = realizedDayPnL + unrealizedDayPnL;
       console.log(`📊 Today's P/L: Realized=${realizedDayPnL.toFixed(2)}, Unrealized=${unrealizedDayPnL.toFixed(2)}, Total=${total.toFixed(2)}`);
