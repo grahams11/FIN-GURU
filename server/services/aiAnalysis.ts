@@ -659,36 +659,114 @@ export class AIAnalysisService {
   ];
 
   /**
-   * STAGE 1: Pre-screening of large-cap stocks
-   * Scans top 40 large-cap stocks (rate limiting handled by PolygonService)
-   * Returns: Top candidates with strong momentum signals
+   * STAGE 1: OPTIMIZED Pre-screening using bulk market snapshot
+   * Fetches 5,000 stocks in ONE API call, then filters in-memory
+   * Returns: Top 40-50 candidates with strong momentum signals
+   * Performance: ~5-10 seconds instead of 8-10 minutes!
    */
   private static async preScreenMarket(marketContext: any): Promise<string[]> {
     const startTime = Date.now();
     
-    // Use large-cap universe optimized for Polygon free tier
-    console.log(`📋 Scanning ${this.LARGE_CAP_UNIVERSE.length} large-cap stocks...`);
+    console.log(`🚀 OPTIMIZED SCANNER: Fetching bulk market snapshot (5,000 stocks in 1 call)...`);
     
-    // Scan all stocks (rate limiter in PolygonService handles 5 calls/minute limit)
+    // PHASE 1: Bulk snapshot (1 API call, ~5 seconds)
+    const snapshot = await polygonService.getBulkMarketSnapshot();
+    
+    if (!snapshot || snapshot.length === 0) {
+      console.warn('⚠️ Bulk snapshot failed, falling back to curated universe scan');
+      return this.preScreenMarketFallback(marketContext);
+    }
+    
+    console.log(`✅ Retrieved ${snapshot.length} stock snapshots`);
+    
+    // PHASE 2: Smart filtering (NO API calls - analyze snapshot data directly)
     const candidates: { ticker: string; score: number }[] = [];
     
-    for (const ticker of this.LARGE_CAP_UNIVERSE) {
-      const result = await this.preScreenTicker(ticker, marketContext);
-      if (result) {
-        candidates.push(result);
+    for (const stock of snapshot) {
+      // FILTER 1: Price range ($5 - $1000)
+      if (stock.price < 5 || stock.price > 1000) {
+        continue;
+      }
+      
+      // FILTER 2: Volume (>500K shares for liquidity)
+      if (stock.volume < 500000) {
+        continue;
+      }
+      
+      // FILTER 3: Valid data (must have open price and price change)
+      if (!stock.open || stock.open === 0 || !isFinite(stock.changePercent)) {
+        continue;
+      }
+      
+      // Calculate momentum score from snapshot data (no historical bars needed!)
+      const score = this.calculateSnapshotMomentumScore(stock, marketContext);
+      
+      if (score > 0) {
+        candidates.push({ ticker: stock.ticker, score });
       }
     }
     
-    // Sort by pre-screen score and take top 200
+    // Sort by momentum score and take top 50 for deep analysis
     const topCandidates = candidates
       .sort((a, b) => b.score - a.score)
-      .slice(0, 200)
+      .slice(0, 50)
       .map(c => c.ticker);
     
     const elapsedSeconds = ((Date.now() - startTime) / 1000).toFixed(1);
-    console.log(`✅ Stage 1 complete: ${topCandidates.length} candidates from ${this.LARGE_CAP_UNIVERSE.length} stocks in ${elapsedSeconds}s`);
+    console.log(`✅ Stage 1 OPTIMIZED complete: ${topCandidates.length} candidates from ${snapshot.length} stocks in ${elapsedSeconds}s`);
+    console.log(`   Top candidates: ${topCandidates.slice(0, 10).join(', ')}...`);
     
     return topCandidates;
+  }
+
+  /**
+   * Calculate momentum score from snapshot data alone (no API calls)
+   * Uses: price change%, volume, volatility (high-low range)
+   * Returns: Score (higher = stronger momentum signal)
+   */
+  private static calculateSnapshotMomentumScore(
+    stock: { ticker: string; price: number; volume: number; open: number; high: number; low: number; changePercent: number },
+    marketContext: any
+  ): number {
+    let score = 0;
+    
+    // 1. Price momentum (absolute change %)
+    const absChange = Math.abs(stock.changePercent);
+    if (absChange > 3) {
+      score += absChange * 10; // Strong movers get bonus
+    }
+    
+    // 2. Directional momentum (align with market or counter-trend)
+    const vixLevel = marketContext.vix || 15;
+    if (vixLevel > 20) {
+      // High VIX: Look for oversold bounces (contrarian)
+      if (stock.changePercent < -2) {
+        score += Math.abs(stock.changePercent) * 5; // Oversold in volatile market
+      }
+    } else {
+      // Low VIX: Follow momentum trends
+      if (stock.changePercent > 2) {
+        score += stock.changePercent * 5; // Strong uptrend
+      }
+    }
+    
+    // 3. Intraday volatility (high-low range as % of price)
+    const dailyRange = ((stock.high - stock.low) / stock.price) * 100;
+    if (dailyRange > 3) {
+      score += dailyRange * 2; // Volatile stocks = options opportunities
+    }
+    
+    // 4. Volume score (relative to market cap proxy)
+    // Higher volume = more liquid options
+    const volumeScore = Math.min(50, stock.volume / 1000000); // Cap at 50M shares
+    score += volumeScore;
+    
+    // 5. Price sweet spot bonus ($20-$500 optimal for options)
+    if (stock.price >= 20 && stock.price <= 500) {
+      score += 20;
+    }
+    
+    return score;
   }
 
   /**

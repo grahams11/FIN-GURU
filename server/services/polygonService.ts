@@ -1,5 +1,6 @@
 import WebSocket from 'ws';
 import axios from 'axios';
+import { alphaVantageService } from './alphaVantageService';
 
 /**
  * Polygon API Rate Limiter
@@ -916,7 +917,11 @@ class PolygonService {
 
   /**
    * Get historical price bars (aggregates) for Fibonacci calculations
-   * Uses Polygon REST API for historical data
+   * Uses Polygon REST API with Alpha Vantage fallback
+   * 
+   * Circuit breaker: Automatically switches to Alpha Vantage when:
+   * - Polygon rate limiter queue is congested (>10 queued)
+   * - Polygon request fails (network, timeout, 429, etc.)
    * 
    * @param symbol Stock symbol
    * @param from Start date (YYYY-MM-DD)
@@ -932,26 +937,67 @@ class PolygonService {
     timespan: 'day' | 'hour' = 'day',
     multiplier: number = 1
   ): Promise<HistoricalBar[] | null> {
-    const url = `https://api.polygon.io/v2/aggs/ticker/${symbol}/range/${multiplier}/${timespan}/${from}/${to}?adjusted=true&sort=asc&apiKey=${this.apiKey}`;
+    const startTime = Date.now();
     
-    const data = await this.makeRateLimitedRequest<any>(url, {
-      timeout: 10000,
-      cacheTTL: 300000,
-      maxRetries: 3
-    });
+    // Circuit breaker: Check Polygon rate limiter status
+    const limiterStatus = this.rateLimiter.getStatus();
+    const shouldUseAlphaVantage = limiterStatus.queuedCalls > 10 && alphaVantageService.isConfigured();
+    
+    if (shouldUseAlphaVantage) {
+      console.log(`⚡ ${symbol}: Polygon queue congested (${limiterStatus.queuedCalls} queued), using Alpha Vantage fallback`);
+      const avBars = await alphaVantageService.getHistoricalBars(
+        symbol,
+        from,
+        to,
+        timespan === 'hour' && multiplier === 4 ? '4hour' : 'day',
+        100
+      );
+      
+      if (avBars) {
+        const latency = Date.now() - startTime;
+        console.log(`✅ ${symbol}: Alpha Vantage provided ${avBars.length} bars (${latency}ms)`);
+        return avBars;
+      }
+    }
+    
+    // Try Polygon first
+    try {
+      const url = `https://api.polygon.io/v2/aggs/ticker/${symbol}/range/${multiplier}/${timespan}/${from}/${to}?adjusted=true&sort=asc&apiKey=${this.apiKey}`;
+      
+      const data = await this.makeRateLimitedRequest<any>(url, {
+        timeout: 10000,
+        cacheTTL: 300000,
+        maxRetries: 3
+      });
 
-    if (!data) {
-      console.warn(`${symbol}: No historical data available for ${from} to ${to}`);
-      return null;
+      if (data?.results && Array.isArray(data.results)) {
+        const timeframeLabel = multiplier > 1 ? `${multiplier}-${timespan}` : timespan;
+        const latency = Date.now() - startTime;
+        console.log(`✅ ${symbol}: Polygon provided ${data.results.length} ${timeframeLabel} bars (${latency}ms)`);
+        return data.results;
+      }
+    } catch (error: any) {
+      console.warn(`⚠️ ${symbol}: Polygon failed (${error.message}), trying Alpha Vantage fallback...`);
+    }
+    
+    // Fallback to Alpha Vantage on Polygon failure
+    if (alphaVantageService.isConfigured()) {
+      const avBars = await alphaVantageService.getHistoricalBars(
+        symbol,
+        from,
+        to,
+        timespan === 'hour' && multiplier === 4 ? '4hour' : 'day',
+        100
+      );
+      
+      if (avBars) {
+        const latency = Date.now() - startTime;
+        console.log(`✅ ${symbol}: Alpha Vantage fallback provided ${avBars.length} bars (${latency}ms)`);
+        return avBars;
+      }
     }
 
-    if (data.results && Array.isArray(data.results)) {
-      const timeframeLabel = multiplier > 1 ? `${multiplier}-${timespan}` : timespan;
-      console.log(`${symbol}: Retrieved ${data.results.length} historical ${timeframeLabel} bars from ${from} to ${to}`);
-      return data.results;
-    }
-
-    console.warn(`${symbol}: No historical data found for ${from} to ${to}`);
+    console.warn(`❌ ${symbol}: No historical data available from any source`);
     return null;
   }
 
