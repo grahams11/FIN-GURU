@@ -39,12 +39,6 @@ export default function Portfolio() {
     refetchInterval: 30000, // Refresh every 30 seconds
   });
   
-  // Fetch today's P/L
-  const { data: pnlDay } = useQuery<{ realized: number; unrealized: number; total: number }>({
-    queryKey: ["/api/portfolio/pnl-day"],
-    refetchInterval: 10000, // Refresh every 10 seconds
-  });
-  
   // Extract tickers from positions for live quotes
   const portfolioTickers = useMemo(() => {
     if (!positions || positions.length === 0) return [];
@@ -105,8 +99,8 @@ export default function Portfolio() {
       </div>
 
       {/* Portfolio Summary Cards */}
-      {(analysis || accountBalance || pnlDay) && (
-        <div className="grid gap-4 md:grid-cols-4">
+      {(analysis || accountBalance) && (
+        <div className="grid gap-4 md:grid-cols-3">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Account Net Liq</CardTitle>
@@ -119,27 +113,6 @@ export default function Portfolio() {
               <p className="text-xs text-muted-foreground mt-1">
                 Cash: ${(accountBalance?.cashBalance ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Today's Change</CardTitle>
-              {(pnlDay?.total ?? 0) >= 0 ? (
-                <TrendingUp className="h-4 w-4 text-green-500" />
-              ) : (
-                <TrendingDown className="h-4 w-4 text-red-500" />
-              )}
-            </CardHeader>
-            <CardContent>
-              <div className={`text-2xl font-bold ${(pnlDay?.total ?? 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                {(pnlDay?.total ?? 0) >= 0 ? '+' : ''}${(pnlDay?.total ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </div>
-              {pnlDay && accountBalance && (
-                <p className={`text-xs mt-1 ${(pnlDay.total / accountBalance.netLiquidatingValue * 100) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                  {((pnlDay.total / accountBalance.netLiquidatingValue) * 100).toFixed(1)}% today
-                </p>
-              )}
             </CardContent>
           </Card>
 

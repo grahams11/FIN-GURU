@@ -1248,7 +1248,7 @@ class TastytradeService {
   }
 
   /**
-   * Fetch today's P/L directly from balance API
+   * Fetch today's P/L from positions endpoint (real-time data matching Tastytrade dashboard)
    */
   async fetchTodayPnL(): Promise<{ realized: number; unrealized: number; total: number }> {
     try {
@@ -1257,83 +1257,71 @@ class TastytradeService {
         return { realized: 0, unrealized: 0, total: 0 };
       }
 
-      // Get full balance data to inspect all fields
-      const response = await this.apiClient.get(`/accounts/${this.accountNumber}/balances`);
+      // Get positions data from Tastytrade API
+      const response = await this.apiClient.get(`/accounts/${this.accountNumber}/positions`);
       
-      if (!response.data || !response.data.data) {
+      console.log('🔍 Positions API response structure:', JSON.stringify(response.data, null, 2).substring(0, 2000));
+      
+      if (!response.data || !response.data.data || !response.data.data.items) {
+        console.log('⚠️ No positions data available');
         return { realized: 0, unrealized: 0, total: 0 };
       }
 
-      const data = response.data.data;
-      
-      // DEBUG: Log ALL fields to find daily P/L
-      console.log('🔍 FULL BALANCE API RESPONSE:');
-      console.log(JSON.stringify(data, null, 2));
+      const positions = response.data.data.items;
+      console.log(`📊 Found ${positions.length} positions`);
+      let totalRealized = 0;
+      let totalUnrealized = 0;
 
-      // Get current net liquidation value
-      const currentNetLiq = parseFloat(data['net-liquidating-value'] || '0');
+      // Process each position
+      for (const position of positions) {
+        const symbol = position.symbol;
+        const underlyingSymbol = position['underlying-symbol'];
+        const quantity = parseFloat(position.quantity) || 0;
+        const multiplier = parseFloat(position.multiplier) || 1;
+        const avgDailyClose = parseFloat(position['average-daily-market-close-price']) || 0;
+        
+        console.log(`📊 Processing position: ${symbol}, Qty: ${quantity}, Multiplier: ${multiplier}, Avg Daily Close: $${avgDailyClose}`);
+        console.log(`🔍 Position fields:`, Object.keys(position));
+        
+        // Get realized P/L for today
+        if (position['realized-today']) {
+          const realized = parseFloat(position['realized-today']) || 0;
+          console.log(`💵 Realized today: $${realized} (date: ${position['realized-today-date']})`);
+          totalRealized += realized;
+        }
 
-      // Calculate yesterday's date in YYYY-MM-DD format
-      const yesterday = new Date();
-      yesterday.setDate(yesterday.getDate() - 1);
-      const yesterdayStr = yesterday.toISOString().split('T')[0];
-
-      console.log(`📅 Fetching EOD balance snapshot for ${yesterdayStr}...`);
-
-      // Get yesterday's end-of-day balance snapshot
-      const snapshotResponse = await this.apiClient.get(
-        `/accounts/${this.accountNumber}/balance-snapshots`,
-        {
-          params: {
-            'snapshot-date': yesterdayStr,
-            'time-of-day': 'EOD'
+        // Check if position has mark price directly
+        let currentMark = parseFloat(position.mark || position['mark-price'] || position['close-price']) || 0;
+        console.log(`💰 Direct mark price from position: $${currentMark}`);
+        
+        // If no mark price, try to get from cache using underlying symbol
+        if (!currentMark) {
+          const cachedQuote = this.quoteCache.get(underlyingSymbol);
+          if (cachedQuote) {
+            currentMark = cachedQuote.markPrice;
+            console.log(`📈 Using cached quote for ${underlyingSymbol}: $${currentMark}`);
+          } else {
+            console.log(`⚠️ No cached quote for ${underlyingSymbol}`);
           }
         }
-      );
 
-      if (!snapshotResponse.data || !snapshotResponse.data.data) {
-        console.warn('⚠️ No balance snapshot available for yesterday');
-        
-        // Fallback: Try net-liq history
-        const historyResponse = await this.apiClient.get(
-          `/accounts/${this.accountNumber}/net-liq/history`,
-          {
-            params: {
-              'time-back': '3d'
-            }
-          }
-        );
-
-        if (historyResponse.data && historyResponse.data.data && historyResponse.data.data.length > 0) {
-          const history = historyResponse.data.data;
-          // Get second-to-last entry (yesterday's close)
-          const yesterdayClose = parseFloat(history[history.length - 2]?.close || history[history.length - 1]?.close || currentNetLiq);
-          const dailyPnL = currentNetLiq - yesterdayClose;
-          
-          console.log(`💰 Daily P/L (from history): $${dailyPnL.toFixed(2)} (Current: $${currentNetLiq.toFixed(2)}, Yesterday Close: $${yesterdayClose.toFixed(2)})`);
-          
-          return {
-            realized: 0,
-            unrealized: dailyPnL,
-            total: dailyPnL
-          };
+        if (quantity !== 0 && avgDailyClose !== 0 && currentMark !== 0) {
+          const unrealizedDayGain = (currentMark - avgDailyClose) * quantity * multiplier;
+          console.log(`📊 Unrealized day gain: ($${currentMark} - $${avgDailyClose}) * ${quantity} * ${multiplier} = $${unrealizedDayGain.toFixed(2)}`);
+          totalUnrealized += unrealizedDayGain;
+        } else {
+          console.log(`⚠️ Skipping unrealized calc - missing data (current: $${currentMark}, avg close: $${avgDailyClose}, qty: ${quantity})`);
         }
-        
-        return { realized: 0, unrealized: 0, total: 0 };
       }
 
-      const snapshotData = snapshotResponse.data.data;
-      const yesterdayClose = parseFloat(snapshotData['net-liquidating-value'] || currentNetLiq);
+      const total = totalRealized + totalUnrealized;
 
-      // Calculate daily P/L (same as Tastytrade dashboard)
-      const dailyPnL = currentNetLiq - yesterdayClose;
-
-      console.log(`💰 Daily P/L: $${dailyPnL.toFixed(2)} (Current: $${currentNetLiq.toFixed(2)}, Yesterday EOD: $${yesterdayClose.toFixed(2)})`);
+      console.log(`💰 Today's P/L: Total $${total.toFixed(2)} (Realized: $${totalRealized.toFixed(2)}, Unrealized: $${totalUnrealized.toFixed(2)})`);
 
       return {
-        realized: 0,
-        unrealized: dailyPnL,
-        total: dailyPnL
+        realized: totalRealized,
+        unrealized: totalUnrealized,
+        total
       };
     } catch (error: any) {
       console.error('❌ Error fetching today P/L:', error.response?.data || error.message);
