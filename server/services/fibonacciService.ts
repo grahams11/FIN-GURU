@@ -34,7 +34,8 @@ export class FibonacciService {
       fromDate.setDate(fromDate.getDate() - this.LOOKBACK_DAYS);
 
       // Use 4-hour chart data for Fibonacci calculations (as per trading strategy)
-      const bars = await polygonService.getHistoricalBars(
+      // Fallback to daily bars if 4-hour bars aren't available
+      let bars = await polygonService.getHistoricalBars(
         symbol,
         fromDate.toISOString().split('T')[0],
         toDate.toISOString().split('T')[0],
@@ -42,8 +43,20 @@ export class FibonacciService {
         4 // 4-hour bars
       );
 
+      // If insufficient 4-hour bars, fallback to daily bars (more widely available)
       if (!bars || bars.length < 10) {
-        console.warn(`${symbol}: Insufficient historical data for Fibonacci calculation`);
+        console.log(`${symbol}: Falling back to daily bars for Fibonacci calculation`);
+        bars = await polygonService.getHistoricalBars(
+          symbol,
+          fromDate.toISOString().split('T')[0],
+          toDate.toISOString().split('T')[0],
+          'day',
+          1 // daily bars
+        );
+      }
+
+      if (!bars || bars.length < 10) {
+        console.warn(`${symbol}: Insufficient historical data for Fibonacci calculation (even with daily bars)`);
         return null;
       }
 

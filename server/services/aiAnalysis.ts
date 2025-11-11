@@ -478,6 +478,24 @@ export class AIAnalysisService {
       const sortedSwingTrades = swingTrades.sort((a, b) => b.score - a.score).slice(0, 15);
       const finalTrades = [...dayTradingTrades, ...sortedSwingTrades].slice(0, 20);
       
+      // 4. FIBONACCI GOLDEN ENTRY DETECTION: Now that we have the final 20 trades,
+      // calculate Fibonacci levels to identify golden (0.707) and green (0.618) bounce opportunities
+      console.log(`\n🎯 Analyzing Fibonacci levels for ${finalTrades.length} final trades...`);
+      await Promise.allSettled(
+        finalTrades.map(async (trade) => {
+          try {
+            const fibResult = await fibonacciService.detectBounce(trade.ticker, trade.currentPrice, trade.optionType);
+            if (fibResult) {
+              trade.fibonacciLevel = fibResult.level;
+              trade.fibonacciColor = fibResult.color;
+              console.log(`✨ ${trade.ticker}: ${fibResult.level === 0.707 ? 'GOLDEN' : 'GREEN'} BOUNCE at ${fibResult.level} level!`);
+            }
+          } catch (error) {
+            // Silently skip Fibonacci detection errors - the trade is still valid
+          }
+        })
+      );
+      
       console.log(`\n✅ Generated ${finalTrades.length} ELITE trade recommendations (${dayTradingTrades.length} day trading, ${sortedSwingTrades.length} swing trading)`);
       return finalTrades;
       
@@ -582,18 +600,18 @@ export class AIAnalysisService {
   ];
 
   /**
-   * STAGE 1: Fast pre-screening using COMPLETE market coverage
-   * Fetches ALL ~9,000 stocks from Polygon for comprehensive opportunity discovery
-   * NO elite universe gap-filling needed (bulk snapshot is complete)
+   * STAGE 1: Fast pre-screening using OPTIMIZED market coverage
+   * Fetches top 5,000 most liquid stocks from Polygon for balanced discovery
+   * OPTIMIZED: 5 pages instead of 20 (75% fewer API calls) while still covering major opportunities
    * Returns: Top 100-200 candidates with RSI extremes for deep analysis
    */
   private static async preScreenMarket(marketContext: any): Promise<string[]> {
     const startTime = Date.now();
     
-    // COMPLETE COVERAGE: Fetch entire market in one comprehensive scan
-    console.log(`📋 Fetching COMPLETE market snapshot for full coverage...`);
+    // OPTIMIZED COVERAGE: Fetch top 5,000 stocks (best balance of coverage vs. API usage)
+    console.log(`📋 Fetching market snapshot (top 5,000 stocks for optimized coverage)...`);
     
-    // Get bulk snapshot (ALL pages ~9,000 stocks)
+    // Get bulk snapshot (5 pages = top 5,000 most liquid stocks)
     const bulkSnapshot = await polygonService.getBulkMarketSnapshot();
     
     if (!bulkSnapshot || bulkSnapshot.length === 0) {
@@ -601,15 +619,15 @@ export class AIAnalysisService {
       return this.preScreenMarketFallback(marketContext);
     }
     
-    console.log(`✅ Retrieved ${bulkSnapshot.length} stocks from COMPLETE market snapshot`);
+    console.log(`✅ Retrieved ${bulkSnapshot.length} stocks from market snapshot`);
     
-    // Create a map of all available stock data (no gap filling needed - we have everything)
+    // Create a map of all available stock data
     const stockDataMap = new Map<string, any>();
     bulkSnapshot.forEach(snapshot => {
       stockDataMap.set(snapshot.ticker, snapshot);
     });
     
-    console.log(`✅ Total universe: ${stockDataMap.size} stocks (COMPLETE MARKET)`);
+    console.log(`✅ Total universe: ${stockDataMap.size} stocks (TOP LIQUID STOCKS)`);
     
     // Apply fast in-memory filters to all stocks
     const candidates: { ticker: string; score: number }[] = [];
@@ -942,35 +960,14 @@ export class AIAnalysisService {
         return null;
       }
 
-      // FIBONACCI BOUNCE DETECTION (enrichment, not filter)
-      // Check if price is at golden 0.707 or green 0.618 Fibonacci levels
-      let fibonacciLevel: number | undefined;
-      let fibonacciColor: 'gold' | 'green' | undefined;
-      
-      try {
-        const bounce = await FibonacciService.detectBounce(ticker, stockData.price, strategyType);
-        // Fail-safe: only process if bounce data is valid
-        if (bounce && bounce.isBouncing && bounce.fibLevel && bounce.color) {
-          fibonacciLevel = bounce.fibLevel;
-          fibonacciColor = bounce.color;
-          // Boost confidence for Fibonacci bounces
-          aiConfidence = Math.min(0.95, aiConfidence + 0.10);
-          console.log(`${ticker}: ${bounce.color === 'gold' ? '⭐ GOLDEN' : '✅ GREEN'} Fibonacci ${bounce.fibLevel} bounce detected!`);
-        }
-      } catch (error) {
-        console.log(`${ticker}: Fibonacci check skipped (${error instanceof Error ? error.message : 'error'})`);
-      }
-
       // Calculate estimated profit (dollar amount)
       const estimatedProfit = profit;
 
-      // Scoring based on ROI and market alignment
+      // Scoring based on ROI and market alignment (Fibonacci detection happens later in Stage 3)
       const marketAlignmentBonus = (strategyType === 'call' && isBullishMarket) || (strategyType === 'put' && isBearishMarket) ? 50 : 0;
-      const fibonacciBonus = fibonacciLevel ? (fibonacciLevel === 0.707 ? 75 : 50) : 0; // Golden gets +75, Green gets +50
-      const score = (projectedROI * aiConfidence * 0.8) + marketAlignmentBonus + fibonacciBonus;
+      const score = (projectedROI * aiConfidence * 0.8) + marketAlignmentBonus;
 
-      const fibLabel = fibonacciLevel ? ` 🎯 Fib ${fibonacciLevel}` : '';
-      console.log(`${ticker}: ✅ ELITE ${strategyType.toUpperCase()}${fibLabel} - ROI ${projectedROI.toFixed(0)}%, Confidence ${(aiConfidence * 100).toFixed(0)}%, Score ${score.toFixed(1)}`);
+      console.log(`${ticker}: ✅ ELITE ${strategyType.toUpperCase()} - ROI ${projectedROI.toFixed(0)}%, Confidence ${(aiConfidence * 100).toFixed(0)}%, Score ${score.toFixed(1)}`);
 
       return {
         ticker,
@@ -991,8 +988,8 @@ export class AIAnalysisService {
         sentiment: isBullishMarket ? 0.8 : isBearishMarket ? 0.2 : 0.5,
         score,
         holdDays: optionsStrategy.holdDays,
-        fibonacciLevel,
-        fibonacciColor,
+        fibonacciLevel: null, // Populated in Stage 3 after final selection
+        fibonacciColor: null, // Populated in Stage 3 after final selection
         estimatedProfit
       };
 

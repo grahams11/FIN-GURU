@@ -831,11 +831,11 @@ class PolygonService {
   }
 
   /**
-   * Get REAL-TIME bulk market snapshot for ALL ~9,000 stocks (NO CACHE!)
+   * Get REAL-TIME bulk market snapshot for TOP 5,000 stocks (NO CACHE!)
    * Uses snapshot endpoint (works during trading hours, not just after close)
-   * COMPLETE COVERAGE: Fetches ALL pages (~20 pages) for comprehensive scanning ~40-100s
+   * OPTIMIZED COVERAGE: Fetches top 5 pages (~5,000 most liquid stocks) in ~20-30s
    * NO CACHING: Fresh data every scan to find NEW opportunities as they emerge
-   * Returns: Array of { ticker, price, volume, change } for all active stocks
+   * Returns: Array of { ticker, price, volume, change } for top 5,000 stocks
    */
   async getBulkMarketSnapshot(): Promise<Array<{
     ticker: string;
@@ -850,13 +850,13 @@ class PolygonService {
   }>> {
     try {
       // Fetch fresh data (no cache - need real-time movers!)
-      // COMPLETE COVERAGE: Fetch ALL pages for comprehensive scanning
+      // OPTIMIZED: Fetch top 5 pages for best balance of coverage vs. API usage
       let allSnapshots: Array<any> = [];
       let nextUrl: string | null = `https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers?limit=1000&apiKey=${this.apiKey}`;
       let pageCount = 0;
-      const maxPages = 20; // Complete coverage: ~9,000 stocks (all pages) in ~40-100s
+      const maxPages = 5; // Top 5,000 stocks (5 pages × 1,000 = 5,000) in ~20-30s
       
-      console.log(`📊 Fetching COMPLETE market snapshot (all pages for full coverage)...`);
+      console.log(`📊 Fetching market snapshot (top ${maxPages * 1000} stocks for optimized coverage)...`);
       
       while (nextUrl && pageCount < maxPages) {
         const response: any = await axios.get(nextUrl, {

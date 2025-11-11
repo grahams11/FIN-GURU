@@ -216,23 +216,28 @@ class TastytradeService {
           
           // Wait for socket to be fully ready before sending messages
           setTimeout(() => {
-            // Step 1: Send SETUP message
-            this.ws?.send(JSON.stringify({
-              type: 'SETUP',
-              channel: 0,
-              keepaliveTimeout: 60,
-              acceptKeepaliveTimeout: 60,
-              version: '0.1-js/1.0.0'
-            }));
-            console.log('🔧 Sent SETUP message');
-            
-            // Step 2: Send AUTH message
-            this.ws?.send(JSON.stringify({
-              type: 'AUTH',
-              channel: 0,
-              token: this.dxlinkToken
-            }));
-            console.log('🔐 Sent AUTH message');
+            // Check if WebSocket is still open before sending
+            if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+              // Step 1: Send SETUP message
+              this.ws.send(JSON.stringify({
+                type: 'SETUP',
+                channel: 0,
+                keepaliveTimeout: 60,
+                acceptKeepaliveTimeout: 60,
+                version: '0.1-js/1.0.0'
+              }));
+              console.log('🔧 Sent SETUP message');
+              
+              // Step 2: Send AUTH message
+              this.ws.send(JSON.stringify({
+                type: 'AUTH',
+                channel: 0,
+                token: this.dxlinkToken
+              }));
+              console.log('🔐 Sent AUTH message');
+            } else {
+              console.warn('⚠️ WebSocket not ready, skipping SETUP/AUTH messages');
+            }
           }, 100); // Small delay to ensure socket is ready
         });
 
