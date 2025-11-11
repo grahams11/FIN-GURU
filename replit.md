@@ -4,14 +4,32 @@ This project is an AI-powered options trading dashboard designed to provide mark
 
 # Recent Changes
 
+## Elite System Improvements - Live API Expirations (November 11, 2025)
+**Architecture Upgrade**: Replaced calculated expirations with live API option chain data
+
+### ExpirationService - API-First Architecture ✅
+- **Problem**: Calculated third Friday logic missed weeklies, quarterlies, and non-standard expirations
+- **Solution**: Query live option chains from Polygon (stocks) and Tastytrade (SPX)
+- **Features**:
+  - **Union & Dedupe**: Combines Polygon + Tastytrade data, dedupes by date with source priority (tastytrade > polygon > calculated)
+  - **Pagination**: Handles 1000+ contract limit via Polygon `next_url` iteration (up to 10 pages)
+  - **Circuit Breaker**: Exponential backoff on 429 rate limits (5s, 10s, 20s, 40s...)
+  - **Caching**: 1-hour TTL with filter-scoped isolation (weekly vs monthly)
+  - **Mid-Week Weeklies**: Detects SPX Mon/Wed/Fri weeklies (not just monthly third Fridays)
+  - **Enhanced Fallback**: Generates both weeklies (next 8 weeks) AND monthlies (next 12 months) when APIs fail
+- **Expiration Types**: weekly, monthly, quarterly, LEAP (based on real market data)
+- **Metrics**: Tracks cache hits, API usage, fallback triggers, rate limits
+- **Impact**: Accurate real-world expirations for elite day trading (weeklies) and swing trading (monthlies)
+
 ## Elite System Improvements - Code Sharpening (November 11, 2025)
 **Internal AI Architect Scan Results**: Identified and fixed 3 critical bugs blocking money-making performance
 
 ### 1. Dynamic Expiration Date System ✅
 - **Problem**: Hard-coded 2025 dates would cause system to suggest **expired contracts** after December 2025
-- **Fix**: Implemented dynamic 12-month rolling expiration calculation using third Friday logic
+- **Fix**: Implemented dynamic 12-month rolling expiration calculation using third Friday logic (now superseded by ExpirationService)
 - **Holiday Handling**: Detects Good Friday (via Easter calculation) and moves expiration to Thursday
 - **Impact**: System now generates valid trade signals **indefinitely** (not just until Dec 2025)
+- **Status**: Being replaced by live API option chain queries via ExpirationService
 
 ### 2. Swing Pivot Fibonacci Detection ✅
 - **Problem**: Using absolute highest/lowest across 360 candles caused **false bounce signals** from outlier spikes
