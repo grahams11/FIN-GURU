@@ -47,20 +47,29 @@ export class FibonacciService {
         return null;
       }
 
-      const high = Math.max(...bars.map((b: HistoricalBar) => b.h));
-      const low = Math.min(...bars.map((b: HistoricalBar) => b.l));
-      const range = high - low;
-
-      if (range === 0) {
-        console.warn(`${symbol}: No price range in historical data`);
+      // Find swing high/low pivots instead of absolute highest/lowest
+      // This filters out outlier spikes and finds meaningful support/resistance
+      const swingPivots = this.findSwingPivots(bars);
+      
+      if (!swingPivots) {
+        console.warn(`${symbol}: Unable to identify swing pivots`);
         return null;
       }
 
-      const level_0_618 = high - (range * 0.618);
-      const level_0_707 = high - (range * 0.707);
+      const { swingHigh, swingLow } = swingPivots;
+      const range = swingHigh - swingLow;
+
+      if (range === 0 || range < 0) {
+        console.warn(`${symbol}: Invalid price range in swing pivots`);
+        return null;
+      }
+
+      // Calculate Fibonacci retracement levels from swing high
+      const level_0_618 = swingHigh - (range * 0.618);
+      const level_0_707 = swingHigh - (range * 0.707);
 
       const recentPrice = bars[bars.length - 1].c;
-      const midpoint = high - (range * 0.5);
+      const midpoint = swingHigh - (range * 0.5);
       
       let trend: 'bullish' | 'bearish' | 'neutral' = 'neutral';
       if (recentPrice > midpoint + (range * 0.1)) {
@@ -70,8 +79,8 @@ export class FibonacciService {
       }
 
       const levels: FibonacciLevels = {
-        high,
-        low,
+        high: swingHigh,
+        low: swingLow,
         level_0_618,
         level_0_707,
         trend,
@@ -80,7 +89,7 @@ export class FibonacciService {
 
       this.cache.set(symbol, levels);
       
-      console.log(`${symbol}: Fibonacci (4H chart) - High: ${high.toFixed(2)}, Low: ${low.toFixed(2)}, 0.618: ${level_0_618.toFixed(2)}, 0.707: ${level_0_707.toFixed(2)}, Trend: ${trend}`);
+      console.log(`${symbol}: Fibonacci (4H swing) - High: ${swingHigh.toFixed(2)}, Low: ${swingLow.toFixed(2)}, 0.618: ${level_0_618.toFixed(2)}, 0.707: ${level_0_707.toFixed(2)}, Trend: ${trend}`);
       
       return levels;
     } catch (error) {
@@ -89,15 +98,71 @@ export class FibonacciService {
     }
   }
 
+  /**
+   * Find swing high and swing low pivots using fractal detection
+   * A swing high requires higher highs on both sides (5-bar lookback)
+   * A swing low requires lower lows on both sides (5-bar lookback)
+   */
+  private static findSwingPivots(bars: HistoricalBar[]): { swingHigh: number; swingLow: number } | null {
+    if (bars.length < 11) return null;
+
+    const lookback = 5; // 5 bars on each side for pivot confirmation
+    const swingHighs: number[] = [];
+    const swingLows: number[] = [];
+
+    // Scan for swing pivots (skip first and last 'lookback' bars)
+    for (let i = lookback; i < bars.length - lookback; i++) {
+      const currentHigh = bars[i].h;
+      const currentLow = bars[i].l;
+
+      // Check if this is a swing high (higher than surrounding bars)
+      let isSwingHigh = true;
+      for (let j = i - lookback; j <= i + lookback; j++) {
+        if (j !== i && bars[j].h >= currentHigh) {
+          isSwingHigh = false;
+          break;
+        }
+      }
+      if (isSwingHigh) {
+        swingHighs.push(currentHigh);
+      }
+
+      // Check if this is a swing low (lower than surrounding bars)
+      let isSwingLow = true;
+      for (let j = i - lookback; j <= i + lookback; j++) {
+        if (j !== i && bars[j].l <= currentLow) {
+          isSwingLow = false;
+          break;
+        }
+      }
+      if (isSwingLow) {
+        swingLows.push(currentLow);
+      }
+    }
+
+    // Use most recent significant swing high and swing low
+    // If no pivots found, fallback to recent 30-bar high/low
+    const swingHigh = swingHighs.length > 0
+      ? swingHighs[swingHighs.length - 1]
+      : Math.max(...bars.slice(-30).map(b => b.h));
+      
+    const swingLow = swingLows.length > 0
+      ? swingLows[swingLows.length - 1]
+      : Math.min(...bars.slice(-30).map(b => b.l));
+
+    return { swingHigh, swingLow };
+  }
+
   static async detectBounce(
     symbol: string,
     currentPrice: number,
     optionType: 'call' | 'put'
-  ): Promise<BounceDetection> {
+  ): Promise<BounceDetection | null> {
     const levels = await this.calculateFibonacciLevels(symbol);
     
     if (!levels) {
-      return { isBouncing: false, levels: null as any };
+      // Fail safe: return null instead of invalid data
+      return null;
     }
 
     const tolerance_0_618 = levels.level_0_618 * this.BOUNCE_TOLERANCE;

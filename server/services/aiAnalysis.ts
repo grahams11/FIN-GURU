@@ -29,44 +29,110 @@ class OptionsMarketStandards {
     return Math.max(minStrike, Math.min(maxStrike, validStrike));
   }
   
-  // Get next valid options expiration date
+  // Get next valid options expiration date (dynamic rolling calculation)
   static getNextValidExpiration(daysOut: number): Date {
     const today = new Date();
     const targetDate = new Date();
     targetDate.setDate(today.getDate() + daysOut);
     
-    // 2025 Monthly Expiration Dates (Third Friday of each month)
-    const monthlyExpirations2025 = [
-      new Date(2025, 0, 17),  // January 17
-      new Date(2025, 1, 21),  // February 21
-      new Date(2025, 2, 21),  // March 21
-      new Date(2025, 3, 17),  // April 17 (Thursday due to Good Friday)
-      new Date(2025, 4, 16),  // May 16
-      new Date(2025, 5, 20),  // June 20
-      new Date(2025, 6, 18),  // July 18
-      new Date(2025, 7, 15),  // August 15
-      new Date(2025, 8, 19),  // September 19
-      new Date(2025, 9, 17),  // October 17
-      new Date(2025, 10, 21), // November 21
-      new Date(2025, 11, 19)  // December 19
-    ];
+    // Generate monthly expirations dynamically for the next 12 months
+    const monthlyExpirations: Date[] = [];
+    const startMonth = today.getMonth();
+    const startYear = today.getFullYear();
+    
+    for (let i = 0; i < 12; i++) {
+      const month = (startMonth + i) % 12;
+      const year = startYear + Math.floor((startMonth + i) / 12);
+      const thirdFriday = this.calculateThirdFriday(year, month);
+      monthlyExpirations.push(thirdFriday);
+    }
     
     // Find the next valid expiration after target date
-    let bestExpiration = monthlyExpirations2025[0];
+    let bestExpiration = monthlyExpirations[0];
     
-    for (const expDate of monthlyExpirations2025) {
+    for (const expDate of monthlyExpirations) {
       if (expDate > targetDate) {
         bestExpiration = expDate;
         break;
       }
     }
     
-    // If target is beyond December 2025, use December expiration
-    if (targetDate > monthlyExpirations2025[monthlyExpirations2025.length - 1]) {
-      bestExpiration = monthlyExpirations2025[monthlyExpirations2025.length - 1];
+    // If no future expiration found, use the last available (shouldn't happen with 12-month lookahead)
+    if (!bestExpiration || bestExpiration <= today) {
+      bestExpiration = monthlyExpirations[monthlyExpirations.length - 1];
     }
     
     return bestExpiration;
+  }
+  
+  // Calculate third Friday of a given month (standard monthly options expiration)
+  // Handles market holidays like Good Friday (moves to Thursday)
+  private static calculateThirdFriday(year: number, month: number): Date {
+    // Start with the first day of the month
+    const firstDay = new Date(year, month, 1);
+    
+    // Find the first Friday (day 5 is Friday, 0 is Sunday)
+    const firstDayOfWeek = firstDay.getDay();
+    let daysUntilFirstFriday = (5 - firstDayOfWeek + 7) % 7;
+    if (daysUntilFirstFriday === 0) daysUntilFirstFriday = 0; // Already Friday
+    
+    // Third Friday = first Friday + 14 days
+    const thirdFridayDate = 1 + daysUntilFirstFriday + 14;
+    const thirdFriday = new Date(year, month, thirdFridayDate);
+    
+    // Check if third Friday is a market holiday (mainly Good Friday)
+    if (this.isMarketHoliday(thirdFriday)) {
+      // Move expiration to Thursday (day before)
+      const thursday = new Date(thirdFriday);
+      thursday.setDate(thursday.getDate() - 1);
+      console.log(`Options expiration for ${year}-${month + 1} moved to Thursday due to market holiday`);
+      return thursday;
+    }
+    
+    return thirdFriday;
+  }
+  
+  // Check if a date is a known market holiday
+  private static isMarketHoliday(date: Date): boolean {
+    const year = date.getFullYear();
+    const month = date.getMonth();
+    const day = date.getDate();
+    
+    // Good Friday (most common third-Friday holiday)
+    // Easter calculation: Meeus/Jones/Butcher algorithm
+    const easterDate = this.calculateEasterSunday(year);
+    const goodFriday = new Date(easterDate);
+    goodFriday.setDate(easterDate.getDate() - 2); // Friday before Easter Sunday
+    
+    if (year === goodFriday.getFullYear() && 
+        month === goodFriday.getMonth() && 
+        day === goodFriday.getDate()) {
+      return true;
+    }
+    
+    // Add other known third-Friday holidays here if needed
+    
+    return false;
+  }
+  
+  // Calculate Easter Sunday using Meeus/Jones/Butcher algorithm
+  private static calculateEasterSunday(year: number): Date {
+    const a = year % 19;
+    const b = Math.floor(year / 100);
+    const c = year % 100;
+    const d = Math.floor(b / 4);
+    const e = b % 4;
+    const f = Math.floor((b + 8) / 25);
+    const g = Math.floor((b - f + 1) / 3);
+    const h = (19 * a + b - d - g + 15) % 30;
+    const i = Math.floor(c / 4);
+    const k = c % 4;
+    const l = (32 + 2 * e + 2 * i - h - k) % 7;
+    const m = Math.floor((a + 11 * h + 22 * l) / 451);
+    const month = Math.floor((h + l - 7 * m + 114) / 31) - 1; // 0-indexed
+    const day = ((h + l - 7 * m + 114) % 31) + 1;
+    
+    return new Date(year, month, day);
   }
   
   // Check if a strike price is valid for the given stock price
@@ -528,7 +594,8 @@ export class AIAnalysisService {
       
       try {
         const bounce = await FibonacciService.detectBounce(ticker, stockData.price, strategyType);
-        if (bounce.isBouncing && bounce.fibLevel && bounce.color) {
+        // Fail-safe: only process if bounce data is valid
+        if (bounce && bounce.isBouncing && bounce.fibLevel && bounce.color) {
           fibonacciLevel = bounce.fibLevel;
           fibonacciColor = bounce.color;
           // Boost confidence for Fibonacci bounces
@@ -998,32 +1065,8 @@ export class AIAnalysisService {
     const maxDate = new Date(today);
     maxDate.setDate(today.getDate() + Math.min(targetDays, 30));
     
-    // Find next third Friday (monthly expiration)
-    const year = targetDate.getFullYear();
-    const month = targetDate.getMonth();
-    
-    // Third Friday is the 15th-21st that falls on a Friday
-    for (let day = 15; day <= 21; day++) {
-      const candidate = new Date(year, month, day);
-      if (candidate.getDay() === 5) { // Friday
-        if (candidate >= targetDate && candidate <= maxDate) {
-          return candidate;
-        }
-      }
-    }
-    
-    // If no suitable date in current month within max limit, try next month BUT enforce 30-day cap
-    for (let day = 15; day <= 21; day++) {
-      const candidate = new Date(year, month + 1, day);
-      if (candidate.getDay() === 5) { // Friday
-        if (candidate <= maxDate) {
-          return candidate;
-        }
-      }
-    }
-    
-    // Fallback: use max date (capped at 30 days)
-    return maxDate;
+    // Use shared expiration logic from OptionsMarketStandards
+    return OptionsMarketStandards.getNextValidExpiration(targetDays);
   }
 
   private static analyzeSentimentWithRules(
