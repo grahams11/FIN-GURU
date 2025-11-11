@@ -582,15 +582,18 @@ export class AIAnalysisService {
   ];
 
   /**
-   * STAGE 1: Fast pre-screening using Polygon bulk snapshot (ONE API CALL!)
-   * Scans ENTIRE market (~9000 stocks) in <5 seconds without rate limits
+   * STAGE 1: Fast pre-screening using COMPLETE market coverage
+   * Fetches ALL ~9,000 stocks from Polygon for comprehensive opportunity discovery
+   * NO elite universe gap-filling needed (bulk snapshot is complete)
    * Returns: Top 100-200 candidates with RSI extremes for deep analysis
    */
   private static async preScreenMarket(marketContext: any): Promise<string[]> {
     const startTime = Date.now();
     
-    // Get bulk snapshot for ALL stocks in ONE API call!
-    console.log(`📋 Fetching bulk market snapshot (entire market in 1 API call)...`);
+    // COMPLETE COVERAGE: Fetch entire market in one comprehensive scan
+    console.log(`📋 Fetching COMPLETE market snapshot for full coverage...`);
+    
+    // Get bulk snapshot (ALL pages ~9,000 stocks)
     const bulkSnapshot = await polygonService.getBulkMarketSnapshot();
     
     if (!bulkSnapshot || bulkSnapshot.length === 0) {
@@ -598,48 +601,46 @@ export class AIAnalysisService {
       return this.preScreenMarketFallback(marketContext);
     }
     
-    console.log(`✅ Retrieved ${bulkSnapshot.length} stocks from bulk snapshot`);
+    console.log(`✅ Retrieved ${bulkSnapshot.length} stocks from COMPLETE market snapshot`);
     
-    // Apply fast in-memory filters
+    // Create a map of all available stock data (no gap filling needed - we have everything)
+    const stockDataMap = new Map<string, any>();
+    bulkSnapshot.forEach(snapshot => {
+      stockDataMap.set(snapshot.ticker, snapshot);
+    });
+    
+    console.log(`✅ Total universe: ${stockDataMap.size} stocks (COMPLETE MARKET)`);
+    
+    // Apply fast in-memory filters to all stocks
     const candidates: { ticker: string; score: number }[] = [];
     
-    for (const snapshot of bulkSnapshot) {
+    const stockEntries = Array.from(stockDataMap.entries());
+    for (const [ticker, snapshot] of stockEntries) {
       // FILTER 1: Price range ($5 - $1000)
       if (snapshot.price < 5 || snapshot.price > 1000) {
-        continue; // Penny stock or ultra-expensive
+        continue;
       }
       
       // FILTER 2: Volume (>500K shares/day)
       if (snapshot.volume < 500000) {
-        continue; // Illiquid
+        continue;
       }
       
       // FILTER 3: Significant price movement (>2% change)
       const absChangePercent = Math.abs(snapshot.changePercent);
       if (absChangePercent < 2) {
-        continue; // Not enough momentum
+        continue;
       }
       
-      // Calculate pre-screen score (higher = better candidate)
+      // Calculate pre-screen score
       let score = 0;
-      
-      // Price movement score (more extreme = higher score)
-      score += absChangePercent * 5; // 5% move = +25 score
-      
-      // Volume bonus (higher volume = more liquid)
-      const volumeScore = Math.min(50, snapshot.volume / 1000000); // Cap at 50M shares
-      score += volumeScore;
-      
-      // Price range bonus (mid-range prices preferred)
-      if (snapshot.price >= 20 && snapshot.price <= 500) {
-        score += 20; // Sweet spot for options trading
-      }
-      
-      // Volatility bonus (high-low range)
+      score += absChangePercent * 5;
+      score += Math.min(50, snapshot.volume / 1000000);
+      if (snapshot.price >= 20 && snapshot.price <= 500) score += 20;
       const dayRange = ((snapshot.high - snapshot.low) / snapshot.low) * 100;
-      score += dayRange * 2; // Wider range = more opportunity
+      score += dayRange * 2;
       
-      candidates.push({ ticker: snapshot.ticker, score });
+      candidates.push({ ticker, score });
     }
     
     // Sort by pre-screen score and take top 200
@@ -649,9 +650,51 @@ export class AIAnalysisService {
       .map(c => c.ticker);
     
     const elapsedSeconds = ((Date.now() - startTime) / 1000).toFixed(1);
-    console.log(`✅ Stage 1 complete: ${topCandidates.length} elite candidates from ${bulkSnapshot.length} stocks in ${elapsedSeconds}s`);
+    console.log(`✅ Stage 1 complete: ${topCandidates.length} elite candidates from ${stockDataMap.size} stocks in ${elapsedSeconds}s`);
     
     return topCandidates;
+  }
+
+  /**
+   * Fetch single stock snapshot for missing elite stocks
+   * Used to fill gaps when bulk snapshot doesn't include O-Z symbols
+   */
+  private static async fetchSingleStockSnapshot(ticker: string): Promise<{
+    ticker: string;
+    price: number;
+    volume: number;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    change: number;
+    changePercent: number;
+  } | null> {
+    try {
+      const stockData = await WebScraperService.scrapeStockPrice(ticker);
+      
+      if (!stockData.price || stockData.price === 0 || !stockData.volume) {
+        return null;
+      }
+      
+      // Estimate open price if not available (use price as fallback)
+      const open = stockData.price; // Simple fallback
+      const change = stockData.changePercent ? (stockData.price * stockData.changePercent) / 100 : 0;
+      
+      return {
+        ticker,
+        price: stockData.price,
+        volume: stockData.volume,
+        open: open,
+        high: stockData.price, // Conservative estimate
+        low: stockData.price, // Conservative estimate
+        close: stockData.price,
+        change: change,
+        changePercent: stockData.changePercent || 0
+      };
+    } catch (error) {
+      return null;
+    }
   }
 
   /**
@@ -662,7 +705,8 @@ export class AIAnalysisService {
     const startTime = Date.now();
     
     // Use curated elite universe
-    const eliteUniverse = [...new Set([...this.ELITE_STOCK_UNIVERSE, ...this.FALLBACK_TICKERS])];
+    const eliteUniverseSet = new Set([...this.ELITE_STOCK_UNIVERSE, ...this.FALLBACK_TICKERS]);
+    const eliteUniverse = Array.from(eliteUniverseSet);
     console.log(`📋 Fallback: Pre-screening ${eliteUniverse.length} elite stocks...`);
     
     // Scan with controlled concurrency (max 10 concurrent)

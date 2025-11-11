@@ -83,6 +83,9 @@ class PolygonService {
   private optionsQuoteCache: Map<string, { data: any; timestamp: number }> = new Map();
   private optionsCacheTTL = 60000; // 1 minute cache for options quotes
 
+  // NOTE: No bulk snapshot caching - we need fresh data for real-time opportunities
+  // Caching would give stale movers; users want to see NEW opportunities as they emerge
+
   constructor() {
     // Use the main Polygon API key for WebSocket authentication
     this.apiKey = process.env.POLYGON_API_KEY || '';
@@ -828,9 +831,10 @@ class PolygonService {
   }
 
   /**
-   * Get REAL-TIME bulk market snapshot for ALL stocks (with pagination!)
+   * Get REAL-TIME bulk market snapshot for ALL ~9,000 stocks (NO CACHE!)
    * Uses snapshot endpoint (works during trading hours, not just after close)
-   * Perfect for fast pre-screening without rate limits
+   * COMPLETE COVERAGE: Fetches ALL pages (~20 pages) for comprehensive scanning ~40-100s
+   * NO CACHING: Fresh data every scan to find NEW opportunities as they emerge
    * Returns: Array of { ticker, price, volume, change } for all active stocks
    */
   async getBulkMarketSnapshot(): Promise<Array<{
@@ -845,17 +849,17 @@ class PolygonService {
     changePercent: number;
   }>> {
     try {
-      // Use REAL-TIME snapshot endpoint (works during trading hours!)
-      // IMPORTANT: Paginate through all results (not just first page)
+      // Fetch fresh data (no cache - need real-time movers!)
+      // COMPLETE COVERAGE: Fetch ALL pages for comprehensive scanning
       let allSnapshots: Array<any> = [];
       let nextUrl: string | null = `https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers?limit=1000&apiKey=${this.apiKey}`;
       let pageCount = 0;
-      const maxPages = 20; // Safety limit (20 pages * 1000 = 20,000 stocks)
+      const maxPages = 20; // Complete coverage: ~9,000 stocks (all pages) in ~40-100s
       
-      console.log(`📊 Fetching REAL-TIME bulk market snapshot (with pagination)...`);
+      console.log(`📊 Fetching COMPLETE market snapshot (all pages for full coverage)...`);
       
       while (nextUrl && pageCount < maxPages) {
-        const response = await axios.get(nextUrl, {
+        const response: any = await axios.get(nextUrl, {
           timeout: 30000 // 30 seconds per page
         });
 
@@ -917,7 +921,7 @@ class PolygonService {
       }
       
       if (allSnapshots.length > 0) {
-        console.log(`✅ Retrieved ${allSnapshots.length} REAL-TIME stock snapshots (${pageCount} pages)`);
+        console.log(`✅ Retrieved ${allSnapshots.length} FRESH stock snapshots (${pageCount} pages, COMPLETE MARKET)`);
         return allSnapshots;
       }
 

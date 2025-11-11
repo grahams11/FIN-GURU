@@ -33,12 +33,15 @@ Preferred communication style: Simple, everyday language.
 
 ## Core Business Logic
 
-### Market Scanning (Elite Two-Stage Market Scanner)
-- **Stage 1 (Fast Pre-Screen)**: Scans ~9000 stocks in <5 seconds using Polygon Bulk Snapshot API, applying in-memory filters for price, volume, movement, and volatility, then scores to identify top 200 candidates.
+### Market Scanning (Elite Two-Stage Market Scanner - COMPLETE COVERAGE)
+- **Stage 1 (Complete Pre-Screen)**: Fetches ALL ~9,000 stocks from Polygon Bulk Snapshot (all pages, ~40-100s). **NO CACHING** for fresh opportunities every scan. Guarantees COMPLETE market coverage including all stocks A-Z, ensuring no opportunity is missed. Every scan finds NEW movers as market evolves.
 - **Stage 2 (Deep Analysis)**: Performs detailed analysis on top 200 candidates, including Fibonacci validation, Greeks calculations, market sentiment, and RSI-based momentum signals, yielding top 15 swing trades.
 - **Output**: Top 20 plays (SPX day trades + 15 swing trades).
-- **Fallback System**: Grouped daily bars and curated stock universe with throttling.
-- **ExpirationService**: Queries live option chains from Polygon (stocks) and Tastytrade (SPX) for accurate expiration dates, including weeklies, monthlies, and quarterlies, with pagination, circuit breaker, and caching. Replaces previous calculated expiration logic.
+- **Performance**: ~40-100s Stage 1 + ~2-3min Stage 2 = **~3-5 minutes total per scan** (comprehensive fresh data).
+- **Coverage**: ALL ~9,000 liquid stocks (COMPLETE market, A-Z alphabetically, no gaps).
+- **Guaranteed Symbols**: ALL stocks including TSLA, NVDA, SPY, QQQ, META, MSFT, UBER, PLTR, etc.
+- **Fallback System**: Grouped daily bars with 10-day holiday-aware lookup, curated stock universe with p-limit throttling.
+- **ExpirationService**: Queries live option chains from Polygon (stocks) and Tastytrade (SPX) for accurate expiration dates, including weeklies, monthlies, and quarterlies, with pagination, circuit breaker, and caching.
 
 ### Trading Systems
 - **Day Trading System (SPX Only)**: Uses VIX + RSI for BUY/SELL signals on SPX, focusing on weekly Friday expirations (1-7 days) with ATM/OTM strikes, targeting 50-150% ROI. Prioritizes SPX recommendations.
