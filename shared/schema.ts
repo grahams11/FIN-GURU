@@ -160,6 +160,113 @@ export const backtestTrades = pgTable("backtest_trades", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+// Elite Strategy: Recommendation Tracking
+export const recommendationTracking = pgTable("recommendation_tracking", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  ticker: text("ticker").notNull(),
+  optionType: text("option_type").notNull(), // 'call' | 'put'
+  recommendationType: text("recommendation_type").notNull(), // 'day_trade' | 'swing_trade'
+  strikePrice: real("strike_price").notNull(),
+  expiry: text("expiry").notNull(),
+  entryPrice: real("entry_price").notNull(), // Stock price at recommendation
+  premium: real("premium").notNull(), // Option premium at recommendation
+  contracts: integer("contracts").notNull(),
+  projectedROI: real("projected_roi").notNull(),
+  aiConfidence: real("ai_confidence").notNull(),
+  
+  // Signal metrics at entry
+  rsi: real("rsi").notNull(),
+  vix: real("vix").notNull(),
+  ema: real("ema"),
+  atrShort: real("atr_short"),
+  atrLong: real("atr_long"),
+  fibonacciLevel: real("fibonacci_level"),
+  
+  // Greeks at entry
+  delta: real("delta"),
+  theta: real("theta"),
+  gamma: real("gamma"),
+  vega: real("vega"),
+  
+  // Strategy parameters used
+  strategyVersion: text("strategy_version").notNull(),
+  parameters: jsonb("parameters").notNull(), // RSI thresholds, VIX mins, etc.
+  
+  // Status tracking
+  status: text("status").notNull().default('pending'), // 'pending' | 'monitoring' | 'closed' | 'expired'
+  recommendedAt: timestamp("recommended_at").defaultNow(),
+});
+
+// Elite Strategy: Performance Monitoring
+export const recommendationPerformance = pgTable("recommendation_performance", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  recommendationId: varchar("recommendation_id").references(() => recommendationTracking.id, { onDelete: 'cascade' }).notNull(),
+  
+  // Actual outcome
+  exitDate: timestamp("exit_date"),
+  exitPrice: real("exit_price"), // Actual stock price at exit
+  exitPremium: real("exit_premium"), // Actual option premium at exit
+  actualROI: real("actual_roi"), // Actual return on investment
+  actualProfit: real("actual_profit"), // Dollar profit/loss
+  
+  // Exit analysis
+  exitReason: text("exit_reason"), // 'profit_target' | 'stop_loss' | 'time_based' | 'manual' | 'expiry'
+  holdDays: integer("hold_days"), // Actual days held
+  maxDrawdown: real("max_drawdown"), // Worst drawdown during hold
+  maxProfit: real("max_profit"), // Best profit during hold
+  
+  // Win/loss classification
+  isWin: boolean("is_win"), // Did it meet profit target?
+  isLoss: boolean("is_loss"), // Did it hit stop loss?
+  
+  // Performance tracking
+  updatedAt: timestamp("updated_at").defaultNow(),
+  closedAt: timestamp("closed_at"),
+});
+
+// Elite Strategy: Adaptive Parameter History
+export const strategyParameters = pgTable("strategy_parameters", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  version: text("version").notNull(), // Semantic version or timestamp
+  
+  // RSI parameters
+  rsiOversold: real("rsi_oversold").notNull(),
+  rsiOverbought: real("rsi_overbought").notNull(),
+  
+  // VIX parameters
+  vixMinCall: real("vix_min_call").notNull(),
+  vixMinPut: real("vix_min_put").notNull(),
+  
+  // Stop/target parameters
+  stopLoss: real("stop_loss").notNull(),
+  profitTarget: real("profit_target").notNull(),
+  partialProfitLevel: real("partial_profit_level"),
+  partialProfitPercent: real("partial_profit_percent"),
+  
+  // Filter parameters
+  emaLength: integer("ema_length"),
+  atrMultiplier: real("atr_multiplier"),
+  deltaMin: real("delta_min"),
+  deltaMax: real("delta_max"),
+  
+  // Performance metrics (rolling 30-day)
+  winRate: real("win_rate"), // Win rate with these parameters
+  avgROI: real("avg_roi"), // Average ROI
+  profitFactor: real("profit_factor"), // Gross profit / gross loss
+  totalTrades: integer("total_trades"), // Sample size
+  
+  // Reason for adjustment
+  adjustmentReason: text("adjustment_reason"),
+  previousVersion: text("previous_version"),
+  
+  // Status
+  isActive: boolean("is_active").default(false), // Only one active at a time
+  activatedAt: timestamp("activated_at").defaultNow(),
+  deactivatedAt: timestamp("deactivated_at"),
+  
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 export const insertUserSchema = createInsertSchema(users).pick({
   username: true,
   password: true,
@@ -216,6 +323,21 @@ export const insertBacktestTradeSchema = createInsertSchema(backtestTrades).omit
   createdAt: true,
 });
 
+export const insertRecommendationTrackingSchema = createInsertSchema(recommendationTracking).omit({
+  id: true,
+  recommendedAt: true,
+});
+
+export const insertRecommendationPerformanceSchema = createInsertSchema(recommendationPerformance).omit({
+  id: true,
+  updatedAt: true,
+});
+
+export const insertStrategyParametersSchema = createInsertSchema(strategyParameters).omit({
+  id: true,
+  createdAt: true,
+});
+
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 export type MarketData = typeof marketData.$inferSelect;
@@ -238,6 +360,12 @@ export type BacktestRun = typeof backtestRuns.$inferSelect;
 export type InsertBacktestRun = z.infer<typeof insertBacktestRunSchema>;
 export type BacktestTrade = typeof backtestTrades.$inferSelect;
 export type InsertBacktestTrade = z.infer<typeof insertBacktestTradeSchema>;
+export type RecommendationTracking = typeof recommendationTracking.$inferSelect;
+export type InsertRecommendationTracking = z.infer<typeof insertRecommendationTrackingSchema>;
+export type RecommendationPerformance = typeof recommendationPerformance.$inferSelect;
+export type InsertRecommendationPerformance = z.infer<typeof insertRecommendationPerformanceSchema>;
+export type StrategyParameters = typeof strategyParameters.$inferSelect;
+export type InsertStrategyParameters = z.infer<typeof insertStrategyParametersSchema>;
 
 export interface Greeks {
   delta: number;
