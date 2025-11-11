@@ -64,10 +64,10 @@ Preferred communication style: Simple, everyday language.
 
 ### Portfolio Management (Hybrid AI)
 - **Data Source**: Fetches ALL portfolio positions from real Tastytrade API.
-- **Risk Management**: Automated stop loss at 45% loss, incremental profit-taking (50% at +100% ROI, 25% at +150% ROI, close at +200% ROI).
+- **Risk Management**: Automated stop loss at 45% loss, aggressive partial profit-taking (50% trim at +35% ROI, full exit at +65% ROI) to protect gains in volatile options markets.
 - **Hybrid AI Analysis**: Combines an internal `PortfolioAnalysisEngine` (RSI, VIX, Greeks, Fibonacci, P&L exit strategies, 24-hour hold/settlement enforcement) with `GrokAIService` for complex scenarios (high risk, urgent exits, low confidence, rebalance opportunities).
 - **Goal Tracking**: Monitors progress towards a $1M target with progress percentage, required growth multiplier, and status assessment.
-- **Strategic Recommendations**: Provides actionable insights (EXIT_POSITION, TAKE_PROFIT, REBALANCE, NEW_POSITION) with urgency, action, expected impact, and execution constraints.
+- **Strategic Recommendations**: Provides actionable insights (EXIT_POSITION, TAKE_PROFIT, REBALANCE, NEW_POSITION) with urgency, action, expected impact, execution constraints, and explicit trim percentages.
 - **Real-Time P&L & Greeks Monitoring**: Live profit/loss tracking with SSE-powered price updates and Greeks for options positions.
 
 # External Dependencies
