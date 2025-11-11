@@ -774,13 +774,13 @@ class PolygonService {
   }
 
   /**
-   * Get today's opening price for a symbol
-   * Uses Polygon REST API to get today's or previous day's aggregate
+   * Get today's opening and closing prices for a symbol
+   * Uses Polygon REST API to get the most recent trading day's data
    * 
    * @param symbol Stock symbol (without I: prefix - e.g., 'SPX', 'NDX', 'VIX')
-   * @returns Opening price or null if unavailable
+   * @returns Object with open and close prices, or null if unavailable
    */
-  async getTodayOpenPrice(symbol: string): Promise<number | null> {
+  async getTodayOpenPrice(symbol: string): Promise<{ open: number; close: number } | null> {
     try {
       // Get date range (today and previous 5 trading days for fallback)
       const today = new Date();
@@ -807,8 +807,10 @@ class PolygonService {
           if (response.data?.results && Array.isArray(response.data.results) && response.data.results.length > 0) {
             // Get the most recent bar (should be today or last trading day)
             const recentBar = response.data.results[0];
-            console.log(`${symbol}: Using open price = $${recentBar.o.toFixed(2)} from ${testSymbol}`);
-            return recentBar.o; // Opening price of most recent trading session
+            const open = recentBar.o;
+            const close = recentBar.c;
+            console.log(`${symbol}: Most recent trading day - Open: $${open.toFixed(2)}, Close: $${close.toFixed(2)} from ${testSymbol}`);
+            return { open, close };
           }
         } catch (innerError: any) {
           // Try next symbol format
@@ -816,11 +818,11 @@ class PolygonService {
         }
       }
 
-      console.warn(`${symbol}: No opening price data available (all formats tried)`);
+      console.warn(`${symbol}: No opening/closing price data available (all formats tried)`);
       return null;
 
     } catch (error: any) {
-      console.warn(`${symbol}: Failed to fetch opening price:`, error.message);
+      console.warn(`${symbol}: Failed to fetch opening/closing price:`, error.message);
       return null;
     }
   }

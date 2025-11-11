@@ -5,11 +5,12 @@ This project is an AI-powered options trading dashboard designed to provide mark
 # Recent Changes
 
 ## Dashboard Market Overview - Day-Based Changes (November 10, 2025)
-- **Feature**: S&P 500, NASDAQ, and VIX now display % and point changes based on today's opening price (not previous close)
-- **Implementation**: Uses Polygon API to fetch today's opening price via aggregates endpoint  
-- **Calculation**: Change = Current Price - Today's Open | Change% = (Change / Today's Open) × 100
-- **Fallback**: When opening price unavailable (weekends, API access limits), displays 0% change
-- **Live**: Feature displays accurate intraday changes during market hours
+- **Feature**: S&P 500, NASDAQ, and VIX now display % and point changes from most recent trading day's open to close
+- **Implementation**: Uses Polygon API to fetch open/close prices via aggregates endpoint with 5-day lookback
+- **Calculation**: Change = Close Price - Open Price | Change% = (Change / Open Price) × 100
+- **Weekend Display**: Shows Friday's open-to-close movement when markets are closed
+- **Live Trading**: Displays real-time intraday changes during market hours (Mon-Fri 9:30 AM - 4:00 PM ET)
+- **Data Sources**: SPY (S&P 500 proxy), NDX (NASDAQ-100), VXX (VIX proxy) for reliable data availability
 
 ## Fibonacci Retracement - 4-Hour Chart Upgrade (November 10, 2025)
 - **Upgrade**: Changed from daily bars to 4-hour bars for Fibonacci calculations

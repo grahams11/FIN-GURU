@@ -246,23 +246,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log('Fetching market overview...');
       const marketData = await WebScraperService.scrapeMarketIndices();
       
-      // Get today's opening prices from Polygon API
+      // Get most recent trading day's open/close prices from Polygon API
       // Use SPY as proxy for SPX (more reliable data availability)
-      const [sp500Open, nasdaqOpen, vixOpen] = await Promise.all([
+      const [sp500Data, nasdaqData, vixData] = await Promise.all([
         polygonService.getTodayOpenPrice('SPY'),    // S&P 500 ETF (proxy for SPX)
         polygonService.getTodayOpenPrice('NDX'),    // NASDAQ-100
         polygonService.getTodayOpenPrice('VXX')     // VIX ETF (proxy for VIX index)
       ]);
       
-      // Calculate change and changePercent based on today's opening price
-      const calculateChanges = (currentPrice: number, openPrice: number | null) => {
-        if (openPrice === null || openPrice === 0) {
-          // Fallback to scraped data if opening price unavailable
+      // Calculate change and changePercent based on most recent trading day (open to close)
+      const calculateChanges = (data: { open: number; close: number } | null) => {
+        if (!data) {
+          // Fallback to 0 if data unavailable
           return { change: 0, changePercent: 0 };
         }
         
-        const change = currentPrice - openPrice;
-        const changePercent = (change / openPrice) * 100;
+        const change = data.close - data.open;
+        const changePercent = (change / data.open) * 100;
         
         return {
           change: parseFloat(change.toFixed(2)),
@@ -270,9 +270,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         };
       };
       
-      const sp500Changes = calculateChanges(marketData.sp500.price, sp500Open);
-      const nasdaqChanges = calculateChanges(marketData.nasdaq.price, nasdaqOpen);
-      const vixChanges = calculateChanges(marketData.vix.price, vixOpen);
+      const sp500Changes = calculateChanges(sp500Data);
+      const nasdaqChanges = calculateChanges(nasdaqData);
+      const vixChanges = calculateChanges(vixData);
       
       // Calculate AI sentiment score
       const sentimentScore = Math.random() * 0.4 + 0.6; // 0.6-1.0 range for bullish bias
