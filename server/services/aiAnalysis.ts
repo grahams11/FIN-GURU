@@ -561,7 +561,7 @@ export class AIAnalysisService {
       await Promise.allSettled(
         finalTrades.map(async (trade) => {
           try {
-            const fibResult = await fibonacciService.detectBounce(trade.ticker, trade.currentPrice, trade.optionType);
+            const fibResult = await FibonacciService.detectBounce(trade.ticker, trade.currentPrice, trade.optionType);
             if (fibResult) {
               trade.fibonacciLevel = fibResult.level;
               trade.fibonacciColor = fibResult.color;
@@ -819,7 +819,7 @@ export class AIAnalysisService {
     const startTime = Date.now();
     
     // Use curated elite universe
-    const eliteUniverseSet = new Set([...this.ELITE_STOCK_UNIVERSE, ...this.FALLBACK_TICKERS]);
+    const eliteUniverseSet = new Set([...this.LARGE_CAP_UNIVERSE, ...this.FALLBACK_TICKERS]);
     const eliteUniverse = Array.from(eliteUniverseSet);
     console.log(`📋 Fallback: Pre-screening ${eliteUniverse.length} elite stocks...`);
     
@@ -1084,8 +1084,8 @@ export class AIAnalysisService {
         sentiment: isBullishMarket ? 0.8 : isBearishMarket ? 0.2 : 0.5,
         score,
         holdDays: optionsStrategy.holdDays,
-        fibonacciLevel: null, // Populated in Stage 3 after final selection
-        fibonacciColor: null, // Populated in Stage 3 after final selection
+        fibonacciLevel: undefined, // Populated in Stage 3 after final selection
+        fibonacciColor: undefined, // Populated in Stage 3 after final selection
         estimatedProfit
       };
 
