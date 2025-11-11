@@ -979,24 +979,21 @@ class PolygonService {
       ];
       
       for (const testSymbol of symbols) {
-        try {
-          const url = `https://api.polygon.io/v2/aggs/ticker/${testSymbol}/range/1/day/${prevStr}/${todayStr}?adjusted=true&limit=5&sort=desc&apiKey=${this.apiKey}`;
-          
-          const response = await axios.get(url, {
-            timeout: 5000
-          });
+        const url = `https://api.polygon.io/v2/aggs/ticker/${testSymbol}/range/1/day/${prevStr}/${todayStr}?adjusted=true&limit=5&sort=desc&apiKey=${this.apiKey}`;
+        
+        const data = await this.makeRateLimitedRequest<any>(url, {
+          timeout: 5000,
+          cacheTTL: 60000, // Cache for 1 minute (frequently requested during scans)
+          maxRetries: 2
+        });
 
-          if (response.data?.results && Array.isArray(response.data.results) && response.data.results.length > 0) {
-            // Get the most recent bar (should be today or last trading day)
-            const recentBar = response.data.results[0];
-            const open = recentBar.o;
-            const close = recentBar.c;
-            console.log(`${symbol}: Most recent trading day - Open: $${open.toFixed(2)}, Close: $${close.toFixed(2)} from ${testSymbol}`);
-            return { open, close };
-          }
-        } catch (innerError: any) {
-          // Try next symbol format
-          continue;
+        if (data?.results && Array.isArray(data.results) && data.results.length > 0) {
+          // Get the most recent bar (should be today or last trading day)
+          const recentBar = data.results[0];
+          const open = recentBar.o;
+          const close = recentBar.c;
+          console.log(`${symbol}: Most recent trading day - Open: $${open.toFixed(2)}, Close: $${close.toFixed(2)} from ${testSymbol}`);
+          return { open, close };
         }
       }
 
