@@ -148,8 +148,9 @@ export class BacktestingEngine {
    * Simulate market scan for a historical day
    */
   private async simulateMarketScan(date: string): Promise<OptionsTrade[]> {
-    // Process just 3 stocks to minimize API calls
-    const symbols = ['AAPL', 'NVDA', 'TSLA'];
+    // REALISTIC API LIMITS: Process 3 stocks per week (Mon/Fri only) to stay under 5 calls/min
+    // Free tier = 5 calls/min = ~1 stock every 20s
+    const symbols = ['AAPL', 'TSLA', 'NVDA'];
     const recommendations: OptionsTrade[] = [];
 
     // Process stocks sequentially (one at a time) to avoid rate limits

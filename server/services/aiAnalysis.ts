@@ -766,9 +766,9 @@ export class AIAnalysisService {
         continue;
       }
       
-      // FILTER 3: Significant price movement (>2% change)
+      // FILTER 3: Price movement (>1% on quiet days, >2% preferred)
       const absChangePercent = Math.abs(snapshot.changePercent);
-      if (absChangePercent < 2) {
+      if (absChangePercent < 1) {
         continue;
       }
       

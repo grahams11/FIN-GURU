@@ -91,8 +91,8 @@ export class EliteStrategyEngine {
       atrShort: 5,
       atrLong: 30,
       atrMultiplier: 1.2,
-      deltaMin: 0.35,
-      deltaMax: 0.45,
+      deltaMin: 0.25,  // Widened from 0.35 for stock options
+      deltaMax: 0.60,  // Widened from 0.45 for stock options
       thetaMax: -0.5,
       ivRankMin: 30,
       fibProximity: 0.005,
