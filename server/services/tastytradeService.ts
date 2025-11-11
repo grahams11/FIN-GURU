@@ -1142,7 +1142,8 @@ class TastytradeService {
   }
 
   /**
-   * Fetch today's P/L (realized + unrealized day change)
+   * Fetch today's P/L (simple account balance difference)
+   * Today's Change = Current Balance - Yesterday's Closing Balance
    */
   async fetchTodayPnL(): Promise<{ realized: number; unrealized: number; total: number }> {
     try {
@@ -1153,182 +1154,58 @@ class TastytradeService {
         return { realized: 0, unrealized: 0, total: 0 };
       }
 
-      // 1. Calculate unrealized day P/L from open positions
-      const positions = await this.apiClient.get(`/accounts/${this.accountNumber}/positions`);
-      let unrealizedDayPnL = 0;
-      
-      if (positions.data && positions.data.data && positions.data.data.items) {
-        positions.data.data.items.forEach((pos: any) => {
-          const closePrice = parseFloat(pos['close-price'] || 0);
-          const yesterdayClose = parseFloat(pos['average-daily-market-close-price'] || 0);
-          const quantity = parseFloat(pos.quantity || 0);
-          const multiplier = parseFloat(pos.multiplier || 1);
-          
-          if (closePrice > 0 && yesterdayClose > 0) {
-            const dayChange = (closePrice - yesterdayClose) * quantity * multiplier;
-            unrealizedDayPnL += dayChange;
-          }
-        });
-      }
+      // 1. Get current account balance
+      const balanceResponse = await this.apiClient.get(`/accounts/${this.accountNumber}/balances`);
+      const currentBalance = parseFloat(balanceResponse.data?.data?.['net-liquidating-value'] || 0);
+      console.log(`💰 Current Balance: $${currentBalance.toFixed(2)}`);
 
-      // 2. Calculate realized P/L from today's closed positions
-      // Use quantity-aware matching to only include the cost of contracts actually closed
-      const today = new Date().toISOString().split('T')[0];
-      const todayTxResponse = await this.apiClient.get(`/accounts/${this.accountNumber}/transactions`, {
-        params: {
-          'start-date': today,
-          'per-page': 100
-        }
-      });
+      // 2. Get yesterday's closing balance from balance history
+      const today = new Date();
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
       
-      let realizedDayPnL = 0;
+      // Go back up to 7 days to find the most recent closing balance (handles weekends/holidays)
+      let priorCloseBalance = 0;
+      let daysBack = 1;
       
-      // Track today's closing transactions: symbol -> { netValue, quantity }
-      const closingTxMap = new Map<string, { netValue: number; quantity: number }>();
-      
-      if (todayTxResponse.data && todayTxResponse.data.data && todayTxResponse.data.data.items) {
-        todayTxResponse.data.data.items.forEach((tx: any) => {
-          const subType = tx['transaction-sub-type'];
-          const symbol = tx.symbol;
-          const netValue = parseFloat(tx['net-value'] || 0);
-          const quantity = Math.abs(parseFloat(tx.quantity || 0));
-          
-          // Track closing transactions
-          if (subType === 'Sell to Close' || subType === 'Buy to Close') {
-            const current = closingTxMap.get(symbol) || { netValue: 0, quantity: 0 };
-            closingTxMap.set(symbol, {
-              netValue: current.netValue + netValue,
-              quantity: current.quantity + quantity
-            });
-          }
-        });
-      }
-      
-      // Fetch ALL transactions to build cost basis (pagination using cursor/page-offset)
-      const allTransactions: any[] = [];
-      let pageOffset = 0;
-      let hasMore = true;
-      const maxPages = 20; // Up to 5000 transactions
-      
-      while (hasMore && pageOffset < maxPages) {
+      while (daysBack <= 7 && priorCloseBalance === 0) {
+        const priorDate = new Date(today);
+        priorDate.setDate(priorDate.getDate() - daysBack);
+        const priorDateStr = priorDate.toISOString().split('T')[0];
+        
         try {
-          const txResponse = await this.apiClient.get(`/accounts/${this.accountNumber}/transactions`, {
+          const historyResponse = await this.apiClient.get(`/accounts/${this.accountNumber}/balance-snapshots`, {
             params: {
-              'per-page': 250,
-              'offset': pageOffset * 250, // Tastytrade uses 'offset' parameter
-              'sort': 'Desc'
+              'snapshot-date': priorDateStr
             }
           });
           
-          if (txResponse.data && txResponse.data.data && txResponse.data.data.items) {
-            const items = txResponse.data.data.items;
-            
-            // Stop if no items returned
-            if (items.length === 0) {
-              hasMore = false;
-              break;
-            }
-            
-            allTransactions.push(...items);
-            
-            // Check if we have enough transactions
-            hasMore = items.length === 250;
-            pageOffset++;
-            
-            // Early exit: if we've covered all symbols closed today with sufficient quantity
-            const coveredSymbols = new Set<string>();
-            const qtyTracker = new Map<string, number>(); // symbol -> total opening qty found
-            
-            for (const tx of allTransactions) {
-              const symbol = tx.symbol;
-              const subType = tx['transaction-sub-type'];
-              const quantity = Math.abs(parseFloat(tx.quantity || 0));
-              
-              if (closingTxMap.has(symbol) && (subType === 'Buy to Open' || subType === 'Sell to Open')) {
-                const current = qtyTracker.get(symbol) || 0;
-                qtyTracker.set(symbol, current + quantity);
-                
-                // Mark covered if we have enough opening quantity
-                if (qtyTracker.get(symbol)! >= closingTxMap.get(symbol)!.quantity) {
-                  coveredSymbols.add(symbol);
-                }
-              }
-            }
-            
-            // All symbols covered - can stop fetching
-            if (coveredSymbols.size === closingTxMap.size) {
-              console.log(`✅ Cost basis fully covered after ${pageOffset} pages (${allTransactions.length} transactions)`);
-              break;
-            }
-          } else {
-            hasMore = false;
+          if (historyResponse.data?.data?.['net-liquidating-value']) {
+            priorCloseBalance = parseFloat(historyResponse.data.data['net-liquidating-value']);
+            console.log(`📅 Prior Close Balance (${priorDateStr}): $${priorCloseBalance.toFixed(2)}`);
+            break;
           }
-        } catch (error: any) {
-          console.error(`Error fetching transaction page ${pageOffset}:`, error.message);
-          hasMore = false;
+        } catch (err: any) {
+          // Try previous day if this date has no snapshot
+          console.log(`⚠️ No balance snapshot for ${priorDateStr}, trying earlier...`);
         }
+        
+        daysBack++;
       }
       
-      console.log(`📋 Fetched ${allTransactions.length} transactions for cost basis matching (${pageOffset} pages)`);
-      
-      // Build quantity-aware cost basis: symbol -> { netValue, quantity }[]
-      const costBasisQueue = new Map<string, Array<{ netValue: number; quantity: number }>>();
-      
-      // Process in reverse (oldest first) for FIFO
-      const txs = allTransactions.reverse();
-      
-      txs.forEach((tx: any) => {
-        const symbol = tx.symbol;
-        const subType = tx['transaction-sub-type'];
-        const netValue = parseFloat(tx['net-value'] || 0);
-        const quantity = Math.abs(parseFloat(tx.quantity || 0));
-        
-        // Only track opening transactions for symbols closed today
-        if (closingTxMap.has(symbol) && (subType === 'Buy to Open' || subType === 'Sell to Open')) {
-          if (!costBasisQueue.has(symbol)) {
-            costBasisQueue.set(symbol, []);
-          }
-          costBasisQueue.get(symbol)!.push({ netValue, quantity });
-        }
-      });
-      
-      // Calculate realized P/L using FIFO matching
-      closingTxMap.forEach((closing, symbol) => {
-        const queue = costBasisQueue.get(symbol) || [];
-        let closingQuantity = closing.quantity;
-        let matchedCost = 0;
-        let matchedQuantity = 0;
-        
-        // Match closing quantity to opening transactions (FIFO)
-        for (const opening of queue) {
-          if (closingQuantity <= 0) break;
-          
-          const matchQty = Math.min(closingQuantity, opening.quantity);
-          const costPerContract = opening.netValue / opening.quantity;
-          console.log(`   Opening: qty=${opening.quantity}, netValue=${opening.netValue.toFixed(2)}, costPerContract=${costPerContract.toFixed(2)}`);
-          matchedCost += costPerContract * matchQty;
-          matchedQuantity += matchQty;
-          closingQuantity -= matchQty;
-        }
-        
-        // Warn if we couldn't match all closed quantity
-        if (closingQuantity > 0) {
-          console.warn(`⚠️ ${symbol}: INCOMPLETE COST BASIS - Closed ${closing.quantity}, only matched ${matchedQuantity}. Missing ${closingQuantity} contracts. P/L may be inaccurate!`);
-        }
-        
-        // P/L = closing proceeds - opening cost (both should be positive values from Tastytrade)
-        const pnl = closing.netValue - Math.abs(matchedCost);
-        console.log(`📈 ${symbol}: Closed ${closing.quantity} @ ${closing.netValue.toFixed(2)}, Matched Cost=${Math.abs(matchedCost).toFixed(2)}, P/L=${pnl.toFixed(2)}`);
-        realizedDayPnL += pnl;
-      });
-      
-      const total = realizedDayPnL + unrealizedDayPnL;
-      console.log(`📊 Today's P/L: Realized=${realizedDayPnL.toFixed(2)}, Unrealized=${unrealizedDayPnL.toFixed(2)}, Total=${total.toFixed(2)}`);
+      if (priorCloseBalance === 0) {
+        console.warn('⚠️ Could not find prior closing balance, returning 0 for today\'s change');
+        return { realized: 0, unrealized: 0, total: 0 };
+      }
+
+      // 3. Calculate today's change
+      const todayChange = currentBalance - priorCloseBalance;
+      console.log(`📊 Today's Change: $${todayChange.toFixed(2)} (Current: $${currentBalance.toFixed(2)} - Prior Close: $${priorCloseBalance.toFixed(2)})`);
       
       return {
-        realized: realizedDayPnL,
-        unrealized: unrealizedDayPnL,
-        total
+        realized: 0,  // Not tracking individual trade P/L anymore
+        unrealized: todayChange,  // All change is in account value
+        total: todayChange
       };
     } catch (error: any) {
       console.error('❌ Error fetching today P/L:', error.response?.data || error.message);
