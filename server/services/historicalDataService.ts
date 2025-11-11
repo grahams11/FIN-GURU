@@ -19,9 +19,9 @@ interface RateLimiter {
 
 export class HistoricalDataService {
   private rateLimiter: RateLimiter = {
-    tokens: 4,
-    maxTokens: 4,
-    refillRate: 4, // 4 requests per second
+    tokens: 1,
+    maxTokens: 1,
+    refillRate: 0.5, // 1 request every 2 seconds (very conservative)
     lastRefill: Date.now()
   };
 
@@ -47,7 +47,7 @@ export class HistoricalDataService {
   }
 
   /**
-   * Fetch historical daily bars (OHLCV) for a symbol
+   * Fetch historical daily bars (OHLCV) for a symbol with retry logic
    */
   async getDailyBars(
     symbol: string,
@@ -60,37 +60,51 @@ export class HistoricalDataService {
       if (cached) return cached;
     }
 
-    await this.waitForRateLimit();
+    // Retry with exponential backoff
+    const maxRetries = 3;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      await this.waitForRateLimit();
 
-    try {
-      const response = await fetch(
-        `https://api.polygon.io/v2/aggs/ticker/${symbol}/range/1/day/${startDate}/${endDate}?adjusted=true&sort=asc&limit=50000&apiKey=${process.env.POLYGON_API_KEY}`
-      );
+      try {
+        const response = await fetch(
+          `https://api.polygon.io/v2/aggs/ticker/${symbol}/range/1/day/${startDate}/${endDate}?adjusted=true&sort=asc&limit=50000&apiKey=${process.env.POLYGON_API_KEY}`
+        );
 
-      if (!response.ok) {
-        console.error(`❌ Polygon API error (${response.status}): ${symbol}`);
-        return [];
+        if (response.status === 429) {
+          const backoffTime = Math.min(30000, 2000 * Math.pow(2, attempt)); // 2s, 4s, 8s (max 30s)
+          console.warn(`⏳ Rate limited - waiting ${backoffTime/1000}s before retry (attempt ${attempt + 1}/${maxRetries})`);
+          await new Promise(resolve => setTimeout(resolve, backoffTime));
+          continue;
+        }
+
+        if (!response.ok) {
+          console.error(`❌ Polygon API error (${response.status}): ${symbol}`);
+          return [];
+        }
+
+        const data = await response.json();
+        const bars: HistoricalBar[] = (data.results || []).map((bar: any) => ({
+          timestamp: bar.t,
+          open: bar.o,
+          high: bar.h,
+          low: bar.l,
+          close: bar.c,
+          volume: bar.v
+        }));
+
+        if (useCache && bars.length > 0) {
+          await historicalDataCache.set(symbol, 'daily_bars', startDate, endDate, bars);
+        }
+
+        console.log(`✅ Fetched ${bars.length} bars for ${symbol}`);
+        return bars;
+      } catch (error) {
+        console.error(`Failed to fetch daily bars for ${symbol} (attempt ${attempt + 1}):`, error);
+        if (attempt === maxRetries - 1) return [];
       }
-
-      const data = await response.json();
-      const bars: HistoricalBar[] = (data.results || []).map((bar: any) => ({
-        timestamp: bar.t,
-        open: bar.o,
-        high: bar.h,
-        low: bar.l,
-        close: bar.c,
-        volume: bar.v
-      }));
-
-      if (useCache && bars.length > 0) {
-        await historicalDataCache.set(symbol, 'daily_bars', startDate, endDate, bars);
-      }
-
-      return bars;
-    } catch (error) {
-      console.error(`Failed to fetch daily bars for ${symbol}:`, error);
-      return [];
     }
+
+    return [];
   }
 
   /**
