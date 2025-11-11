@@ -9,7 +9,7 @@ import { db } from '../db';
 import { recommendationTracking, recommendationPerformance, strategyParameters } from '@shared/schema';
 import type { TradeRecommendation } from '@shared/schema';
 import { eq, and, gte, desc } from 'drizzle-orm';
-import { eliteStrategyEngine } from './eliteStrategyEngine';
+import { EliteStrategyEngine } from './eliteStrategyEngine';
 
 export class RecommendationTracker {
   
@@ -73,7 +73,7 @@ export class RecommendationTracker {
         atrMultiplier: activeParams.atrMultiplier,
         deltaMin: activeParams.deltaMin,
         deltaMax: activeParams.deltaMax
-      } : eliteStrategyEngine.getConfig(),
+      } : EliteStrategyEngine.getInstance().getConfig(),
       
       status: 'monitoring'
     }).returning();
@@ -224,7 +224,7 @@ export class RecommendationTracker {
    * Adjust strategy parameters to improve win rate
    */
   static async adjustParameters(reason: string, currentMetrics: any): Promise<void> {
-    const currentConfig = eliteStrategyEngine.getConfig();
+    const currentConfig = EliteStrategyEngine.getInstance().getConfig();
     const activeParams = await this.getActiveParameters();
     
     // Deactivate current parameters
@@ -283,7 +283,7 @@ export class RecommendationTracker {
     });
     
     // Update elite strategy engine
-    eliteStrategyEngine.updateConfig(newConfig);
+    EliteStrategyEngine.getInstance().updateConfig(newConfig);
     
     console.log(`🎯 Parameters adjusted to boost win rate:`);
     console.log(`   RSI: ${newConfig.rsiOversold}/${newConfig.rsiOverbought} (was ${currentConfig.rsiOversold}/${currentConfig.rsiOverbought})`);
@@ -311,7 +311,7 @@ export class RecommendationTracker {
     const existing = await this.getActiveParameters();
     if (existing) return;
     
-    const defaultConfig = eliteStrategyEngine.getConfig();
+    const defaultConfig = EliteStrategyEngine.getInstance().getConfig();
     
     await db.insert(strategyParameters).values({
       version: 'v1.0.0',

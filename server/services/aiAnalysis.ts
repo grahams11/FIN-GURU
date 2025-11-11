@@ -3,6 +3,8 @@ import { WebScraperService, type OptionsChain } from './webScraper';
 import { polygonService } from './polygonService';
 import { FibonacciService } from './fibonacciService';
 import { expirationService, type ExpirationDate } from './expirationService';
+import { EliteStrategyEngine } from './eliteStrategyEngine';
+import { RecommendationTracker } from './recommendationTracker';
 
 // Options Market Standards
 class OptionsMarketStandards {
@@ -259,6 +261,9 @@ class BlackScholesCalculator {
 }
 
 export class AIAnalysisService {
+  // Elite Strategy Engine (self-learning system - singleton shared across all services)
+  private static readonly eliteStrategy = EliteStrategyEngine.getInstance();
+  
   // DAY TRADING INSTRUMENTS (Always top 1)
   // SPX = S&P 500 Index (professional day trading instrument with reliable live data)
   private static readonly DAY_TRADING_INSTRUMENTS = ['SPX'];
@@ -427,9 +432,81 @@ export class AIAnalysisService {
     return filtered;
   }
 
+  /**
+   * Apply elite strategy validation filters to enhance signal quality
+   */
+  private static async applyEliteFilters(
+    recommendation: TradeRecommendation,
+    marketData: any
+  ): Promise<{ passed: boolean; confidence: number; reason: string }> {
+    try {
+      // Get historical data for technical indicators
+      const ticker = recommendation.ticker;
+      const config = this.eliteStrategy.getConfig();
+      
+      // Extract current metrics from recommendation
+      const rsi = recommendation.greeks ? (recommendation.greeks as any).rsi || 50 : 50;
+      const vix = marketData.vix?.value || 18;
+      const delta = recommendation.greeks.delta;
+      
+      // Filter 1: Greeks quality (Delta range)
+      const deltaInRange = delta >= config.deltaMin && delta <= config.deltaMax;
+      if (!deltaInRange) {
+        return { passed: false, confidence: 0, reason: `Delta ${delta.toFixed(2)} outside range ${config.deltaMin}-${config.deltaMax}` };
+      }
+      
+      // Filter 2: Theta quality
+      const theta = recommendation.greeks.theta;
+      if (theta > config.thetaMax) {
+        return { passed: false, confidence: 0, reason: `Theta ${theta.toFixed(2)} too high (max ${config.thetaMax})` };
+      }
+      
+      // Filter 3: VIX requirements based on option type
+      if (recommendation.optionType === 'call' && vix < config.vixMinCall) {
+        return { passed: false, confidence: 0, reason: `VIX ${vix.toFixed(1)} below minimum ${config.vixMinCall} for calls` };
+      }
+      if (recommendation.optionType === 'put' && vix < config.vixMinPut) {
+        return { passed: false, confidence: 0, reason: `VIX ${vix.toFixed(1)} below minimum ${config.vixMinPut} for puts` };
+      }
+      
+      // Calculate enhanced confidence score
+      let confidenceBoost = 0;
+      
+      // RSI extremity bonus
+      if (recommendation.optionType === 'call' && rsi < config.rsiOversold) {
+        confidenceBoost += 0.10;
+      }
+      if (recommendation.optionType === 'put' && rsi > config.rsiOverbought) {
+        confidenceBoost += 0.10;
+      }
+      
+      // Fibonacci bonus
+      if (recommendation.fibonacciLevel) {
+        confidenceBoost += 0.10;
+      }
+      
+      // Delta quality bonus (closer to 0.40 is better)
+      const deltaQuality = 1 - Math.abs(0.40 - delta) / 0.40;
+      confidenceBoost += deltaQuality * 0.10;
+      
+      const enhancedConfidence = Math.min(0.95, recommendation.aiConfidence + confidenceBoost);
+      
+      return {
+        passed: true,
+        confidence: enhancedConfidence,
+        reason: `Elite filters passed: Delta ${delta.toFixed(2)}, Theta ${theta.toFixed(2)}, VIX ${vix.toFixed(1)}`
+      };
+      
+    } catch (error) {
+      console.error(`Error applying elite filters to ${recommendation.ticker}:`, error);
+      // On error, pass through with original confidence
+      return { passed: true, confidence: recommendation.aiConfidence, reason: 'Filter check skipped due to error' };
+    }
+  }
+
   static async generateTradeRecommendations(): Promise<TradeRecommendation[]> {
     try {
-      console.log('🚀 Starting ELITE TWO-STAGE market scanner...');
+      console.log('🚀 Starting ELITE TWO-STAGE market scanner with self-learning validation...');
       
       // Scrape current market data (includes VIX)
       const marketData = await this.scrapeMarketDataForAnalysis();
@@ -496,8 +573,53 @@ export class AIAnalysisService {
         })
       );
       
-      console.log(`\n✅ Generated ${finalTrades.length} ELITE trade recommendations (${dayTradingTrades.length} day trading, ${sortedSwingTrades.length} swing trading)`);
-      return finalTrades;
+      // 5. ELITE STRATEGY VALIDATION & TRACKING
+      console.log(`\n🎯 Applying elite strategy filters and tracking recommendations...`);
+      const validatedTrades: TradeRecommendation[] = [];
+      
+      for (const trade of finalTrades) {
+        try {
+          // Apply elite filters
+          const filterResult = await this.applyEliteFilters(trade, marketData);
+          
+          if (filterResult.passed) {
+            // Update confidence with elite validation
+            trade.aiConfidence = filterResult.confidence;
+            validatedTrades.push(trade);
+            
+            // Track recommendation for performance monitoring
+            const recommendationType = dayTradingTrades.includes(trade) ? 'day_trade' : 'swing_trade';
+            const rsi = (trade.greeks as any).rsi || 50; // Extract RSI from earlier calculation
+            
+            try {
+              await RecommendationTracker.trackRecommendation(trade, recommendationType, {
+                rsi,
+                vix: marketData.vix?.value || 18,
+                ema: undefined, // TODO: Add EMA calculation
+                atrShort: undefined, // TODO: Add ATR calculation
+                atrLong: undefined,
+                fibonacciLevel: trade.fibonacciLevel
+              });
+            } catch (trackError) {
+              console.warn(`Failed to track ${trade.ticker} recommendation:`, trackError);
+              // Don't fail the recommendation if tracking fails
+            }
+            
+            console.log(`✅ ${trade.ticker} ${trade.optionType.toUpperCase()}: ${filterResult.reason}`);
+          } else {
+            console.log(`❌ ${trade.ticker} ${trade.optionType.toUpperCase()} filtered out: ${filterResult.reason}`);
+          }
+        } catch (error) {
+          console.warn(`Error validating ${trade.ticker}:`, error);
+          // Include trade even if validation fails (fallback to original logic)
+          validatedTrades.push(trade);
+        }
+      }
+      
+      console.log(`\n✅ Generated ${validatedTrades.length} ELITE validated trade recommendations (${dayTradingTrades.filter(t => validatedTrades.includes(t)).length} day trading, ${validatedTrades.length - dayTradingTrades.filter(t => validatedTrades.includes(t)).length} swing trading)`);
+      console.log(`📊 Filtered out ${finalTrades.length - validatedTrades.length} trades that didn't meet elite criteria`);
+      
+      return validatedTrades;
       
     } catch (error) {
       console.error('Error generating trade recommendations:', error);

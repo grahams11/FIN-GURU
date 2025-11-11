@@ -73,9 +73,10 @@ export interface EnhancedSignal {
 }
 
 export class EliteStrategyEngine {
+  private static instance: EliteStrategyEngine | null = null;
   private config: EliteStrategyConfig;
   
-  constructor(config?: Partial<EliteStrategyConfig>) {
+  private constructor(config?: Partial<EliteStrategyConfig>) {
     // Default elite parameters
     this.config = {
       rsiOversold: 40,
@@ -97,6 +98,61 @@ export class EliteStrategyEngine {
       fibProximity: 0.005,
       ...config
     };
+  }
+  
+  /**
+   * Get singleton instance (creates if doesn't exist)
+   */
+  static getInstance(): EliteStrategyEngine {
+    if (!EliteStrategyEngine.instance) {
+      EliteStrategyEngine.instance = new EliteStrategyEngine();
+    }
+    return EliteStrategyEngine.instance;
+  }
+  
+  /**
+   * Load parameters from database and update config
+   */
+  async loadParametersFromDatabase(): Promise<void> {
+    try {
+      const { db } = await import('../db');
+      const { strategyParameters } = await import('@shared/schema');
+      const { eq, desc } = await import('drizzle-orm');
+      
+      const [activeParams] = await db.select()
+        .from(strategyParameters)
+        .where(eq(strategyParameters.isActive, true))
+        .orderBy(desc(strategyParameters.activatedAt))
+        .limit(1);
+      
+      if (activeParams) {
+        this.config = {
+          rsiOversold: activeParams.rsiOversold,
+          rsiOverbought: activeParams.rsiOverbought,
+          vixMinCall: activeParams.vixMinCall,
+          vixMinPut: activeParams.vixMinPut,
+          stopLoss: activeParams.stopLoss,
+          profitTarget: activeParams.profitTarget,
+          partialProfitLevel: activeParams.partialProfitLevel || 0.35,
+          partialProfitPercent: activeParams.partialProfitPercent || 0.50,
+          emaLength: activeParams.emaLength || 20,
+          atrShort: 5,
+          atrLong: 30,
+          atrMultiplier: activeParams.atrMultiplier || 1.2,
+          deltaMin: activeParams.deltaMin || 0.35,
+          deltaMax: activeParams.deltaMax || 0.45,
+          thetaMax: -0.5,
+          ivRankMin: 30,
+          fibProximity: 0.005,
+        };
+        console.log(`✅ Loaded active strategy parameters ${activeParams.version} from database`);
+      } else {
+        console.log(`ℹ️ No active parameters in database, using defaults`);
+      }
+    } catch (error) {
+      console.error('Failed to load parameters from database:', error);
+      // Continue with default parameters
+    }
   }
   
   /**
@@ -251,5 +307,3 @@ export class EliteStrategyEngine {
     return { ...this.config };
   }
 }
-
-export const eliteStrategyEngine = new EliteStrategyEngine();

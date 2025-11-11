@@ -1347,6 +1347,92 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ===== ELITE STRATEGY ANALYTICS ENDPOINTS =====
+  
+  // Get elite strategy performance metrics
+  app.get('/api/strategy/metrics', async (req, res) => {
+    try {
+      const { RecommendationTracker } = await import('./services/recommendationTracker');
+      
+      const days = parseInt(req.query.days as string) || 30;
+      const metrics = await RecommendationTracker.getRecentWinRate(days);
+      const activeParams = await RecommendationTracker.getActiveParameters();
+      
+      res.json({
+        ...metrics,
+        activeStrategyVersion: activeParams?.version || 'v1.0.0',
+        parameters: activeParams ? {
+          rsiOversold: activeParams.rsiOversold,
+          rsiOverbought: activeParams.rsiOverbought,
+          vixMinCall: activeParams.vixMinCall,
+          vixMinPut: activeParams.vixMinPut,
+          stopLoss: activeParams.stopLoss,
+          profitTarget: activeParams.profitTarget,
+        } : null
+      });
+    } catch (error: any) {
+      console.error('Error fetching strategy metrics:', error);
+      res.status(500).json({ message: 'Failed to fetch strategy metrics' });
+    }
+  });
+  
+  // Get strategy parameter evolution history
+  app.get('/api/strategy/parameters/history', async (req, res) => {
+    try {
+      const { db } = await import('./db');
+      const { strategyParameters } = await import('@shared/schema');
+      const { desc } = await import('drizzle-orm');
+      
+      const history = await db.query.strategyParameters.findMany({
+        orderBy: desc(strategyParameters.activatedAt),
+        limit: 50
+      });
+      
+      res.json(history);
+    } catch (error: any) {
+      console.error('Error fetching parameter history:', error);
+      res.status(500).json({ message: 'Failed to fetch parameter history' });
+    }
+  });
+  
+  // Get recent tracked recommendations
+  app.get('/api/strategy/recommendations', async (req, res) => {
+    try {
+      const { db } = await import('./db');
+      const { recommendationTracking, recommendationPerformance } = await import('@shared/schema');
+      const { desc, eq } = await import('drizzle-orm');
+      
+      const limit = parseInt(req.query.limit as string) || 50;
+      const status = req.query.status as string;
+      
+      // Get recommendations with optional status filter
+      const recommendations = await db.query.recommendationTracking.findMany({
+        where: status ? eq(recommendationTracking.status, status) : undefined,
+        orderBy: desc(recommendationTracking.recommendedAt),
+        limit
+      });
+      
+      // Fetch performance data for each recommendation
+      const enriched = await Promise.all(
+        recommendations.map(async (rec) => {
+          const perf = await db.query.recommendationPerformance.findFirst({
+            where: eq(recommendationPerformance.recommendationId, rec.id)
+          });
+          
+          return {
+            ...rec,
+            performance: perf || null
+          };
+        })
+      );
+      
+      res.json(enriched);
+    } catch (error: any) {
+      console.error('Error fetching recommendations:', error);
+      res.status(500).json({ message: 'Failed to fetch recommendations' });
+    }
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }

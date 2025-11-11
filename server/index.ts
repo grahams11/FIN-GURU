@@ -3,6 +3,8 @@ import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { tastytradeService } from "./services/tastytradeService";
 import { polygonService } from "./services/polygonService";
+import { EliteStrategyEngine } from "./services/eliteStrategyEngine";
+import { RecommendationTracker } from "./services/recommendationTracker";
 
 const app = express();
 app.use(express.json());
@@ -54,6 +56,12 @@ app.use((req, res, next) => {
   tastytradeService.init().catch(err => {
     console.warn('⚠️ Tastytrade initialization failed, will use other fallback sources:', err.message);
   });
+  
+  // Initialize Elite Strategy Engine with parameters from database
+  console.log('🧠 Initializing Elite Strategy Engine...');
+  await RecommendationTracker.initializeDefaultParameters();
+  await EliteStrategyEngine.getInstance().loadParametersFromDatabase();
+  console.log('✅ Elite Strategy Engine ready with active parameters');
   
   const server = await registerRoutes(app);
 
