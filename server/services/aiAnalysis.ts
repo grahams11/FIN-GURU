@@ -2,6 +2,7 @@ import type { TradeRecommendation, MarketOverviewData, Greeks } from '@shared/sc
 import { WebScraperService, type OptionsChain } from './webScraper';
 import { polygonService } from './polygonService';
 import { FibonacciService } from './fibonacciService';
+import { expirationService, type ExpirationDate } from './expirationService';
 
 // Options Market Standards
 class OptionsMarketStandards {
@@ -943,12 +944,12 @@ export class AIAnalysisService {
   }
   
   // Fallback method using estimation when scraping fails
-  private static generateFallbackOptionsStrategy(
+  private static async generateFallbackOptionsStrategy(
     ticker: string, 
     stockData: any, 
     sentiment: any, 
     marketContext: any
-  ): any {
+  ): Promise<any> {
     try {
       const currentPrice = stockData.price;
       const isCallStrategy = sentiment.bullishness >= 0.55;
@@ -965,7 +966,7 @@ export class AIAnalysisService {
       // Calculate expiry date using real options expiration schedule
       // Cap at 30 days for swing trades (5-10 day holds)
       const targetDays = Math.max(14, Math.min(30, 21 + Math.round(sentiment.confidence * 9)));
-      const expiryDate = this.getNextValidExpiration(targetDays);
+      const expiryDate = await this.getNextValidExpiration(ticker, targetDays);
       
       // Estimate implied volatility based on VIX and stock volatility
       const baseIV = 0.25; // Base 25%
@@ -1056,7 +1057,11 @@ export class AIAnalysisService {
     return Math.round(targetPrice / interval) * interval;
   }
   
-  private static getNextValidExpiration(targetDays: number): Date {
+  private static async getNextValidExpiration(
+    ticker: string,
+    targetDays: number,
+    sessionToken?: string
+  ): Promise<Date> {
     const today = new Date();
     const targetDate = new Date(today);
     targetDate.setDate(today.getDate() + targetDays);
@@ -1065,7 +1070,28 @@ export class AIAnalysisService {
     const maxDate = new Date(today);
     maxDate.setDate(today.getDate() + Math.min(targetDays, 30));
     
-    // Use shared expiration logic from OptionsMarketStandards
+    // Use ExpirationService to get live API data
+    const expirations = await expirationService.getExpirations(ticker, {
+      minDays: Math.floor(targetDays * 0.8), // Allow 20% earlier
+      maxDays: Math.floor(targetDays * 1.2), // Allow 20% later
+      filterType: 'monthly', // Swing trades use monthly expirations
+      sessionToken
+    });
+    
+    // If we got API data, use the closest expiration to target
+    if (expirations.length > 0) {
+      const targetTime = targetDate.getTime();
+      const closest = expirations.reduce((prev: ExpirationDate, curr: ExpirationDate) => {
+        const prevDiff = Math.abs(new Date(prev.date).getTime() - targetTime);
+        const currDiff = Math.abs(new Date(curr.date).getTime() - targetTime);
+        return currDiff < prevDiff ? curr : prev;
+      });
+      console.log(`✅ Using live API expiration for ${ticker}: ${closest.date} (${closest.expiryType}, ${closest.source})`);
+      return new Date(closest.date);
+    }
+    
+    // Fallback to calculated expiration logic
+    console.warn(`⚠️ No API expirations found for ${ticker}, using calculated fallback`);
     return OptionsMarketStandards.getNextValidExpiration(targetDays);
   }
 
@@ -1394,7 +1420,7 @@ export class AIAnalysisService {
       
       // Optimal timeframe: 5-10 days for momentum swing trades
       const targetDays = 7 + Math.floor(Math.random() * 3); // 7-10 days
-      const expiryDate = this.getNextValidExpiration(targetDays);
+      const expiryDate = await this.getNextValidExpiration(ticker, targetDays);
       
       // Calculate implied volatility based on stock momentum
       const baseIV = 0.35;
