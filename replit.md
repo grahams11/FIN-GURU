@@ -4,6 +4,28 @@ This project is an AI-powered options trading dashboard designed to provide mark
 
 # Recent Changes
 
+## Elite System Improvements - Code Sharpening (November 11, 2025)
+**Internal AI Architect Scan Results**: Identified and fixed 3 critical bugs blocking money-making performance
+
+### 1. Dynamic Expiration Date System ✅
+- **Problem**: Hard-coded 2025 dates would cause system to suggest **expired contracts** after December 2025
+- **Fix**: Implemented dynamic 12-month rolling expiration calculation using third Friday logic
+- **Holiday Handling**: Detects Good Friday (via Easter calculation) and moves expiration to Thursday
+- **Impact**: System now generates valid trade signals **indefinitely** (not just until Dec 2025)
+
+### 2. Swing Pivot Fibonacci Detection ✅
+- **Problem**: Using absolute highest/lowest across 360 candles caused **false bounce signals** from outlier spikes
+- **Fix**: Implemented 5-bar fractal swing detection to identify meaningful support/resistance levels
+- **Method**: Scans for swing highs/lows where price is higher/lower than 5 bars on each side
+- **Fallback**: Uses recent 30-bar high/low if no pivots found
+- **Impact**: Eliminates false "Fibonacci bounce" confirmations that inflated confidence scores
+
+### 3. Type Safety & Fail-Safe Logic ✅
+- **Problem**: `null as any` pattern allowed undefined Fibonacci data to boost confidence scores silently
+- **Fix**: Changed `detectBounce()` return type to `BounceDetection | null` with strict null checking
+- **Safeguards**: Added validation gates before surfacing confidence/ROI scores
+- **Impact**: Prevents undefined behavior from cascading through scoring algorithms
+
 ## Dashboard Market Overview - Day-Based Changes (November 10, 2025)
 - **Feature**: S&P 500, NASDAQ, and VIX now display % and point changes from most recent trading day's open to close
 - **Implementation**: Uses Polygon API to fetch open/close prices via aggregates endpoint with 5-day lookback
