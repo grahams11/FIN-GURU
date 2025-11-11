@@ -628,159 +628,55 @@ export class AIAnalysisService {
   }
 
   /**
-   * ELITE STOCK UNIVERSE: High-quality stocks with liquid options markets
-   * Curated list of ~400 top stocks across all sectors for fast, comprehensive scanning
-   * Updated periodically to ensure market coverage without API rate limit issues
+   * LARGE CAP UNIVERSE: Top 40 most liquid large-cap stocks and ETFs
+   * Optimized for Polygon free tier (5 API calls/minute) to avoid rate limits
+   * Focus on high-volume, highly liquid options markets for best opportunities
    */
-  private static readonly ELITE_STOCK_UNIVERSE = [
-    // Mega-cap tech (FAANG+)
-    'AAPL', 'MSFT', 'GOOGL', 'GOOG', 'AMZN', 'META', 'NVDA', 'TSLA', 'NFLX',
+  private static readonly LARGE_CAP_UNIVERSE = [
+    // Mega-cap tech (highest volume)
+    'AAPL', 'MSFT', 'NVDA', 'GOOGL', 'AMZN', 'META', 'TSLA',
     
-    // Major tech & software
-    'AMD', 'INTC', 'CRM', 'ORCL', 'ADBE', 'CSCO', 'AVGO', 'QCOM', 'TXN', 'MU',
-    'NOW', 'SHOP', 'SQ', 'PYPL', 'SNOW', 'PLTR', 'COIN', 'RBLX', 'U', 'DDOG',
-    'CRWD', 'ZS', 'NET', 'PANW', 'FTNT', 'OKTA', 'MDB', 'TEAM', 'WDAY', 'VEEV',
+    // High-volume tech
+    'AMD', 'INTC', 'CRM', 'NFLX', 'AVGO', 'ORCL',
     
-    // Semiconductors
-    'TSM', 'ASML', 'AMAT', 'LRCX', 'KLAC', 'MRVL', 'ARM', 'MCHP', 'ADI', 'NXPI',
-    'ON', 'MPWR', 'SWKS', 'QRVO',
+    // Semiconductors (liquid options)
+    'TSM', 'QCOM', 'MU', 'AMAT',
     
-    // Financial services
-    'JPM', 'BAC', 'WFC', 'GS', 'MS', 'C', 'BLK', 'SCHW', 'V', 'MA', 'AXP',
-    'SPGI', 'CME', 'ICE', 'COIN', 'SOFI', 'AFRM', 'UPST', 'HOOD',
+    // Financial mega-caps
+    'JPM', 'BAC', 'WFC', 'V', 'MA',
     
-    // Healthcare & biotech
-    'JNJ', 'UNH', 'PFE', 'ABBV', 'MRK', 'TMO', 'LLY', 'AMGN', 'GILD', 'MRNA',
-    'BNTX', 'REGN', 'VRTX', 'BMY', 'CVS', 'CI', 'HUM', 'BIIB', 'ISRG',
+    // Healthcare large-caps
+    'UNH', 'JNJ', 'LLY', 'ABBV',
     
-    // Energy
-    'XOM', 'CVX', 'COP', 'SLB', 'EOG', 'MPC', 'PSX', 'VLO', 'OXY', 'HAL',
-    'DVN', 'FANG', 'PXD', 'HES', 'MRO', 'APA',
+    // Energy large-caps
+    'XOM', 'CVX',
     
-    // Consumer & retail
-    'WMT', 'HD', 'COST', 'NKE', 'SBUX', 'MCD', 'DIS', 'TGT', 'LOW', 'BKNG',
-    'MAR', 'HLT', 'ABNB', 'UBER', 'LYFT', 'DASH', 'ETSY', 'W', 'CHWY',
+    // Consumer large-caps
+    'WMT', 'HD', 'COST', 'DIS',
     
-    // Industrial & aerospace
-    'BA', 'CAT', 'GE', 'HON', 'LMT', 'RTX', 'UPS', 'DE', 'MMM', 'EMR',
-    'NOC', 'GD', 'BA', 'CARR', 'CMI', 'ETN',
-    
-    // Automotive & EV
-    'F', 'GM', 'RIVN', 'LCID', 'NIO', 'XPEV', 'LI', 'RACE', 'STLA',
-    
-    // Telecom & media
-    'T', 'VZ', 'TMUS', 'CMCSA', 'CHTR', 'PARA', 'WBD', 'DIS', 'NFLX', 'SPOT',
-    
-    // Cloud & enterprise
-    'AMZN', 'MSFT', 'GOOGL', 'IBM', 'ORCL', 'SAP', 'SNOW', 'DDOG', 'MDB',
-    
-    // E-commerce & payments
-    'AMZN', 'SHOP', 'EBAY', 'MELI', 'SE', 'PYPL', 'SQ', 'AFRM', 'UPST',
-    
-    // Real estate & REITs
-    'AMT', 'PLD', 'EQIX', 'PSA', 'O', 'DLR', 'SPG', 'WELL', 'AVB',
-    
-    // Materials & chemicals
-    'LIN', 'APD', 'SHW', 'ECL', 'DD', 'DOW', 'NEM', 'FCX', 'GOLD',
-    
-    // Industrials
-    'UNP', 'UPS', 'FDX', 'NSC', 'CSX', 'WM', 'RSG',
-    
-    // Consumer staples
-    'PG', 'KO', 'PEP', 'MDLZ', 'CL', 'KMB', 'GIS', 'K', 'CPB',
-    
-    // Utilities
-    'NEE', 'DUK', 'SO', 'D', 'AEP', 'EXC', 'SRE', 'PCG',
-    
-    // Major ETFs (highly liquid options)
-    'SPY', 'QQQ', 'IWM', 'DIA', 'VTI', 'VOO', 'XLF', 'XLE', 'XLK', 'XLV',
-    'XLI', 'XLY', 'XLP', 'XLB', 'XLU', 'XLRE', 'XLC', 'SMH', 'ARKK', 'GLD',
-    
-    // High-growth tech
-    'ROKU', 'ZM', 'DOCU', 'TWLO', 'PINS', 'SNAP', 'UBER', 'LYFT', 'DASH',
-    
-    // Gaming & entertainment
-    'TTWO', 'EA', 'ATVI', 'RBLX', 'U', 'DIS', 'NFLX', 'SPOT', 'WBD',
-    
-    // Cybersecurity
-    'CRWD', 'ZS', 'PANW', 'FTNT', 'OKTA', 'S', 'CYBR',
-    
-    // Data & AI
-    'PLTR', 'SNOW', 'MDB', 'DDOG', 'NET', 'AI', 'C3AI',
-    
-    // Fintech
-    'COIN', 'SOFI', 'AFRM', 'UPST', 'HOOD', 'SQ', 'PYPL',
-    
-    // Electric vehicles
-    'TSLA', 'RIVN', 'LCID', 'NIO', 'XPEV', 'LI', 'F', 'GM',
-    
-    // Chinese ADRs
-    'BABA', 'JD', 'PDD', 'BIDU', 'NIO', 'XPEV', 'LI', 'BILI',
-    
-    // Emerging leaders
-    'MARA', 'RIOT', 'CVNA', 'CARVANA', 'OPEN', 'RDFN', 'Z'
+    // Major ETFs (highest liquidity)
+    'SPY', 'QQQ', 'IWM', 'DIA', 'XLF', 'XLE', 'XLK'
   ];
 
   /**
-   * STAGE 1: Fast pre-screening using OPTIMIZED market coverage
-   * Fetches top 5,000 most liquid stocks from Polygon for balanced discovery
-   * OPTIMIZED: 5 pages instead of 20 (75% fewer API calls) while still covering major opportunities
-   * Returns: Top 100-200 candidates with RSI extremes for deep analysis
+   * STAGE 1: Pre-screening of large-cap stocks
+   * Scans top 40 large-cap stocks (rate limiting handled by PolygonService)
+   * Returns: Top candidates with strong momentum signals
    */
   private static async preScreenMarket(marketContext: any): Promise<string[]> {
     const startTime = Date.now();
     
-    // OPTIMIZED COVERAGE: Fetch top 5,000 stocks (best balance of coverage vs. API usage)
-    console.log(`📋 Fetching market snapshot (top 5,000 stocks for optimized coverage)...`);
+    // Use large-cap universe optimized for Polygon free tier
+    console.log(`📋 Scanning ${this.LARGE_CAP_UNIVERSE.length} large-cap stocks...`);
     
-    // Get bulk snapshot (5 pages = top 5,000 most liquid stocks)
-    const bulkSnapshot = await polygonService.getBulkMarketSnapshot();
-    
-    if (!bulkSnapshot || bulkSnapshot.length === 0) {
-      console.warn('⚠️ Bulk snapshot failed, using curated elite universe fallback');
-      return this.preScreenMarketFallback(marketContext);
-    }
-    
-    console.log(`✅ Retrieved ${bulkSnapshot.length} stocks from market snapshot`);
-    
-    // Create a map of all available stock data
-    const stockDataMap = new Map<string, any>();
-    bulkSnapshot.forEach(snapshot => {
-      stockDataMap.set(snapshot.ticker, snapshot);
-    });
-    
-    console.log(`✅ Total universe: ${stockDataMap.size} stocks (TOP LIQUID STOCKS)`);
-    
-    // Apply fast in-memory filters to all stocks
+    // Scan all stocks (rate limiter in PolygonService handles 5 calls/minute limit)
     const candidates: { ticker: string; score: number }[] = [];
     
-    const stockEntries = Array.from(stockDataMap.entries());
-    for (const [ticker, snapshot] of stockEntries) {
-      // FILTER 1: Price range ($5 - $1000)
-      if (snapshot.price < 5 || snapshot.price > 1000) {
-        continue;
+    for (const ticker of this.LARGE_CAP_UNIVERSE) {
+      const result = await this.preScreenTicker(ticker, marketContext);
+      if (result) {
+        candidates.push(result);
       }
-      
-      // FILTER 2: Volume (>500K shares/day)
-      if (snapshot.volume < 500000) {
-        continue;
-      }
-      
-      // FILTER 3: Price movement (>1% on quiet days, >2% preferred)
-      const absChangePercent = Math.abs(snapshot.changePercent);
-      if (absChangePercent < 1) {
-        continue;
-      }
-      
-      // Calculate pre-screen score
-      let score = 0;
-      score += absChangePercent * 5;
-      score += Math.min(50, snapshot.volume / 1000000);
-      if (snapshot.price >= 20 && snapshot.price <= 500) score += 20;
-      const dayRange = ((snapshot.high - snapshot.low) / snapshot.low) * 100;
-      score += dayRange * 2;
-      
-      candidates.push({ ticker, score });
     }
     
     // Sort by pre-screen score and take top 200
@@ -790,7 +686,7 @@ export class AIAnalysisService {
       .map(c => c.ticker);
     
     const elapsedSeconds = ((Date.now() - startTime) / 1000).toFixed(1);
-    console.log(`✅ Stage 1 complete: ${topCandidates.length} elite candidates from ${stockDataMap.size} stocks in ${elapsedSeconds}s`);
+    console.log(`✅ Stage 1 complete: ${topCandidates.length} candidates from ${this.LARGE_CAP_UNIVERSE.length} stocks in ${elapsedSeconds}s`);
     
     return topCandidates;
   }

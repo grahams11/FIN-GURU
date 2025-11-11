@@ -1,6 +1,98 @@
 import WebSocket from 'ws';
 import axios from 'axios';
 
+/**
+ * Polygon API Rate Limiter
+ * Enforces 5 REST API calls per minute globally across the application
+ * Free tier limit: 5 calls/minute
+ * Thread-safe for concurrent calls using promise queue
+ */
+class PolygonRateLimiter {
+  private static instance: PolygonRateLimiter | null = null;
+  private callTimestamps: number[] = [];
+  private readonly MAX_CALLS_PER_MINUTE = 5;
+  private readonly MINUTE_MS = 60000;
+  private queue: Array<() => void> = [];
+  private processing = false;
+
+  private constructor() {}
+
+  static getInstance(): PolygonRateLimiter {
+    if (!PolygonRateLimiter.instance) {
+      PolygonRateLimiter.instance = new PolygonRateLimiter();
+    }
+    return PolygonRateLimiter.instance;
+  }
+
+  /**
+   * Wait if necessary to respect rate limit, then allow the call
+   * Thread-safe - handles concurrent callers via promise queue
+   */
+  async acquire(): Promise<void> {
+    return new Promise<void>((resolve) => {
+      this.queue.push(resolve);
+      this.processQueue();
+    });
+  }
+
+  /**
+   * Process queued callers one at a time to prevent race conditions
+   */
+  private async processQueue(): Promise<void> {
+    if (this.processing || this.queue.length === 0) {
+      return;
+    }
+
+    this.processing = true;
+
+    while (this.queue.length > 0) {
+      const now = Date.now();
+      
+      // Remove timestamps older than 1 minute
+      this.callTimestamps = this.callTimestamps.filter(
+        timestamp => now - timestamp < this.MINUTE_MS
+      );
+
+      // If we've made 5 calls in the last minute, wait
+      if (this.callTimestamps.length >= this.MAX_CALLS_PER_MINUTE) {
+        const oldestCall = this.callTimestamps[0];
+        const waitTime = this.MINUTE_MS - (now - oldestCall) + 200; // +200ms buffer
+        
+        if (waitTime > 0) {
+          console.log(`⏳ Rate limit: Waiting ${(waitTime/1000).toFixed(1)}s (${this.callTimestamps.length}/5 calls used, ${this.queue.length} queued)`);
+          await new Promise(resolve => setTimeout(resolve, waitTime));
+          continue; // Re-check after waiting
+        }
+      }
+
+      // Allow next caller
+      this.callTimestamps.push(Date.now());
+      const nextCaller = this.queue.shift();
+      if (nextCaller) {
+        nextCaller();
+      }
+    }
+
+    this.processing = false;
+  }
+
+  /**
+   * Get current rate limit status
+   */
+  getStatus(): { callsUsed: number; callsRemaining: number; queuedCalls: number } {
+    const now = Date.now();
+    this.callTimestamps = this.callTimestamps.filter(
+      timestamp => now - timestamp < this.MINUTE_MS
+    );
+    
+    return {
+      callsUsed: this.callTimestamps.length,
+      callsRemaining: this.MAX_CALLS_PER_MINUTE - this.callTimestamps.length,
+      queuedCalls: this.queue.length
+    };
+  }
+}
+
 interface QuoteData {
   symbol: string;
   bidPrice: number;
@@ -83,6 +175,12 @@ class PolygonService {
   private optionsQuoteCache: Map<string, { data: any; timestamp: number }> = new Map();
   private optionsCacheTTL = 60000; // 1 minute cache for options quotes
 
+  // Rate limiter instance
+  private rateLimiter = PolygonRateLimiter.getInstance();
+  
+  // REST API response cache (short-lived, idempotent GETs only)
+  private restApiCache: Map<string, { data: any; timestamp: number }> = new Map();
+
   // NOTE: No bulk snapshot caching - we need fresh data for real-time opportunities
   // Caching would give stale movers; users want to see NEW opportunities as they emerge
 
@@ -93,6 +191,92 @@ class PolygonService {
     if (!this.apiKey) {
       console.error('❌ POLYGON_API_KEY not found in environment variables');
     }
+  }
+
+  /**
+   * Shared rate-limited request wrapper for all Polygon REST API calls
+   * - Enforces 5 calls/minute rate limit globally
+   * - Retries with exponential backoff on 429/5xx errors
+   * - Optional caching for idempotent GETs
+   */
+  private async makeRateLimitedRequest<T>(
+    url: string,
+    options: {
+      method?: 'GET' | 'POST';
+      timeout?: number;
+      cacheTTL?: number; // Cache time-to-live in ms (0 = no cache)
+      maxRetries?: number;
+    } = {}
+  ): Promise<T | null> {
+    const {
+      method = 'GET',
+      timeout = 10000,
+      cacheTTL = 0,
+      maxRetries = 3
+    } = options;
+
+    // Check cache for idempotent GETs
+    if (method === 'GET' && cacheTTL > 0) {
+      const cacheKey = url;
+      const cached = this.restApiCache.get(cacheKey);
+      if (cached && (Date.now() - cached.timestamp) < cacheTTL) {
+        return cached.data as T;
+      }
+    }
+
+    // Retry loop with exponential backoff
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        // Acquire rate limit slot (waits if necessary)
+        await this.rateLimiter.acquire();
+
+        // Make the API call
+        const response = await axios.get(url, { timeout });
+
+        // Cache successful response if enabled
+        if (method === 'GET' && cacheTTL > 0 && response.data) {
+          const cacheKey = url;
+          this.restApiCache.set(cacheKey, {
+            data: response.data,
+            timestamp: Date.now()
+          });
+        }
+
+        return response.data as T;
+
+      } catch (error: any) {
+        const status = error.response?.status;
+        const isRetryable = status === 429 || (status >= 500 && status < 600);
+
+        if (isRetryable && attempt < maxRetries) {
+          // Exponential backoff with jitter: 500ms, 1s, 2s
+          const baseDelay = 500 * Math.pow(2, attempt - 1);
+          const jitter = Math.random() * 200;
+          const delay = baseDelay + jitter;
+          
+          console.log(`⚠️ API error ${status}, retry ${attempt}/${maxRetries} in ${delay.toFixed(0)}ms`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        }
+
+        // Non-retryable error or max retries exceeded
+        if (status === 404) {
+          return null; // Resource not found is expected
+        }
+        
+        if (status === 429) {
+          console.error(`❌ Rate limit exceeded after ${maxRetries} retries`);
+        } else if (status === 401 || status === 403) {
+          console.error(`❌ Authentication/authorization error ${status}`);
+        } else {
+          console.error(`❌ API request failed:`, error.message);
+        }
+        
+        return null;
+      }
+    }
+
+    return null;
   }
 
   /**
@@ -748,32 +932,27 @@ class PolygonService {
     timespan: 'day' | 'hour' = 'day',
     multiplier: number = 1
   ): Promise<HistoricalBar[] | null> {
-    try {
-      const url = `https://api.polygon.io/v2/aggs/ticker/${symbol}/range/${multiplier}/${timespan}/${from}/${to}?adjusted=true&sort=asc&apiKey=${this.apiKey}`;
-      
-      const response = await axios.get(url, {
-        timeout: 10000
-      });
+    const url = `https://api.polygon.io/v2/aggs/ticker/${symbol}/range/${multiplier}/${timespan}/${from}/${to}?adjusted=true&sort=asc&apiKey=${this.apiKey}`;
+    
+    const data = await this.makeRateLimitedRequest<any>(url, {
+      timeout: 10000,
+      cacheTTL: 300000,
+      maxRetries: 3
+    });
 
-      if (response.data?.results && Array.isArray(response.data.results)) {
-        const timeframeLabel = multiplier > 1 ? `${multiplier}-${timespan}` : timespan;
-        console.log(`${symbol}: Retrieved ${response.data.results.length} historical ${timeframeLabel} bars from ${from} to ${to}`);
-        return response.data.results;
-      }
-
-      console.warn(`${symbol}: No historical data found for ${from} to ${to}`);
-      return null;
-
-    } catch (error: any) {
-      if (error.response?.status === 404) {
-        console.warn(`${symbol}: Historical data not available (404)`);
-      } else if (error.response?.status === 429) {
-        console.error(`${symbol}: Rate limit exceeded for historical data`);
-      } else {
-        console.error(`${symbol}: Failed to fetch historical bars from ${from} to ${to}:`, error.message);
-      }
+    if (!data) {
+      console.warn(`${symbol}: No historical data available for ${from} to ${to}`);
       return null;
     }
+
+    if (data.results && Array.isArray(data.results)) {
+      const timeframeLabel = multiplier > 1 ? `${multiplier}-${timespan}` : timespan;
+      console.log(`${symbol}: Retrieved ${data.results.length} historical ${timeframeLabel} bars from ${from} to ${to}`);
+      return data.results;
+    }
+
+    console.warn(`${symbol}: No historical data found for ${from} to ${to}`);
+    return null;
   }
 
   /**
