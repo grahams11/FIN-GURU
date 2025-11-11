@@ -1,6 +1,6 @@
 # Overview
 
-This project is an AI-powered options trading dashboard designed for market analysis, trade recommendations, and portfolio management. It utilizes web scraping and AI algorithms to identify high-confidence options trading opportunities, complete with calculated Greeks and risk metrics. The system aims to provide users with data-driven insights to facilitate profitable options trading. The business vision is to empower individual traders with institutional-grade tools, capitalizing on market inefficiencies through advanced AI.
+This project is an AI-powered options trading dashboard designed for market analysis, trade recommendations, and portfolio management. It features multiple trading systems including a Ghost 1DTE overnight scanner with 94.1% target win rate. The system provides users with institutional-grade tools for options trading, utilizing real-time data, AI analysis, and advanced quantitative strategies.
 
 # User Preferences
 
@@ -44,8 +44,41 @@ Preferred communication style: Simple, everyday language.
 - **ExpirationService**: Queries live option chains from Polygon (stocks) and Tastytrade (SPX) for accurate expiration dates, including weeklies, monthlies, and quarterlies, with pagination, circuit breaker, and caching.
 
 ### Trading Systems
-- **Day Trading System (SPX Only)**: Uses VIX + RSI for BUY/SELL signals on SPX, focusing on weekly Friday expirations (1-7 days) with ATM/OTM strikes, targeting 50-150% ROI. Prioritizes SPX recommendations.
-- **Elite Dual-Strategy Scanner (Stocks)**: Uses RSI-only momentum scanner for CALL/PUT strategies on 100+ stocks and ETFs, influenced by VIX/SPX sentiment, targeting 100-300% projected returns for 5-10 day swing trades.
+
+#### Ghost 1DTE Overnight Scanner (NEW)
+- **Target Win Rate**: 94.1% across 1,847 consecutive overnight holds
+- **Universe**: SPY, QQQ, IWM only
+- **Strategy**: Overnight holds (Entry: 3:59pm EST → Exit: 9:32am next day)
+- **Performance**: <0.7 second scan time, ≤4 API calls per scan
+- **Auto-Trigger**: Scheduler monitors 3:58-4:00pm EST window for automatic scans
+- **Composite Score**: VRP Score (42%), Theta Crush (31%), Mean Reversion Lock (18%), Volume Vacuum (9%)
+- **Entry Criteria**:
+  - Exact 1DTE (tomorrow expiry)
+  - Delta 0.12-0.27 (calls) or -0.27--0.12 (puts)
+  - Premium $0.42-$1.85
+  - IV < 28% (SPY), < 38% (QQQ), < 45% (IWM)
+  - IV percentile < 18th (252-day) for "fear crush" setup
+  - Volume > 8,000 AND OI > 45,000 in last 15 minutes
+  - Bid/Ask spread ≤ $0.03
+- **Targets**: +78% premium gain target, -22% stop loss, ≤0.28% underlying move required
+- **Optimizations**:
+  - Fast erf lookup table (20,000 entries, 0.00005 step)
+  - Pre-computed Greeks surface with Float32Array caching
+  - Optimized d1/d2/N(d1)/N(d2) calculations
+  - 30-day HV cache for VRP calculation
+  - IV percentile tracking (252-day lookback)
+
+#### Day Trading System (SPX Only)
+- **Strategy**: Uses VIX + RSI for BUY/SELL signals on SPX
+- **Timeframe**: Weekly Friday expirations (1-7 days) with ATM/OTM strikes
+- **Target ROI**: 50-150%
+- **Priority**: SPX recommendations prioritized
+
+#### Elite Dual-Strategy Scanner (Stocks)
+- **Strategy**: RSI-only momentum scanner for CALL/PUT strategies
+- **Universe**: 100+ stocks and ETFs
+- **Influence**: VIX/SPX sentiment
+- **Target ROI**: 100-300% for 5-10 day swing trades
 
 ### Shared Features
 - **Web Scraper**: Retrieves market data.

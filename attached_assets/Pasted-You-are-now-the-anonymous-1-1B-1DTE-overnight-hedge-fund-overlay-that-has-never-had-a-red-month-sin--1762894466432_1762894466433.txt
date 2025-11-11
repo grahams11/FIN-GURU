@@ -1,0 +1,71 @@
+You-are-now-the-anonymous-1-1B-1DTE-overnight-hedge-fund-overlay-that-has-never-had-a-red-month-sin-1762893134053_1762893134054.txt
+You are now the anonymous $1.1B 1DTE overnight hedge-fund overlay that has never had a red month since Jan 2023. Your 1DTE system has a verified 94.1% win rate across 1,847 consecutive overnight holds (SPY/QQQ/IWM only, 3:59pm → 9:32am next day).
+
+MISSION: Mutate my current Replit into the exact Phase 3 1DTE Ghost. Sub-0.7 second scan, ≤4 API hits, 94%+ win rate on 1DTE overnight holds.
+
+IMPLEMENT EVERY LINE BELOW – NO EXCEPTIONS:
+
+1. **API Holocaust – 4 hits max**
+   - 3:58:00pm EST: ONE Polygon snapshot call for SPY, QQQ, IWM full 1DTE chains
+   - ONE WebSocket for `T.{SPY,QQQ,IWM}` from 3:58–4:05pm only
+   - Cache entire Greeks surface for 24h
+   - Zero additional calls until next day
+
+2. **Ghost Funnel – 99.998% noise annihilation**
+   Keep ONLY contracts where ALL true:
+   - Expiry = tomorrow (exact 1DTE)
+   - IV < 28% (SPY), < 38% (QQQ), < 45% (IWM)
+   - Delta 0.12 – 0.27 (calls) OR -0.27 – -0.12 (puts)
+   - Premium $0.42 – $1.85
+   - Bid/Ask spread ≤ 0.03 ($0.03)
+   - Volume > 8,000 AND OI > 45,000 in last 15 min of day
+   - IV percentile < 18th (last 252d) → “fear crush” setup
+
+3. **Phase 3 94.1% Composite Score (trigger ≥ 93.3)**
+   Score = 
+     42% × VRP_Score 
+   + 31% × ThetaCrush 
+   + 18% × MeanReversionLock 
+   + 9%  × VolumeVacuum
+
+   Exact @njit math:
+VRP_Score        = (30d HV - IV) / IV × 100 × (1 / IV_percentile)
+ThetaCrush       = -Theta / Mark × 18h × 100
+MeanReversionLock= Bollinger percent_b < 0.11 or > 0.89 × RSI(14) divergence
+VolumeVacuum     = (EOD volume spike > 380% 10-day avg) × put/call skew crush
+textEntry ONLY when:
+- Score ≥ 93.3
+- VRP_Score > 78th percentile of last 500 1DTE nights
+- ThetaCrush > 68% of premium decays overnight
+- MeanReversionLock = price at 2.1+ σ Bollinger extreme
+- Same-direction skew crush (puts 3.2x volume on SPY down day, etc.)
+
+4. **Overnight Target Solver**
+- Target: 78% premium gain by 9:32am → solve for 1.78× mark
+- Required underlying move: ≤ 0.28% (SPY ≤ $1.68, QQQ ≤ $1.44)
+- Stop: 22% premium loss if gap > 0.61% against
+
+5. **Speed + Memory**
+- Pre-compute full 1DTE Greeks surface at 3:58:12pm in 41ms with Numba
+- Store in 8192×64 float16 arrays (87 MB RAM → free Replit laughs)
+- Zero Python loops – full vectorized NumPy + Numba
+- Full scan: 0.41–0.68 seconds
+
+6. **Backtest (5 years in 2.9 sec)**
+- In-memory SQLite with 2020-2025 daily + 1DTE chains
+- 100k overnight simulations with stochastic gap model (fat tails)
+- Required: 94.1% win rate, PF 4.82, Sharpe 6.1, max DD 4.4%, 1,847/1,847 green overnight holds
+
+7. **Live Output Format (exact)**
+GHOST 1DTE OVERNIGHT #1 - 96.1/100
+SPY 2025-11-12 598P @ $0.96 → $1.71 target (+78%)
+VRP: +41.2% | ThetaCrush: 72% overnight | IV 19.3% (12th percentile)
+Entry: 3:59:11pm EST | Exit: 9:31:58am tomorrow
+Gap needed: -0.23% ($1.38 downside)
+Stop: $0.75 (-22%) if SPY opens > 599.38
+Historical win rate same setup: 94.6% (417/441)
+textPaste your current main.py. Implement every single line in Python 3.11. Use only free-tier APIs.
+
+This is a $250,000 consulting ticket. You have 7 minutes. Ship only production code + comments. No intros. No summaries.
+
+BEGIN.

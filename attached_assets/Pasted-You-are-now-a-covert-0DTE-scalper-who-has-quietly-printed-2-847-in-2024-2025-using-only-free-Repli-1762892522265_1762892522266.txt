@@ -1,0 +1,67 @@
+You are now a covert 0DTE scalper who has quietly printed +2,847% in 2024-2025 using only free Replit + Polygon free tier. Your personal 0DTE system has a verified 92.3% win rate across 3,112 live trades (SPY/QQQ only, 9:45am–11:15am EST entry window).
+
+YOUR MISSION: Convert my existing Replit scanner into the exact 0DTE nuclear reactor you personally run. Sub-1.4 second full scan, ≤7 API hits, 92%+ win rate on same-day expiry.
+
+MANDATORY 0DTE OVERHAUL (implement every line):
+
+1. **API Annihilation – 7 hits max**
+   - Polygon WebSocket: ONLY subscribe to `T.{SPY,QQQ}` and `A.{SPY,QQQ}` streams at 9:30:00 EST
+   - Cache full 0DTE chain ONCE at 9:29:50 using `/v3/snapshot/options/{underlying}` (free tier allows 5/min → perfect)
+   - Use the cached chain for ALL calculations until 4:00pm close
+   - NO yfinance, NO individual quote calls
+
+2. **Micro-Funnel – 99.93% noise removal in 38ms**
+   Keep ONLY contracts matching ALL:
+   - Expiry = today (0DTE)
+   - Volume > 2,500 AND OI > 15,000 in first 15 minutes
+   - Bid/Ask spread ≤ 0.04 (4¢)
+   - Mark price $0.35 – $2.65
+   - IV 0.08 – 0.42 (SPY) | 0.12 – 0.55 (QQQ)
+   - Delta 0.19 – 0.41 (calls) | -0.41 – -0.19 (puts)
+
+3. **0DTE 92.3% Win-Rate Composite Score v9.9 (trigger ≥ 91.0)**
+   Score = 
+     38% × GammaExplosion 
+   + 27% × ThetaMeltScore 
+   + 20% × MicrotrendLock 
+   + 15% × LiquidityVacuum
+
+   Exact math (use @njit):
+GammaExplosion     = Gamma × (1/IV) × (Volume/OI) × 100
+ThetaMeltScore     = -Theta / Mark × (1 / HoursToExpiry) × 1000
+MicrotrendLock     = (EMA_3 - EMA_13) / EMA_13 × 100 × RSI_5_slope
+LiquidityVacuum    = (BidSize + AskSize) / 20period_avg × Volume_5min_rank
+textEntry ONLY when:
+- Score ≥ 91.0
+- GammaExplosion > 82nd percentile of last 100 0DTE bars
+- ThetaMeltScore > 0.46 (46%+ of premium decays by 11:15am)
+- MicrotrendLock same direction as delta sign
+
+4. **Target & Stop Solver (solveStockPriceForTargetPremium in 3µs)**
+- Target: 52% premium gain → solve underlying price for 1.52× mark
+- Stop: 38% premium loss → solve underlying price for 0.62× mark
+- Must be ≤ 0.42% move in underlying (SPY ≤ $2.10 move, QQQ ≤ $2.05)
+
+5. **Speed Demons**
+- Pre-compute entire 0DTE greeks surface at 9:29:50 with Numba @njit vectorized
+- Store d1/d2/N(d1)/N(d2) in 4096×50 NumPy float32 arrays
+- Use lookup table for erf() with 0.00005 step
+- ThreadPoolExecutor(12) for SPY/QQQ parallel chain parse
+- Entire scan 0.91–1.38 seconds on free Replit
+
+6. **Backtest Module (5 years in 4.2 seconds)**
+- SQLite in-memory with 2020-2025 1-min SPY/QQQ + 0DTE chains (download once from Polygon CSV)
+- Run 50k Monte-Carlo paths with Heston stochastic vol
+- Required output: ≥92.0% win rate, PF ≥ 3.31, Sharpe ≥ 4.8, max DD ≤ 6.1%
+
+7. **Live Output Format (exactly this)**
+NUKE 0DTE #1 - 94.7/100
+SPY 2025-11-11 602C @ $1.27 → $1.93 target (52%)
+GammaExplosion: 27.3 | ThetaMelt: 51.8%/2h | Microtrend: +0.38%
+Entry: 9:47:22 EST | Exit target: 11:12 EST
+Underlying move needed: +0.31% (≤ $1.87)
+Stop: $0.79 (-38%) if SPY ≤ 600.13
+Live win probability: 92.8%
+textPaste your current main.py + requirements.txt. Implement every single line above in pure Python 3.11, no external paid libs.
+
+You have 9 minutes. This is a $50,000 consulting ticket. Ship production code + inline commen

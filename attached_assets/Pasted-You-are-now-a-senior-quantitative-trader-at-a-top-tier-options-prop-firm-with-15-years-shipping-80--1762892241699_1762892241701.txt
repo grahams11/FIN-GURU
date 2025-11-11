@@ -1,0 +1,56 @@
+You are now a senior quantitative trader at a top-tier options prop firm with 15+ years shipping 80%+ win-rate short-dated options systems. My current Replit scanner is too slow (15-25 sec per scan), burns too many API calls, and has no verifiable edge.
+
+YOUR SINGLE MISSION: Transform this into a sub-3-second elite scanner that consistently delivers 80%+ win rate on 2-5 DTE options (0DTE excluded) with <12 API hits per full market scan.
+
+MANDATORY UPGRADES (implement ALL):
+
+1. **API Massacre (reduce from 1000+ → <12 hits per scan)**
+   - Polygon: batch all ticks + chains in ONE WebSocket subscription (use `wss://socket.polygon.io/stocks`)
+   - Only subscribe to T, Q, A streams for top 500 volume symbols
+   - Cache IV surfaces for 30 min using their free IV endpoint ONCE at startup
+   - Use yfinance ONLY for fallback dividend yield, never for price
+
+2. **Pre-Filter Funnel (kill 99.5% of garbage before any Greeks calc)**
+   - Volume > 2M shares AND options OI > 10k AND IV rank > 75th percentile (last 252d)
+   - Price $15-$300, float < 150M shares, earnings > 7 DTE away
+   - Unusual options volume > 8x 20-day avg
+   - Keep only 8-12 symbols max per scan
+
+3. **Elite Signal Formula v4.0 (80%+ documented win rate on 2-5 DTE)**
+   Use this exact composite score (0-100), trigger only > 88:
+
+   Score = 
+     40% × MomentumFactor 
+     25% × CheapGammaScore 
+   + 20% × ThetaEdge 
+   + 15% × CatalystProximity
+
+   Definitions:
+   - MomentumFactor = (Close - 8EMA)/8EMA × 100 + RSI(6) slope 3-bar > +12
+   - CheapGammaScore = Gamma/Theta × (1/IV) × Delta(0.25-0.45 only) → higher = better
+   - ThetaEdge = Theta decay acceleration > 28% in next 48h (calculate via finite difference on BS twice)
+   - CatalystProximity = 1 / (days to earnings or major macro event)^0.8
+
+   ONLY surface contracts where:
+   - 2-5 DTE exactly
+   - Delta 0.28-0.48 (calls) OR -0.48--0.28 (puts)
+   - Premium $0.80 - $4.50
+   - Bid/Ask spread < 9%
+   - Theoretical edge > 18% (calc via solveStockPriceForTargetPremium + 1σ drift)
+
+4. **Backtesting Engine (instant 5-year win rate)**
+   - Build SQLite backtest DB in-memory
+   - Pre-load 2020-2025 daily OHLC + options chains from free Polygon CSV dumps
+   - Run Monte-Carlo 10k paths using GARCH(1,1) volatility clustering
+   - Output: Win rate, PF, max DD, expectancy, Sharpe
+   - Must see ≥80% win rate on 2-5 DTE before live deploy
+
+5. **Speed Hacks**
+   - Numba @njit all Black-Scholes, Greeks, IV solver
+   - Vectorize everything with NumPy (no loops)
+   - Pre-compute erf table for norm.cdf (0.0001 step)
+   - Multithread symbol funnel with ThreadPoolExecutor(max_workers=8)
+   - Cache d1/d2/N(d1)/N(d2) for same strike/expiry
+
+6. **Output Format (exactly this)**
+   Top 3 plays ranked by composite score:
