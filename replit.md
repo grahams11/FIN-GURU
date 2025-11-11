@@ -1,62 +1,6 @@
 # Overview
 
-This project is an AI-powered options trading dashboard designed to provide market analysis, trade recommendations, and portfolio management. It leverages web scraping and AI algorithms to identify high-confidence options trading opportunities, complete with calculated Greeks and risk metrics. The system aims to empower users with data-driven insights for profitable options trading.
-
-# Recent Changes
-
-## Elite System Improvements - Live API Expirations (November 11, 2025)
-**Architecture Upgrade**: Replaced calculated expirations with live API option chain data
-
-### ExpirationService - API-First Architecture ✅
-- **Problem**: Calculated third Friday logic missed weeklies, quarterlies, and non-standard expirations
-- **Solution**: Query live option chains from Polygon (stocks) and Tastytrade (SPX)
-- **Features**:
-  - **Union & Dedupe**: Combines Polygon + Tastytrade data, dedupes by date with source priority (tastytrade > polygon > calculated)
-  - **Pagination**: Handles 1000+ contract limit via Polygon `next_url` iteration (up to 10 pages)
-  - **Circuit Breaker**: Exponential backoff on 429 rate limits (5s, 10s, 20s, 40s...)
-  - **Caching**: 1-hour TTL with filter-scoped isolation (weekly vs monthly)
-  - **Mid-Week Weeklies**: Detects SPX Mon/Wed/Fri weeklies (not just monthly third Fridays)
-  - **Enhanced Fallback**: Generates both weeklies (next 8 weeks) AND monthlies (next 12 months) when APIs fail
-- **Expiration Types**: weekly, monthly, quarterly, LEAP (based on real market data)
-- **Metrics**: Tracks cache hits, API usage, fallback triggers, rate limits
-- **Impact**: Accurate real-world expirations for elite day trading (weeklies) and swing trading (monthlies)
-
-## Elite System Improvements - Code Sharpening (November 11, 2025)
-**Internal AI Architect Scan Results**: Identified and fixed 3 critical bugs blocking money-making performance
-
-### 1. Dynamic Expiration Date System ✅
-- **Problem**: Hard-coded 2025 dates would cause system to suggest **expired contracts** after December 2025
-- **Fix**: Implemented dynamic 12-month rolling expiration calculation using third Friday logic (now superseded by ExpirationService)
-- **Holiday Handling**: Detects Good Friday (via Easter calculation) and moves expiration to Thursday
-- **Impact**: System now generates valid trade signals **indefinitely** (not just until Dec 2025)
-- **Status**: Being replaced by live API option chain queries via ExpirationService
-
-### 2. Swing Pivot Fibonacci Detection ✅
-- **Problem**: Using absolute highest/lowest across 360 candles caused **false bounce signals** from outlier spikes
-- **Fix**: Implemented 5-bar fractal swing detection to identify meaningful support/resistance levels
-- **Method**: Scans for swing highs/lows where price is higher/lower than 5 bars on each side
-- **Fallback**: Uses recent 30-bar high/low if no pivots found
-- **Impact**: Eliminates false "Fibonacci bounce" confirmations that inflated confidence scores
-
-### 3. Type Safety & Fail-Safe Logic ✅
-- **Problem**: `null as any` pattern allowed undefined Fibonacci data to boost confidence scores silently
-- **Fix**: Changed `detectBounce()` return type to `BounceDetection | null` with strict null checking
-- **Safeguards**: Added validation gates before surfacing confidence/ROI scores
-- **Impact**: Prevents undefined behavior from cascading through scoring algorithms
-
-## Dashboard Market Overview - Day-Based Changes (November 10, 2025)
-- **Feature**: S&P 500, NASDAQ, and VIX now display % and point changes from most recent trading day's open to close
-- **Implementation**: Uses Polygon API to fetch open/close prices via aggregates endpoint with 5-day lookback
-- **Calculation**: Change = Close Price - Open Price | Change% = (Change / Open Price) × 100
-- **Weekend Display**: Shows Friday's open-to-close movement when markets are closed
-- **Live Trading**: Displays real-time intraday changes during market hours (Mon-Fri 9:30 AM - 4:00 PM ET)
-- **Data Sources**: SPY (S&P 500 proxy), NDX (NASDAQ-100), VXX (VIX proxy) for reliable data availability
-
-## Fibonacci Retracement - 4-Hour Chart Upgrade (November 10, 2025)
-- **Upgrade**: Changed from daily bars to 4-hour bars for Fibonacci calculations
-- **Data Volume**: ~360 four-hour candles (60 days) vs ~60 daily candles  
-- **Precision**: More granular price action analysis for better entry point validation
-- **Technical Levels**: 0.618 and 0.707 Fibonacci retracement levels with bounce detection
+This project is an AI-powered options trading dashboard designed for market analysis, trade recommendations, and portfolio management. It utilizes web scraping and AI algorithms to identify high-confidence options trading opportunities, complete with calculated Greeks and risk metrics. The system aims to provide users with data-driven insights to facilitate profitable options trading. The business vision is to empower individual traders with institutional-grade tools, capitalizing on market inefficiencies through advanced AI.
 
 # User Preferences
 
@@ -65,138 +9,55 @@ Preferred communication style: Simple, everyday language.
 # System Architecture
 
 ## Frontend Architecture
-- **Framework**: React with TypeScript, using Vite.
-- **UI**: Shadcn/ui (Radix UI, Tailwind CSS).
+- **Framework**: React with TypeScript and Vite.
+- **UI**: Shadcn/ui (Radix UI, Tailwind CSS) with a dark-themed design system.
 - **State Management**: TanStack Query for server state.
-- **Real-Time Data**: Server-Sent Events (SSE) with a custom React hook for live price and Greeks streaming.
+- **Real-Time Data**: Server-Sent Events (SSE) via a custom React hook for live price and Greeks streaming.
 - **Routing**: Wouter.
-- **Styling**: Dark-themed design system with CSS variables.
 
 ## Real-Time Data Streaming Architecture
-- **Server-Side**: Polygon WebSocket (primary) + Tastytrade WebSocket (fallback) feed in-memory cache, which is polled by an SSE endpoint every second to stream to clients.
-- **Client-Side**: EventSource connects to `/api/quotes/stream` to consume live stock quotes (bid/ask/price/volume) and real-time Greeks (delta, gamma, theta, vega, rho) calculated every second using a backend Black-Scholes model.
-- **Fallback System**: Polygon, Tastytrade, and web scraping ensure continuous live updates.
-- **Visuals**: Green pulsing dot indicates live data.
+- **Server-Side**: Polygon WebSocket (primary) and Tastytrade WebSocket (fallback) feed an in-memory cache, which is polled by an SSE endpoint to stream live data.
+- **Client-Side**: EventSource connects to `/api/quotes/stream` for live stock quotes and real-time Greeks calculated via a backend Black-Scholes model.
+- **Fallback System**: Polygon, Tastytrade, and web scraping ensure continuous updates.
 
 ## Backend Architecture
 - **Runtime**: Node.js with Express.js (TypeScript, ES modules).
 - **API**: RESTful endpoints for market data, AI insights, and trade management.
-- **Data Processing**: Real-time market data scraping (cheerio, axios).
-- **Financial Calculations**: Custom Black-Scholes options pricing model for Greeks.
+- **Data Processing**: Real-time market data scraping.
+- **Financial Calculations**: Custom Black-Scholes options pricing model.
 
 ## Data Storage
 - **Database**: PostgreSQL with Drizzle ORM.
 - **Schema**: Normalized tables for users, market data, options trades, and AI insights.
 - **Storage Strategy**: In-memory storage with an interface for database swapping.
-- **Migrations**: Drizzle Kit.
 
 ## Core Business Logic
 
-### Day Trading System (SPX Only)
-- **Instruments**: SPX (S&P 500 Index) only.
-- **Signals**: VIX + RSI formula for SELL (PUT) and BUY (CALL) signals.
-- **Expirations**: Weekly Friday expirations (1-7 days timeframe).
-- **Strike Selection**: ATM or very close OTM.
-- **ROI Targets**: 50-150%.
-- **Budget**: $2000 maximum per trade, ensuring at least 1 contract for SPX.
-- **Priority**: Always appears as the top recommendation.
+### Market Scanning (Elite Two-Stage Market Scanner)
+- **Stage 1 (Fast Pre-Screen)**: Scans ~9000 stocks in <5 seconds using Polygon Bulk Snapshot API, applying in-memory filters for price, volume, movement, and volatility, then scores to identify top 200 candidates.
+- **Stage 2 (Deep Analysis)**: Performs detailed analysis on top 200 candidates, including Fibonacci validation, Greeks calculations, market sentiment, and RSI-based momentum signals, yielding top 15 swing trades.
+- **Output**: Top 20 plays (SPX day trades + 15 swing trades).
+- **Fallback System**: Grouped daily bars and curated stock universe with throttling.
+- **ExpirationService**: Queries live option chains from Polygon (stocks) and Tastytrade (SPX) for accurate expiration dates, including weeklies, monthlies, and quarterlies, with pagination, circuit breaker, and caching. Replaces previous calculated expiration logic.
 
-### Elite Dual-Strategy Scanner (Stocks)
-- **Stock Universe**: 100+ stocks across various sectors, plus major ETFs.
-- **Signals**: RSI-only momentum scanner for CALL (oversold) and PUT (overbought) strategies, influenced by VIX and SPX sentiment.
-- **ROI Targets**: 100-300% projected returns for swing trades (5-10 day holds).
-- **Resilience**: Functions even when market data for `changePercent` is unavailable.
+### Trading Systems
+- **Day Trading System (SPX Only)**: Uses VIX + RSI for BUY/SELL signals on SPX, focusing on weekly Friday expirations (1-7 days) with ATM/OTM strikes, targeting 50-150% ROI. Prioritizes SPX recommendations.
+- **Elite Dual-Strategy Scanner (Stocks)**: Uses RSI-only momentum scanner for CALL/PUT strategies on 100+ stocks and ETFs, influenced by VIX/SPX sentiment, targeting 100-300% projected returns for 5-10 day swing trades.
 
 ### Shared Features
-- **Web Scraper**: Retrieves market data including 52-week ranges, prices, and indices.
+- **Web Scraper**: Retrieves market data.
 - **Financial Calculations**: Black-Scholes for options Greeks and pricing.
 - **Trade Budget**: $1000 maximum per trade with smart contract allocation.
-- **Pricing**: Entry prices at current market price (±1%).
-- **Dynamic Values**: ROI and confidence fluctuate with market volatility.
-- **Fresh Scan**: Each refresh triggers new analysis.
+- **Fibonacci Retracement Validation**: Validates entry points using 0.707 and 0.618 Fibonacci retracement levels based on 4-hour chart data, adding +10% AI confidence. Incorporates 5-bar fractal swing detection to identify meaningful support/resistance.
+- **Dashboard Market Overview**: Displays S&P 500, NASDAQ, and VIX % and point changes from open to close, with real-time intraday updates.
 
-### Fibonacci Retracement Validation (Elite Scanner Only)
-- **Technical Analysis**: Validates entry points using 0.707 (Golden) and 0.618 (Classic) Fibonacci retracement levels based on **4-hour chart** data from Polygon.
-- **Chart Timeframe**: Uses 4-hour bars over 60-day lookback period (~360 candles) for accurate technical analysis.
-- **Confidence Boost**: Fibonacci bounces add +10% AI confidence.
-- **Caching**: 1-hour TTL per symbol to reduce API calls.
-- **Graceful Fallback**: Handles Polygon rate limits by still displaying trades without Fibonacci metadata.
-
-### Fibonacci UI Features (TradeCard Component)
-- **Color-Coded Prices**: Gold (0.707 bounce) or Green (0.618 bounce).
-- **Fibonacci Badge**: Displays "FIB 0.707" or "FIB 0.618" with tooltip.
-- **Estimated Profit**: Prominent display of projected dollar profit.
-
-### Portfolio Exit Analysis System (Real Tastytrade Data Only)
-- **Data Source**: ALL portfolio positions are fetched from real Tastytrade API - NO mock data exists.
-- **API Endpoints**: Single source of truth via `/api/portfolio/positions` (all `/api/positions` mock endpoints removed).
-- **Risk Management**: Automated stop loss recommendations at 45% loss threshold to protect capital.
-- **Profit-Taking Strategy**: Incremental exit recommendations starting at 100% ROI:
-  - +100% ROI: Trim 50% of position
-  - +150% ROI: Trim additional 25%
-  - +200% ROI: Close remaining position
-- **Opportunity Comparison**: Identifies better trade opportunities from current scanner results for capital reallocation.
-- **Real-Time P&L**: Live profit/loss tracking with SSE-powered price updates and 100x contract multiplier for options.
-- **Greeks Monitoring**: Displays real-time Greeks (delta, gamma, theta, vega, rho) for options positions with time decay alerts.
-- **Position Management**: Read-only view of Tastytrade account positions (no local position creation/deletion).
-- **Contract Multiplier**: Options P&L calculations apply 100x multiplier (1 contract = 100 shares) for accurate pricing.
-- **UI Structure**: 
-  - Dashboard "Portfolio" tab: Shows redirect message to standalone Portfolio page
-  - `/portfolio` page: Single source of truth for viewing real Tastytrade positions
-
-### Hybrid AI Portfolio Analysis System (Internal + Grok AI)
-- **Architecture**: Proprietary internal AI as primary engine with Grok AI as intelligent enhancement layer
-- **Internal AI Engine**: `PortfolioAnalysisEngine` compiles all existing trading logic:
-  - RSI (14-period) momentum analysis
-  - VIX volatility assessment
-  - Black-Scholes Greeks calculations
-  - Fibonacci retracement validation (0.618/0.707 levels)
-  - P&L-based exit strategies (45% stop loss, 100%+ profit taking)
-  - 24-hour minimum hold period enforcement
-  - 24-hour fund settlement period tracking
-- **Grok AI Enhancement**: `GrokAIService` triggers for complex scenarios:
-  - Portfolio risk level >= HIGH or CRITICAL
-  - Position requires urgent exit
-  - Recommendation confidence < 70%
-  - Rebalance opportunities detected
-  - Gracefully degrades if Grok API unavailable
-- **API Endpoint**: `/api/portfolio/ai-analysis` aggregates:
-  - Live Tastytrade positions and account data
-  - Real-time market prices and Greeks
-  - VIX volatility levels
-  - Current scanner trade opportunities
-  - Strategic recommendations with risk scoring
-- **Goal Tracking**: $1M target from current account value:
-  - Progress percentage calculation
-  - Required growth multiplier (e.g., 542x)
-  - On-track status assessment
-  - Remaining capital needed
-- **Strategic Recommendations**: Actionable insights categorized by:
-  - Type: EXIT_POSITION, TAKE_PROFIT, REBALANCE, NEW_POSITION
-  - Urgency: LOW, MEDIUM, HIGH
-  - Action: CLOSE, TRIM, REALLOCATE, ENTER
-  - Expected impact: P&L realized, capital freed, potential ROI
-  - Execution constraints: 24h hold/settlement compliance
-- **Risk Assessment**: Real-time portfolio risk levels:
-  - LOW: Healthy positions, minimal exposure
-  - MEDIUM: Moderate risk, monitoring recommended
-  - HIGH: Significant exposure, action suggested
-  - CRITICAL: Urgent intervention required
-- **Frontend Component**: `PortfolioAIInsights.tsx` displays:
-  - Hybrid AI badge indicating internal + Grok analysis
-  - Portfolio risk level with color coding
-  - Goal progress with visual progress bar
-  - Strategic recommendations with urgency indicators
-  - Actionable insights categorized by priority
-  - Grok enhancement section (when triggered) with cyan accent
-  - Auto-refresh every 30 seconds
-  - Full test coverage with data-testid attributes
-- **UI Design**:
-  - Purple gradient card for internal AI analysis
-  - Cyan gradient card for Grok AI enhancements
-  - Risk badges: Red (CRITICAL), Orange (HIGH), Yellow (MEDIUM), Green (LOW)
-  - Urgency icons for recommendations
-  - "24h Rule" badges for constrained positions
+### Portfolio Management (Hybrid AI)
+- **Data Source**: Fetches ALL portfolio positions from real Tastytrade API.
+- **Risk Management**: Automated stop loss at 45% loss, incremental profit-taking (50% at +100% ROI, 25% at +150% ROI, close at +200% ROI).
+- **Hybrid AI Analysis**: Combines an internal `PortfolioAnalysisEngine` (RSI, VIX, Greeks, Fibonacci, P&L exit strategies, 24-hour hold/settlement enforcement) with `GrokAIService` for complex scenarios (high risk, urgent exits, low confidence, rebalance opportunities).
+- **Goal Tracking**: Monitors progress towards a $1M target with progress percentage, required growth multiplier, and status assessment.
+- **Strategic Recommendations**: Provides actionable insights (EXIT_POSITION, TAKE_PROFIT, REBALANCE, NEW_POSITION) with urgency, action, expected impact, and execution constraints.
+- **Real-Time P&L & Greeks Monitoring**: Live profit/loss tracking with SSE-powered price updates and Greeks for options positions.
 
 # External Dependencies
 
@@ -204,10 +65,10 @@ Preferred communication style: Simple, everyday language.
 - **Neon Database**: Serverless PostgreSQL.
 - **Drizzle ORM**: Type-safe database toolkit.
 
-## Financial Data Sources (Prioritized)
-- **Polygon/Massive.com (PRIMARY)**: Real-time market data via WebSocket (stock quotes) and REST API (options quotes, Greeks, IV). Handles 100% US stocks and options.
-- **Tastytrade API (SPX OPTIONS PRIMARY)**: Real-time options data via DXLink WebSocket, specifically for SPX index options, providing real market Greeks, IV, and theoretical prices.
-- **Google Finance (FALLBACK)**: Web scraping for stock prices, ETFs, and market indices when primary sources are unavailable.
+## Financial Data Sources
+- **Polygon/Massive.com (PRIMARY)**: Real-time market data via WebSocket (stock quotes) and REST API (options quotes, Greeks, IV) for US stocks and options.
+- **Tastytrade API (SPX OPTIONS PRIMARY)**: Real-time options data via DXLink WebSocket for SPX index options, providing real market Greeks, IV, and theoretical prices.
+- **Google Finance (FALLBACK)**: Web scraping for stock prices, ETFs, and market indices.
 - **MarketWatch (FINAL FALLBACK)**: Secondary web scraping fallback.
 
 ## Development Tools

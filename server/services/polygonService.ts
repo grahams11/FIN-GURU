@@ -828,6 +828,192 @@ class PolygonService {
   }
 
   /**
+   * Get REAL-TIME bulk market snapshot for ALL stocks (with pagination!)
+   * Uses snapshot endpoint (works during trading hours, not just after close)
+   * Perfect for fast pre-screening without rate limits
+   * Returns: Array of { ticker, price, volume, change } for all active stocks
+   */
+  async getBulkMarketSnapshot(): Promise<Array<{
+    ticker: string;
+    price: number;
+    volume: number;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    change: number;
+    changePercent: number;
+  }>> {
+    try {
+      // Use REAL-TIME snapshot endpoint (works during trading hours!)
+      // IMPORTANT: Paginate through all results (not just first page)
+      let allSnapshots: Array<any> = [];
+      let nextUrl: string | null = `https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers?limit=1000&apiKey=${this.apiKey}`;
+      let pageCount = 0;
+      const maxPages = 20; // Safety limit (20 pages * 1000 = 20,000 stocks)
+      
+      console.log(`📊 Fetching REAL-TIME bulk market snapshot (with pagination)...`);
+      
+      while (nextUrl && pageCount < maxPages) {
+        const response = await axios.get(nextUrl, {
+          timeout: 30000 // 30 seconds per page
+        });
+
+        if (response.data?.tickers && Array.isArray(response.data.tickers)) {
+          const pageSnapshots = response.data.tickers
+            .filter((ticker: any) => {
+              // Only include tickers with valid data
+              if (!ticker.day && !ticker.lastTrade && !ticker.prevDay) return false;
+              
+              const dayData = ticker.day || {};
+              const lastTrade = ticker.lastTrade || {};
+              const prevDay = ticker.prevDay || {};
+              
+              const currentPrice = lastTrade.p || dayData.c || prevDay.c || 0;
+              const todayOpen = dayData.o || prevDay.c || 0;
+              const todayVolume = dayData.v || 0;
+              
+              // Filter out invalid data (zero price, zero volume, zero open)
+              return currentPrice > 0 && todayVolume > 0 && todayOpen > 0;
+            })
+            .map((ticker: any) => {
+              const dayData = ticker.day || {};
+              const lastTrade = ticker.lastTrade || {};
+              const prevDay = ticker.prevDay || {};
+              
+              // Use current price from last trade, or day close if trade unavailable
+              const currentPrice = lastTrade.p || dayData.c || prevDay.c || 0;
+              const todayOpen = dayData.o || prevDay.c || 1; // Prevent divide by zero
+              const todayVolume = dayData.v || 0;
+              
+              return {
+                ticker: ticker.ticker,
+                price: currentPrice,
+                volume: todayVolume,
+                open: todayOpen,
+                high: dayData.h || currentPrice,
+                low: dayData.l || currentPrice,
+                close: currentPrice,
+                change: currentPrice - todayOpen,
+                changePercent: ((currentPrice - todayOpen) / todayOpen) * 100
+              };
+            });
+          
+          allSnapshots.push(...pageSnapshots);
+          pageCount++;
+          
+          console.log(`  📄 Page ${pageCount}: ${pageSnapshots.length} stocks (total: ${allSnapshots.length})`);
+          
+          // Get next page URL
+          nextUrl = response.data.next_url || null;
+          
+          // Add small delay between pages to avoid rate limits
+          if (nextUrl) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+          }
+        } else {
+          break; // No more data
+        }
+      }
+      
+      if (allSnapshots.length > 0) {
+        console.log(`✅ Retrieved ${allSnapshots.length} REAL-TIME stock snapshots (${pageCount} pages)`);
+        return allSnapshots;
+      }
+
+      console.warn('⚠️ No bulk snapshot data available, falling back to grouped daily bars');
+      
+      // Fallback to grouped daily bars (previous trading day)
+      const fallbackSnapshots = await this.getBulkMarketSnapshotFallback();
+      return fallbackSnapshots;
+
+    } catch (error: any) {
+      console.error('❌ Error fetching bulk market snapshot:', error.message);
+      
+      // Try fallback to grouped daily bars
+      try {
+        console.log('🔄 Attempting fallback to grouped daily bars...');
+        const fallbackSnapshots = await this.getBulkMarketSnapshotFallback();
+        return fallbackSnapshots;
+      } catch (fallbackError: any) {
+        console.error('❌ Fallback also failed:', fallbackError.message);
+        return [];
+      }
+    }
+  }
+
+  /**
+   * Fallback: Get previous trading day's data using grouped daily bars
+   * Used when real-time snapshot fails
+   * Tries up to 10 days back to account for holidays and market closures
+   */
+  private async getBulkMarketSnapshotFallback(): Promise<Array<{
+    ticker: string;
+    price: number;
+    volume: number;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    change: number;
+    changePercent: number;
+  }>> {
+    // Try multiple previous days to handle holidays and weekends
+    const maxDaysBack = 10;
+    const today = new Date();
+    
+    for (let daysBack = 1; daysBack <= maxDaysBack; daysBack++) {
+      const targetDate = new Date(today);
+      targetDate.setDate(targetDate.getDate() - daysBack);
+      const dateStr = targetDate.toISOString().split('T')[0];
+      
+      // Skip weekends (save API calls)
+      const dayOfWeek = targetDate.getDay();
+      if (dayOfWeek === 0 || dayOfWeek === 6) {
+        continue; // Skip Sunday (0) and Saturday (6)
+      }
+      
+      try {
+        const url = `https://api.polygon.io/v2/aggs/grouped/locale/us/market/stocks/${dateStr}?adjusted=true&apiKey=${this.apiKey}`;
+        
+        console.log(`📊 Trying grouped daily bars for ${dateStr} (${daysBack} days back)...`);
+        
+        const response = await axios.get(url, {
+          timeout: 15000
+        });
+
+        if (response.data?.results && Array.isArray(response.data.results) && response.data.results.length > 0) {
+          const snapshots = response.data.results
+            .filter((bar: any) => bar.o > 0) // Filter out bars with zero open (invalid)
+            .map((bar: any) => ({
+              ticker: bar.T,
+              price: bar.c,
+              volume: bar.v,
+              open: bar.o,
+              high: bar.h,
+              low: bar.l,
+              close: bar.c,
+              change: bar.c - bar.o,
+              changePercent: ((bar.c - bar.o) / bar.o) * 100
+            }));
+          
+          if (snapshots.length > 0) {
+            console.log(`✅ Retrieved ${snapshots.length} stock snapshots from ${dateStr} (${daysBack} days back)`);
+            return snapshots;
+          }
+        }
+      } catch (error: any) {
+        // Continue trying previous days
+        console.warn(`⚠️ ${dateStr} failed:`, error.message);
+        continue;
+      }
+    }
+
+    console.warn(`⚠️ Fallback exhausted: No market data found in last ${maxDaysBack} days`);
+    return [];
+  }
+
+  /**
    * Close WebSocket connection
    */
   async close(): Promise<void> {

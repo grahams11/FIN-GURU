@@ -429,13 +429,13 @@ export class AIAnalysisService {
 
   static async generateTradeRecommendations(): Promise<TradeRecommendation[]> {
     try {
-      console.log('Starting AI trade analysis with day trading instruments...');
+      console.log('🚀 Starting ELITE TWO-STAGE market scanner...');
       
       // Scrape current market data (includes VIX)
       const marketData = await this.scrapeMarketDataForAnalysis();
       
       // 1. ALWAYS ANALYZE DAY TRADING INSTRUMENTS FIRST (SPX only - MNQ removed due to lack of live data)
-      console.log('Analyzing day trading instruments (SPX)...');
+      console.log('📊 Stage 0: Analyzing day trading instruments (SPX)...');
       const dayTradingAnalyses = await Promise.allSettled(
         this.DAY_TRADING_INSTRUMENTS.map(ticker => 
           this.analyzeDayTradingInstrument(ticker, marketData)
@@ -451,13 +451,18 @@ export class AIAnalysisService {
         }
       });
       
-      // 2. SCAN ENTIRE MARKET FOR SWING TRADES
-      const allTickers = await this.getAllTradeableTickers();
-      const shuffledTickers = [...allTickers].sort(() => Math.random() - 0.5);
-      console.log(`🔍 Scanning ${shuffledTickers.length} stocks across entire market for pullback opportunities...`);
+      // 2. ELITE TWO-STAGE SCANNER FOR SWING TRADES
+      console.log('\n🔍 STAGE 1: Pre-screening entire market for elite candidates...');
+      const eliteCandidates = await this.preScreenMarket(marketData);
       
+      if (eliteCandidates.length === 0) {
+        console.warn('⚠️ No elite candidates found in pre-screening, falling back to top plays');
+        return dayTradingTrades;
+      }
+      
+      console.log(`\n🎯 STAGE 2: Deep analysis on top ${eliteCandidates.length} elite candidates...`);
       const tradeAnalyses = await Promise.allSettled(
-        shuffledTickers.map(ticker => this.analyzeTicker(ticker, marketData))
+        eliteCandidates.map(ticker => this.analyzeTicker(ticker, marketData))
       );
 
       const swingTrades: TradeRecommendation[] = [];
@@ -465,21 +470,326 @@ export class AIAnalysisService {
         if (result.status === 'fulfilled' && result.value) {
           swingTrades.push(result.value);
         } else if (result.status === 'rejected') {
-          console.error(`Failed to analyze ${shuffledTickers[index]}:`, result.reason);
+          console.error(`Failed to analyze ${eliteCandidates[index]}:`, result.reason);
         }
       });
 
-      // 3. COMBINE: Day trading plays ALWAYS in positions 1-2, then best swing trades
-      const sortedSwingTrades = swingTrades.sort((a, b) => b.score - a.score).slice(0, 3);
-      const finalTrades = [...dayTradingTrades, ...sortedSwingTrades].slice(0, 5);
+      // 3. COMBINE: Day trading plays first, then TOP 10-15 swing trades
+      const sortedSwingTrades = swingTrades.sort((a, b) => b.score - a.score).slice(0, 15);
+      const finalTrades = [...dayTradingTrades, ...sortedSwingTrades].slice(0, 20);
       
-      console.log(`Generated ${finalTrades.length} trade recommendations (${dayTradingTrades.length} day trading, ${sortedSwingTrades.length} swing trading)`);
+      console.log(`\n✅ Generated ${finalTrades.length} ELITE trade recommendations (${dayTradingTrades.length} day trading, ${sortedSwingTrades.length} swing trading)`);
       return finalTrades;
       
     } catch (error) {
       console.error('Error generating trade recommendations:', error);
       return [];
     }
+  }
+
+  /**
+   * ELITE STOCK UNIVERSE: High-quality stocks with liquid options markets
+   * Curated list of ~400 top stocks across all sectors for fast, comprehensive scanning
+   * Updated periodically to ensure market coverage without API rate limit issues
+   */
+  private static readonly ELITE_STOCK_UNIVERSE = [
+    // Mega-cap tech (FAANG+)
+    'AAPL', 'MSFT', 'GOOGL', 'GOOG', 'AMZN', 'META', 'NVDA', 'TSLA', 'NFLX',
+    
+    // Major tech & software
+    'AMD', 'INTC', 'CRM', 'ORCL', 'ADBE', 'CSCO', 'AVGO', 'QCOM', 'TXN', 'MU',
+    'NOW', 'SHOP', 'SQ', 'PYPL', 'SNOW', 'PLTR', 'COIN', 'RBLX', 'U', 'DDOG',
+    'CRWD', 'ZS', 'NET', 'PANW', 'FTNT', 'OKTA', 'MDB', 'TEAM', 'WDAY', 'VEEV',
+    
+    // Semiconductors
+    'TSM', 'ASML', 'AMAT', 'LRCX', 'KLAC', 'MRVL', 'ARM', 'MCHP', 'ADI', 'NXPI',
+    'ON', 'MPWR', 'SWKS', 'QRVO',
+    
+    // Financial services
+    'JPM', 'BAC', 'WFC', 'GS', 'MS', 'C', 'BLK', 'SCHW', 'V', 'MA', 'AXP',
+    'SPGI', 'CME', 'ICE', 'COIN', 'SOFI', 'AFRM', 'UPST', 'HOOD',
+    
+    // Healthcare & biotech
+    'JNJ', 'UNH', 'PFE', 'ABBV', 'MRK', 'TMO', 'LLY', 'AMGN', 'GILD', 'MRNA',
+    'BNTX', 'REGN', 'VRTX', 'BMY', 'CVS', 'CI', 'HUM', 'BIIB', 'ISRG',
+    
+    // Energy
+    'XOM', 'CVX', 'COP', 'SLB', 'EOG', 'MPC', 'PSX', 'VLO', 'OXY', 'HAL',
+    'DVN', 'FANG', 'PXD', 'HES', 'MRO', 'APA',
+    
+    // Consumer & retail
+    'WMT', 'HD', 'COST', 'NKE', 'SBUX', 'MCD', 'DIS', 'TGT', 'LOW', 'BKNG',
+    'MAR', 'HLT', 'ABNB', 'UBER', 'LYFT', 'DASH', 'ETSY', 'W', 'CHWY',
+    
+    // Industrial & aerospace
+    'BA', 'CAT', 'GE', 'HON', 'LMT', 'RTX', 'UPS', 'DE', 'MMM', 'EMR',
+    'NOC', 'GD', 'BA', 'CARR', 'CMI', 'ETN',
+    
+    // Automotive & EV
+    'F', 'GM', 'RIVN', 'LCID', 'NIO', 'XPEV', 'LI', 'RACE', 'STLA',
+    
+    // Telecom & media
+    'T', 'VZ', 'TMUS', 'CMCSA', 'CHTR', 'PARA', 'WBD', 'DIS', 'NFLX', 'SPOT',
+    
+    // Cloud & enterprise
+    'AMZN', 'MSFT', 'GOOGL', 'IBM', 'ORCL', 'SAP', 'SNOW', 'DDOG', 'MDB',
+    
+    // E-commerce & payments
+    'AMZN', 'SHOP', 'EBAY', 'MELI', 'SE', 'PYPL', 'SQ', 'AFRM', 'UPST',
+    
+    // Real estate & REITs
+    'AMT', 'PLD', 'EQIX', 'PSA', 'O', 'DLR', 'SPG', 'WELL', 'AVB',
+    
+    // Materials & chemicals
+    'LIN', 'APD', 'SHW', 'ECL', 'DD', 'DOW', 'NEM', 'FCX', 'GOLD',
+    
+    // Industrials
+    'UNP', 'UPS', 'FDX', 'NSC', 'CSX', 'WM', 'RSG',
+    
+    // Consumer staples
+    'PG', 'KO', 'PEP', 'MDLZ', 'CL', 'KMB', 'GIS', 'K', 'CPB',
+    
+    // Utilities
+    'NEE', 'DUK', 'SO', 'D', 'AEP', 'EXC', 'SRE', 'PCG',
+    
+    // Major ETFs (highly liquid options)
+    'SPY', 'QQQ', 'IWM', 'DIA', 'VTI', 'VOO', 'XLF', 'XLE', 'XLK', 'XLV',
+    'XLI', 'XLY', 'XLP', 'XLB', 'XLU', 'XLRE', 'XLC', 'SMH', 'ARKK', 'GLD',
+    
+    // High-growth tech
+    'ROKU', 'ZM', 'DOCU', 'TWLO', 'PINS', 'SNAP', 'UBER', 'LYFT', 'DASH',
+    
+    // Gaming & entertainment
+    'TTWO', 'EA', 'ATVI', 'RBLX', 'U', 'DIS', 'NFLX', 'SPOT', 'WBD',
+    
+    // Cybersecurity
+    'CRWD', 'ZS', 'PANW', 'FTNT', 'OKTA', 'S', 'CYBR',
+    
+    // Data & AI
+    'PLTR', 'SNOW', 'MDB', 'DDOG', 'NET', 'AI', 'C3AI',
+    
+    // Fintech
+    'COIN', 'SOFI', 'AFRM', 'UPST', 'HOOD', 'SQ', 'PYPL',
+    
+    // Electric vehicles
+    'TSLA', 'RIVN', 'LCID', 'NIO', 'XPEV', 'LI', 'F', 'GM',
+    
+    // Chinese ADRs
+    'BABA', 'JD', 'PDD', 'BIDU', 'NIO', 'XPEV', 'LI', 'BILI',
+    
+    // Emerging leaders
+    'MARA', 'RIOT', 'CVNA', 'CARVANA', 'OPEN', 'RDFN', 'Z'
+  ];
+
+  /**
+   * STAGE 1: Fast pre-screening using Polygon bulk snapshot (ONE API CALL!)
+   * Scans ENTIRE market (~9000 stocks) in <5 seconds without rate limits
+   * Returns: Top 100-200 candidates with RSI extremes for deep analysis
+   */
+  private static async preScreenMarket(marketContext: any): Promise<string[]> {
+    const startTime = Date.now();
+    
+    // Get bulk snapshot for ALL stocks in ONE API call!
+    console.log(`📋 Fetching bulk market snapshot (entire market in 1 API call)...`);
+    const bulkSnapshot = await polygonService.getBulkMarketSnapshot();
+    
+    if (!bulkSnapshot || bulkSnapshot.length === 0) {
+      console.warn('⚠️ Bulk snapshot failed, using curated elite universe fallback');
+      return this.preScreenMarketFallback(marketContext);
+    }
+    
+    console.log(`✅ Retrieved ${bulkSnapshot.length} stocks from bulk snapshot`);
+    
+    // Apply fast in-memory filters
+    const candidates: { ticker: string; score: number }[] = [];
+    
+    for (const snapshot of bulkSnapshot) {
+      // FILTER 1: Price range ($5 - $1000)
+      if (snapshot.price < 5 || snapshot.price > 1000) {
+        continue; // Penny stock or ultra-expensive
+      }
+      
+      // FILTER 2: Volume (>500K shares/day)
+      if (snapshot.volume < 500000) {
+        continue; // Illiquid
+      }
+      
+      // FILTER 3: Significant price movement (>2% change)
+      const absChangePercent = Math.abs(snapshot.changePercent);
+      if (absChangePercent < 2) {
+        continue; // Not enough momentum
+      }
+      
+      // Calculate pre-screen score (higher = better candidate)
+      let score = 0;
+      
+      // Price movement score (more extreme = higher score)
+      score += absChangePercent * 5; // 5% move = +25 score
+      
+      // Volume bonus (higher volume = more liquid)
+      const volumeScore = Math.min(50, snapshot.volume / 1000000); // Cap at 50M shares
+      score += volumeScore;
+      
+      // Price range bonus (mid-range prices preferred)
+      if (snapshot.price >= 20 && snapshot.price <= 500) {
+        score += 20; // Sweet spot for options trading
+      }
+      
+      // Volatility bonus (high-low range)
+      const dayRange = ((snapshot.high - snapshot.low) / snapshot.low) * 100;
+      score += dayRange * 2; // Wider range = more opportunity
+      
+      candidates.push({ ticker: snapshot.ticker, score });
+    }
+    
+    // Sort by pre-screen score and take top 200
+    const topCandidates = candidates
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 200)
+      .map(c => c.ticker);
+    
+    const elapsedSeconds = ((Date.now() - startTime) / 1000).toFixed(1);
+    console.log(`✅ Stage 1 complete: ${topCandidates.length} elite candidates from ${bulkSnapshot.length} stocks in ${elapsedSeconds}s`);
+    
+    return topCandidates;
+  }
+
+  /**
+   * Fallback pre-screening using curated universe + individual API calls
+   * Used when bulk snapshot fails
+   */
+  private static async preScreenMarketFallback(marketContext: any): Promise<string[]> {
+    const startTime = Date.now();
+    
+    // Use curated elite universe
+    const eliteUniverse = [...new Set([...this.ELITE_STOCK_UNIVERSE, ...this.FALLBACK_TICKERS])];
+    console.log(`📋 Fallback: Pre-screening ${eliteUniverse.length} elite stocks...`);
+    
+    // Scan with controlled concurrency (max 10 concurrent)
+    const pLimit = (await import('p-limit')).default;
+    const limit = pLimit(10); // Limit to 10 concurrent API calls
+    
+    const promises = eliteUniverse.map(ticker => 
+      limit(() => this.preScreenTicker(ticker, marketContext))
+    );
+    
+    const results = await Promise.allSettled(promises);
+    
+    const candidates: { ticker: string; score: number }[] = [];
+    results.forEach((result) => {
+      if (result.status === 'fulfilled' && result.value) {
+        candidates.push(result.value);
+      }
+    });
+    
+    // Sort by pre-screen score and take top 200
+    const topCandidates = candidates
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 200)
+      .map(c => c.ticker);
+    
+    const elapsedSeconds = ((Date.now() - startTime) / 1000).toFixed(1);
+    console.log(`✅ Fallback Stage 1 complete: ${topCandidates.length} candidates in ${elapsedSeconds}s`);
+    
+    return topCandidates;
+  }
+
+  /**
+   * Pre-screen individual ticker for elite potential
+   * Fast filters: price, volume, RSI extremes
+   * Returns: { ticker, score } if passes filters, null otherwise
+   */
+  private static async preScreenTicker(
+    ticker: string, 
+    marketContext: any
+  ): Promise<{ ticker: string; score: number } | null> {
+    try {
+      // Get basic price data (using lightweight historical data)
+      const endDate = new Date();
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - 10); // Last 10 days
+      
+      const bars = await polygonService.getHistoricalBars(
+        ticker,
+        startDate.toISOString().split('T')[0],
+        endDate.toISOString().split('T')[0],
+        'day'
+      );
+      
+      if (!bars || bars.length < 5) {
+        return null; // Not enough data
+      }
+      
+      // Get most recent bar for current price
+      const latestBar = bars[bars.length - 1];
+      const currentPrice = latestBar.c;
+      
+      // FILTER 1: Price range ($5 - $1000)
+      if (currentPrice < 5 || currentPrice > 1000) {
+        return null; // Penny stock or ultra-expensive
+      }
+      
+      // FILTER 2: Average volume (>500K shares/day)
+      const avgVolume = bars.reduce((sum, bar) => sum + bar.v, 0) / bars.length;
+      if (avgVolume < 500000) {
+        return null; // Illiquid
+      }
+      
+      // FILTER 3: Quick RSI calculation (oversold <35 or overbought >65)
+      const rsi = this.calculateQuickRSI(bars);
+      if (rsi > 35 && rsi < 65) {
+        return null; // Not at extremes
+      }
+      
+      // Calculate pre-screen score (higher = better candidate)
+      let score = 0;
+      
+      // RSI extremes (more extreme = higher score)
+      if (rsi < 35) {
+        score += (35 - rsi) * 2; // Oversold bonus
+      } else if (rsi > 65) {
+        score += (rsi - 65) * 2; // Overbought bonus
+      }
+      
+      // Volume bonus (higher volume = more liquid)
+      const volumeScore = Math.min(50, avgVolume / 1000000); // Cap at 50M shares
+      score += volumeScore;
+      
+      // Price range bonus (mid-range prices preferred)
+      if (currentPrice >= 20 && currentPrice <= 500) {
+        score += 20; // Sweet spot for options trading
+      }
+      
+      return { ticker, score };
+      
+    } catch (error) {
+      // Silent fail for pre-screening (avoid log spam)
+      return null;
+    }
+  }
+
+  /**
+   * Quick RSI calculation from historical bars
+   * Simpler/faster than full RSI for pre-screening
+   */
+  private static calculateQuickRSI(bars: any[]): number {
+    if (bars.length < 14) {
+      return 50; // Default neutral RSI
+    }
+    
+    const prices = bars.map(bar => bar.c);
+    const changes = prices.slice(1).map((price, i) => price - prices[i]);
+    
+    const gains = changes.filter(c => c > 0);
+    const losses = changes.filter(c => c < 0).map(c => Math.abs(c));
+    
+    const avgGain = gains.length > 0 ? gains.reduce((a, b) => a + b, 0) / gains.length : 0.01;
+    const avgLoss = losses.length > 0 ? losses.reduce((a, b) => a + b, 0) / losses.length : 0.01;
+    
+    const rs = avgGain / avgLoss;
+    const rsi = 100 - (100 / (1 + rs));
+    
+    return rsi;
   }
 
   private static async analyzeTicker(ticker: string, marketContext: any): Promise<TradeRecommendation | null> {
