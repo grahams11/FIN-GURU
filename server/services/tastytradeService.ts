@@ -1159,38 +1159,44 @@ class TastytradeService {
       const currentBalance = parseFloat(balanceResponse.data?.data?.['net-liquidating-value'] || 0);
       console.log(`💰 Current Balance: $${currentBalance.toFixed(2)}`);
 
-      // 2. Get yesterday's closing balance from balance history
+      // 2. Get yesterday's closing balance from net-liq-history
       const today = new Date();
-      const yesterday = new Date(today);
-      yesterday.setDate(yesterday.getDate() - 1);
       
-      // Go back up to 7 days to find the most recent closing balance (handles weekends/holidays)
+      // Go back up to 10 days to get historical data (handles weekends/holidays)
+      const endDate = today.toISOString().split('T')[0];
+      const startDate = new Date(today);
+      startDate.setDate(startDate.getDate() - 10);
+      const startDateStr = startDate.toISOString().split('T')[0];
+      
       let priorCloseBalance = 0;
-      let daysBack = 1;
       
-      while (daysBack <= 7 && priorCloseBalance === 0) {
-        const priorDate = new Date(today);
-        priorDate.setDate(priorDate.getDate() - daysBack);
-        const priorDateStr = priorDate.toISOString().split('T')[0];
+      try {
+        // Try the net-liq-history endpoint
+        const historyResponse = await this.apiClient.get(`/accounts/${this.accountNumber}/net-liq/history`, {
+          params: {
+            'time-back': '10d'  // Get last 10 days of history
+          }
+        });
         
-        try {
-          const historyResponse = await this.apiClient.get(`/accounts/${this.accountNumber}/balance-snapshots`, {
-            params: {
-              'snapshot-date': priorDateStr
-            }
+        if (historyResponse.data?.data?.items && historyResponse.data.data.items.length > 0) {
+          // Sort by date descending and get the most recent prior day's closing balance
+          const items = historyResponse.data.data.items.sort((a: any, b: any) => {
+            return new Date(b.time).getTime() - new Date(a.time).getTime();
           });
           
-          if (historyResponse.data?.data?.['net-liquidating-value']) {
-            priorCloseBalance = parseFloat(historyResponse.data.data['net-liquidating-value']);
-            console.log(`📅 Prior Close Balance (${priorDateStr}): $${priorCloseBalance.toFixed(2)}`);
-            break;
+          // Find the most recent balance that's not today
+          const todayStr = today.toISOString().split('T')[0];
+          for (const item of items) {
+            const itemDate = new Date(item.time).toISOString().split('T')[0];
+            if (itemDate !== todayStr && item['close-price']) {
+              priorCloseBalance = parseFloat(item['close-price']);
+              console.log(`📅 Prior Close Balance (${itemDate}): $${priorCloseBalance.toFixed(2)}`);
+              break;
+            }
           }
-        } catch (err: any) {
-          // Try previous day if this date has no snapshot
-          console.log(`⚠️ No balance snapshot for ${priorDateStr}, trying earlier...`);
         }
-        
-        daysBack++;
+      } catch (err: any) {
+        console.warn(`⚠️ Could not fetch from net-liq-history: ${err.message}`);
       }
       
       if (priorCloseBalance === 0) {
