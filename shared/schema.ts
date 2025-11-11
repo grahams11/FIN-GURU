@@ -116,6 +116,50 @@ export const priceAlerts = pgTable("price_alerts", {
   triggeredAt: timestamp("triggered_at"),
 });
 
+export const backtestRuns = pgTable("backtest_runs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  symbolUniverse: text("symbol_universe").array(), // Optional list of symbols to test, null = all market
+  startDate: timestamp("start_date").notNull(),
+  endDate: timestamp("end_date").notNull(),
+  timeframe: text("timeframe").notNull().default('1d'), // '1d' | '4h'
+  warmupLookback: integer("warmup_lookback").notNull().default(14), // Days for RSI calculation
+  config: jsonb("config"), // Strategy parameters used
+  totalTrades: integer("total_trades").default(0),
+  wins: integer("wins").default(0),
+  losses: integer("losses").default(0),
+  winRate: real("win_rate"), // Percentage
+  avgROI: real("avg_roi"), // Average return on investment
+  profitFactor: real("profit_factor"), // Gross profit / gross loss
+  maxDrawdown: real("max_drawdown"), // Maximum peak-to-trough decline
+  sharpeRatio: real("sharpe_ratio"), // Risk-adjusted return metric
+  status: text("status").notNull().default('pending'), // 'pending' | 'running' | 'completed' | 'failed'
+  startedAt: timestamp("started_at").defaultNow(),
+  completedAt: timestamp("completed_at"),
+  errorMessage: text("error_message"),
+});
+
+export const backtestTrades = pgTable("backtest_trades", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  runId: varchar("run_id").references(() => backtestRuns.id, { onDelete: 'cascade' }).notNull(),
+  ticker: text("ticker").notNull(),
+  optionType: text("option_type").notNull(), // 'call' | 'put'
+  strike: real("strike").notNull(),
+  expiry: timestamp("expiry").notNull(),
+  entryDate: timestamp("entry_date").notNull(),
+  exitDate: timestamp("exit_date"),
+  entryPremium: real("entry_premium").notNull(),
+  exitPremium: real("exit_premium"),
+  exitReason: text("exit_reason"), // 'target' | 'stop' | 'expiry' | 'signal'
+  contracts: integer("contracts").notNull(),
+  pnl: real("pnl"), // Profit/loss in dollars
+  roi: real("roi"), // Return on investment percentage
+  maxDrawdown: real("max_drawdown"), // Max decline during hold
+  signals: jsonb("signals"), // RSI, VIX, Fibonacci data at entry
+  marketContext: jsonb("market_context"), // Market conditions at entry
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 export const insertUserSchema = createInsertSchema(users).pick({
   username: true,
   password: true,
@@ -162,6 +206,16 @@ export const insertPriceAlertSchema = createInsertSchema(priceAlerts).omit({
   createdAt: true,
 });
 
+export const insertBacktestRunSchema = createInsertSchema(backtestRuns).omit({
+  id: true,
+  startedAt: true,
+});
+
+export const insertBacktestTradeSchema = createInsertSchema(backtestTrades).omit({
+  id: true,
+  createdAt: true,
+});
+
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 export type MarketData = typeof marketData.$inferSelect;
@@ -180,6 +234,10 @@ export type WatchlistItem = typeof watchlistItems.$inferSelect;
 export type InsertWatchlistItem = z.infer<typeof insertWatchlistItemSchema>;
 export type PriceAlert = typeof priceAlerts.$inferSelect;
 export type InsertPriceAlert = z.infer<typeof insertPriceAlertSchema>;
+export type BacktestRun = typeof backtestRuns.$inferSelect;
+export type InsertBacktestRun = z.infer<typeof insertBacktestRunSchema>;
+export type BacktestTrade = typeof backtestTrades.$inferSelect;
+export type InsertBacktestTrade = z.infer<typeof insertBacktestTradeSchema>;
 
 export interface Greeks {
   delta: number;

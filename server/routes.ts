@@ -1257,6 +1257,96 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ==================== BACKTEST ENDPOINTS ====================
+  
+  // Start a new backtest
+  app.post('/api/backtest/run', async (req, res) => {
+    try {
+      const { createBacktest } = await import('./services/backtestEngine');
+      
+      const config = {
+        startDate: req.body.startDate || '2024-01-01',
+        endDate: req.body.endDate || '2024-12-31',
+        symbols: req.body.symbols || null,
+        budget: req.body.budget || 1000,
+        stopLoss: req.body.stopLoss || 0.45,
+        profitTarget: req.body.profitTarget || 1.0,
+        rsiOversold: req.body.rsiOversold || 30,
+        rsiOverbought: req.body.rsiOverbought || 70,
+        minVIX: req.body.minVIX || 15,
+        maxHoldDays: req.body.maxHoldDays || 10
+      };
+
+      console.log('🎯 Starting backtest with config:', config);
+      const results = await createBacktest(config);
+      
+      res.json(results);
+    } catch (error: any) {
+      console.error('Backtest error:', error);
+      res.status(500).json({ 
+        message: 'Backtest failed', 
+        error: error.message 
+      });
+    }
+  });
+
+  // Get backtest results by ID
+  app.get('/api/backtest/:id', async (req, res) => {
+    try {
+      const { db } = await import('./db');
+      const { backtestRuns, backtestTrades } = await import('@shared/schema');
+      const { eq } = await import('drizzle-orm');
+      
+      const run = await db.query.backtestRuns.findFirst({
+        where: eq(backtestRuns.id, req.params.id)
+      });
+
+      if (!run) {
+        return res.status(404).json({ message: 'Backtest not found' });
+      }
+
+      const trades = await db.query.backtestTrades.findMany({
+        where: eq(backtestTrades.runId, req.params.id)
+      });
+
+      res.json({
+        run,
+        trades,
+        summary: {
+          totalTrades: run.totalTrades || 0,
+          wins: run.wins || 0,
+          losses: run.losses || 0,
+          winRate: run.winRate || 0,
+          avgROI: run.avgROI || 0,
+          profitFactor: run.profitFactor || 0,
+          maxDrawdown: run.maxDrawdown || 0
+        }
+      });
+    } catch (error: any) {
+      console.error('Error fetching backtest:', error);
+      res.status(500).json({ message: 'Failed to fetch backtest results' });
+    }
+  });
+
+  // List all backtest runs
+  app.get('/api/backtest/list', async (req, res) => {
+    try {
+      const { db } = await import('./db');
+      const { backtestRuns } = await import('@shared/schema');
+      const { desc } = await import('drizzle-orm');
+      
+      const runs = await db.query.backtestRuns.findMany({
+        orderBy: desc(backtestRuns.startedAt),
+        limit: 50
+      });
+
+      res.json(runs);
+    } catch (error: any) {
+      console.error('Error fetching backtest list:', error);
+      res.status(500).json({ message: 'Failed to fetch backtest list' });
+    }
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }
