@@ -14,7 +14,8 @@ import {
   DollarSign,
   BarChart3,
   CheckCircle2,
-  XCircle
+  XCircle,
+  AlertCircle
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
@@ -98,7 +99,7 @@ export default function Backtest() {
   });
 
   // Fetch backtest details
-  const { data: backtestDetails } = useQuery<BacktestDetails>({
+  const { data: backtestDetails, isLoading: isLoadingDetails, error: detailsError } = useQuery<BacktestDetails>({
     queryKey: ["/api/backtest", currentRunId],
     enabled: !!currentRunId,
   });
@@ -246,7 +247,22 @@ export default function Backtest() {
 
           {/* Right Column: Results */}
           <div className="lg:col-span-2 space-y-6">
-            {summary ? (
+            {isLoadingDetails ? (
+              <Card data-testid="card-loading-backtest">
+                <CardContent className="p-12 text-center">
+                  <Activity className="h-12 w-12 animate-spin mx-auto mb-4 text-muted-foreground" />
+                  <p className="text-muted-foreground">Loading backtest results...</p>
+                </CardContent>
+              </Card>
+            ) : detailsError ? (
+              <Card data-testid="card-error-backtest">
+                <CardContent className="p-12 text-center">
+                  <AlertCircle className="h-12 w-12 mx-auto mb-4 text-destructive" />
+                  <p className="text-destructive font-semibold mb-2">Failed to load backtest results</p>
+                  <p className="text-sm text-muted-foreground">Please try running the backtest again</p>
+                </CardContent>
+              </Card>
+            ) : summary ? (
               <>
                 {/* Performance Metrics */}
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -319,6 +335,26 @@ export default function Backtest() {
                       </div>
                       <p className="text-xs text-muted-foreground mt-2">
                         {summary.wins}W / {summary.losses}L
+                      </p>
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardContent className="p-6">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm text-muted-foreground">Max Drawdown</p>
+                          <p 
+                            className="text-2xl font-bold text-red-500"
+                            data-testid="text-max-drawdown"
+                          >
+                            {summary.maxDrawdown !== null ? `-${summary.maxDrawdown.toFixed(1)}%` : 'N/A'}
+                          </p>
+                        </div>
+                        <AlertCircle className="h-8 w-8 text-red-500 opacity-50" />
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-2">
+                        Largest peak-to-trough decline
                       </p>
                     </CardContent>
                   </Card>
