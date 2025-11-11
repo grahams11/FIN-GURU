@@ -93,7 +93,7 @@ export function OptionsTraderAI({ insights, trades, isLoading, liveQuotes }: Opt
           </div>
           <div>
             <h2 className="text-2xl font-bold text-foreground" data-testid="text-ai-title">Options Trader AI</h2>
-            <p className="text-muted-foreground">AI-powered top 5 trade recommendations</p>
+            <p className="text-muted-foreground">AI-powered top 20 elite plays (SPX + Swing Trades)</p>
           </div>
         </div>
         <div className="flex items-center space-x-4">
@@ -150,10 +150,10 @@ export function OptionsTraderAI({ insights, trades, isLoading, liveQuotes }: Opt
         </div>
       </div>
 
-      {/* Top 5 Trade Recommendations */}
+      {/* Top 20 Trade Recommendations */}
       <div className="space-y-4">
         {trades && trades.length > 0 ? (
-          trades.slice(0, 5).map((trade, index) => (
+          trades.slice(0, 20).map((trade, index) => (
             <TradeCard
               key={trade.id}
               trade={trade}
