@@ -148,14 +148,14 @@ export class BacktestingEngine {
    * Simulate market scan for a historical day
    */
   private async simulateMarketScan(date: string): Promise<OptionsTrade[]> {
-    // Focus on 10 most liquid stocks to minimize API calls
-    const symbols = [
-      'SPY', 'QQQ', 'AAPL', 'NVDA', 'META',
-      'MSFT', 'AMZN', 'GOOGL', 'AMD', 'TSLA'
-    ];
+    // Process just 3 stocks to minimize API calls
+    const symbols = ['AAPL', 'NVDA', 'TSLA'];
     const recommendations: OptionsTrade[] = [];
 
+    // Process stocks sequentially (one at a time) to avoid rate limits
     for (const symbol of symbols) {
+      console.log(`  Analyzing ${symbol}...`);
+      
       // Fetch historical data for this symbol around this date
       const startDate = this.subtractDays(date, 30);
       const bars = await historicalDataService.getDailyBars(symbol, startDate, date);
