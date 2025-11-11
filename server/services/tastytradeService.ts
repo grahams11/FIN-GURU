@@ -1248,7 +1248,7 @@ class TastytradeService {
   }
 
   /**
-   * Fetch today's P/L by comparing current balance to yesterday's EOD snapshot
+   * Fetch today's P/L directly from balance API
    */
   async fetchTodayPnL(): Promise<{ realized: number; unrealized: number; total: number }> {
     try {
@@ -1257,9 +1257,21 @@ class TastytradeService {
         return { realized: 0, unrealized: 0, total: 0 };
       }
 
+      // Get full balance data to inspect all fields
+      const response = await this.apiClient.get(`/accounts/${this.accountNumber}/balances`);
+      
+      if (!response.data || !response.data.data) {
+        return { realized: 0, unrealized: 0, total: 0 };
+      }
+
+      const data = response.data.data;
+      
+      // DEBUG: Log ALL fields to find daily P/L
+      console.log('🔍 FULL BALANCE API RESPONSE:');
+      console.log(JSON.stringify(data, null, 2));
+
       // Get current net liquidation value
-      const currentBalance = await this.fetchAccountBalance();
-      const currentNetLiq = currentBalance.netLiquidatingValue;
+      const currentNetLiq = parseFloat(data['net-liquidating-value'] || '0');
 
       // Calculate yesterday's date in YYYY-MM-DD format
       const yesterday = new Date();
