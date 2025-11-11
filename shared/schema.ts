@@ -267,6 +267,100 @@ export const strategyParameters = pgTable("strategy_parameters", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+// UOA (Unusual Options Activity) Scanner
+export const uoaTrades = pgTable("uoa_trades", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  ticker: text("ticker").notNull(),
+  optionSymbol: varchar("option_symbol").notNull(), // Polygon contract identifier (e.g., O:SPY251121C00700000)
+  optionType: text("option_type").notNull(), // 'call' | 'put'
+  strike: real("strike").notNull(),
+  expiry: text("expiry").notNull(),
+  
+  // Pricing
+  stockPrice: real("stock_price").notNull(),
+  premium: real("premium").notNull(),
+  bid: real("bid").notNull(),
+  ask: real("ask").notNull(),
+  
+  // UOA Metrics (Primary Signal)
+  volume: integer("volume").notNull(),
+  openInterest: integer("open_interest").notNull(),
+  uoaRatio: real("uoa_ratio").notNull(), // volume / open_interest (target >3x)
+  volumeVsAvg: real("volume_vs_avg").notNull(), // Current volume vs 5-day avg (target >3x)
+  
+  // Volatility & Technical
+  iv: real("iv").notNull(), // Implied volatility
+  ivPercentile: real("iv_percentile").notNull(), // IV rank (0-100, target >50)
+  priceVolatility: real("price_volatility").notNull(), // Price vol vs 20-day avg (target >1.5x)
+  rsi: real("rsi").notNull(), // RSI(14) for direction (<30 bullish, >70 bearish)
+  
+  // Greeks
+  delta: real("delta").notNull(),
+  theta: real("theta").notNull(),
+  gamma: real("gamma").notNull(),
+  vega: real("vega").notNull(),
+  
+  // Composite Score (0-100)
+  compositeScore: real("composite_score").notNull(), // Overall score (target >70)
+  likelihoodScore: real("likelihood_score").notNull(), // 60% weight: UOA + technical + sentiment
+  roiScore: real("roi_score").notNull(), // 40% weight: IV move × delta - premium
+  
+  // Score Components
+  uoaStrength: real("uoa_strength").notNull(), // 20 points max
+  technicalAlignment: real("technical_alignment").notNull(), // 20 points max
+  sentimentScore: real("sentiment_score").notNull(), // 20 points max
+  roiPotential: real("roi_potential").notNull(), // 40 points max
+  
+  // Directional Probability
+  directionProb: real("direction_prob").notNull(), // Probability of move (target >60%)
+  
+  // ROI Projection
+  projectedROI: real("projected_roi").notNull(), // Expected return % (target >150%)
+  impliedMove: real("implied_move").notNull(), // Expected price move from IV
+  targetPrice: real("target_price"), // Projected target price
+  
+  // Catalyst Flags
+  hasEarnings: boolean("has_earnings").default(false), // Earnings within 7 days
+  earningsDate: text("earnings_date"),
+  newsVolume: real("news_volume"), // News volume vs avg (>2x = catalyst)
+  hasCatalyst: boolean("has_catalyst").default(false), // Any identified catalyst
+  catalystType: text("catalyst_type"), // 'earnings' | 'news' | 'uoa' | 'technical'
+  
+  // Price Action
+  nearSupport: boolean("near_support").default(false), // Price near 50 SMA support
+  nearResistance: boolean("near_resistance").default(false), // Price near resistance
+  priceLevel: text("price_level"), // 'support' | 'resistance' | 'neutral'
+  
+  // Market Cap & Liquidity Filters
+  marketCap: real("market_cap"), // In billions
+  avgDailyVolume: integer("avg_daily_volume"), // 20-day avg stock volume
+  bidAskSpread: real("bid_ask_spread"), // Spread percentage (target <0.5%)
+  
+  // Display & Ranking
+  rank: integer("rank").notNull(), // 1-5 for top plays
+  displayText: text("display_text"), // Human-readable summary
+  
+  // Cache Control
+  scanTime: timestamp("scan_time").notNull(), // When this was scanned
+  cacheExpiry: timestamp("cache_expiry").notNull(), // When to refresh (scan_time + 20-30s)
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => ({
+  // Performance indexes for fast cache queries (<100ms target)
+  cacheExpiryIdx: {
+    columns: [table.cacheExpiry],
+    name: "idx_uoa_cache_expiry",
+  },
+  scanRankIdx: {
+    columns: [table.scanTime, table.rank],
+    name: "idx_uoa_scan_rank",
+  },
+  // Prevent duplicate contracts per scan batch
+  uniqueScanContract: {
+    columns: [table.scanTime, table.optionSymbol],
+    name: "unique_scan_contract",
+  },
+}));
+
 export const insertUserSchema = createInsertSchema(users).pick({
   username: true,
   password: true,
@@ -338,6 +432,11 @@ export const insertStrategyParametersSchema = createInsertSchema(strategyParamet
   createdAt: true,
 });
 
+export const insertUoaTradeSchema = createInsertSchema(uoaTrades).omit({
+  id: true,
+  createdAt: true,
+});
+
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 export type MarketData = typeof marketData.$inferSelect;
@@ -366,6 +465,8 @@ export type RecommendationPerformance = typeof recommendationPerformance.$inferS
 export type InsertRecommendationPerformance = z.infer<typeof insertRecommendationPerformanceSchema>;
 export type StrategyParameters = typeof strategyParameters.$inferSelect;
 export type InsertStrategyParameters = z.infer<typeof insertStrategyParametersSchema>;
+export type UoaTrade = typeof uoaTrades.$inferSelect;
+export type InsertUoaTrade = z.infer<typeof insertUoaTradeSchema>;
 
 export interface Greeks {
   delta: number;
