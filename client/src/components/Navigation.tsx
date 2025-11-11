@@ -1,6 +1,6 @@
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
-import { LayoutDashboard, Briefcase } from "lucide-react";
+import { LayoutDashboard, Briefcase, BarChart3 } from "lucide-react";
 
 export function Navigation() {
   const [location] = useLocation();
@@ -31,6 +31,16 @@ export function Navigation() {
               >
                 <Briefcase className="h-4 w-4" />
                 Portfolio
+              </Button>
+            </Link>
+            <Link href="/backtest">
+              <Button 
+                variant={location === "/backtest" ? "default" : "ghost"}
+                className="gap-2"
+                data-testid="nav-backtest"
+              >
+                <BarChart3 className="h-4 w-4" />
+                Backtest
               </Button>
             </Link>
           </div>
