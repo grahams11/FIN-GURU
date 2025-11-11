@@ -113,7 +113,7 @@ export class DatabaseStorage implements IStorage {
       .select()
       .from(optionsTrade)
       .orderBy(desc(optionsTrade.score))
-      .limit(5);
+      .limit(20);
   }
 
   async executeTrade(tradeId: string): Promise<boolean> {
