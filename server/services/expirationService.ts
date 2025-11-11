@@ -141,7 +141,7 @@ class ExpirationService {
       // Fallback to calculated expirations (already filtered by filterType)
       console.warn(`⚠️ [ExpirationService] API calls failed for ${symbol}, using calculated expirations`);
       this.logMetrics('fallback_triggered', symbol);
-      const expirations = this.calculateExpirations(minDays, maxDays, filterType);
+      const expirations = this.calculateExpirations(symbol, minDays, maxDays, filterType);
       
       // Cache the filtered fallback results
       this.cache.set(cacheKey, { expirations, timestamp: Date.now() });
@@ -151,7 +151,7 @@ class ExpirationService {
       console.error(`❌ [ExpirationService] Error for ${symbol}:`, error.message);
       this.logMetrics('error', symbol);
       // Always provide fallback
-      const expirations = this.calculateExpirations(minDays, maxDays, filterType);
+      const expirations = this.calculateExpirations(symbol, minDays, maxDays, filterType);
       return expirations;
     }
   }
@@ -304,32 +304,43 @@ class ExpirationService {
   /**
    * Calculate expiration dates using Friday logic (fallback)
    * Includes BOTH weeklies (next 8 weeks) AND monthlies (next 12 months)
+   * For SPX: Generates Mon/Wed/Fri weeklies when filterType is 'weekly'
    */
-  private calculateExpirations(minDays: number, maxDays: number, filterType: 'weekly' | 'monthly' | 'all'): ExpirationDate[] {
+  private calculateExpirations(symbol: string, minDays: number, maxDays: number, filterType: 'weekly' | 'monthly' | 'all'): ExpirationDate[] {
     const expirations: ExpirationDate[] = [];
     const today = new Date();
 
     // Generate weekly Fridays for next 8 weeks (for day trading)
     if (filterType === 'all' || filterType === 'weekly') {
-      for (let i = 0; i < 8; i++) {
-        const targetDate = new Date(today);
-        targetDate.setDate(today.getDate() + (i * 7));
-        
-        // Find next Friday from target date
-        const daysUntilFriday = (5 - targetDate.getDay() + 7) % 7;
-        const friday = new Date(targetDate);
-        friday.setDate(targetDate.getDate() + daysUntilFriday);
-        
-        const daysToExpiration = Math.ceil((friday.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+      // SPX has Mon/Wed/Fri weeklies, other symbols have Friday-only
+      const weeklyDays = symbol === 'SPX' ? [1, 3, 5] : [5]; // Mon=1, Wed=3, Fri=5
+      
+      for (let weekOffset = 0; weekOffset < 8; weekOffset++) {
+        for (const targetDay of weeklyDays) {
+          const targetDate = new Date(today);
+          targetDate.setDate(today.getDate() + (weekOffset * 7));
+          
+          // Find next occurrence of target day (Mon/Wed/Fri)
+          const currentDay = targetDate.getDay();
+          let daysUntilTarget = (targetDay - currentDay + 7) % 7;
+          if (daysUntilTarget === 0 && targetDate <= today) {
+            daysUntilTarget = 7; // Skip to next week if today or past
+          }
+          
+          const expiryDate = new Date(targetDate);
+          expiryDate.setDate(targetDate.getDate() + daysUntilTarget);
+          
+          const daysToExpiration = Math.ceil((expiryDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 
-        // Filter by days range
-        if (daysToExpiration >= minDays && daysToExpiration <= maxDays && daysToExpiration > 0) {
-          expirations.push({
-            date: this.formatDate(friday),
-            daysToExpiration,
-            expiryType: 'weekly',
-            source: 'calculated'
-          });
+          // Filter by days range
+          if (daysToExpiration >= minDays && daysToExpiration <= maxDays && daysToExpiration > 0) {
+            expirations.push({
+              date: this.formatDate(expiryDate),
+              daysToExpiration,
+              expiryType: 'weekly',
+              source: 'calculated'
+            });
+          }
         }
       }
     }
