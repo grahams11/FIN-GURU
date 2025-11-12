@@ -64,7 +64,7 @@ app.use((req, res, next) => {
   await EliteStrategyEngine.getInstance().loadParametersFromDatabase();
   console.log('✅ Elite Strategy Engine ready with active parameters');
   
-  // Start Ghost 1DTE Scheduler (auto-triggers at 3:58pm EST)
+  // Start Ghost 1DTE Scheduler (auto-triggers in 3:00-4:00pm EST window)
   GhostScheduler.start();
   
   // Start UOA Background Worker (refreshes cache every 30s)

@@ -26,7 +26,7 @@ import {
 /**
  * GHOST 1DTE OVERNIGHT SCANNER
  * 94.1% win rate across 1,847 consecutive overnight holds
- * Entry: 3:59pm EST → Exit: 9:32am next day
+ * Entry: 3:00-4:00pm EST → Exit: 9:32am next day
  * Universe: SPY, QQQ, IWM only
  */
 
@@ -643,7 +643,7 @@ export default function GhostScanner() {
               <AlertCircle className="w-16 h-16 text-slate-500 mx-auto mb-4" />
               <p className="text-xl text-slate-400">No plays found matching criteria</p>
               <p className="text-sm text-slate-500 mt-2">
-                Try scanning during market close window (3:58pm - 4:00pm EST)
+                Try scanning during market close window (3:00pm - 4:00pm EST)
               </p>
             </CardContent>
           </Card>

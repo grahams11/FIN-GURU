@@ -5,7 +5,7 @@ import { BlackScholesCalculator } from './financialCalculations';
 /**
  * 1DTE OVERNIGHT GHOST SCANNER (GROK PHASE 4)
  * Win Rate: 94.1% across 1,847 consecutive overnight holds
- * Entry: 3:59pm EST → Exit: 9:32am next day
+ * Entry: 3:00-4:00pm EST → Exit: 9:32am next day
  * Universe: SPY, QQQ, IWM only
  * API Usage: Unlimited (Advanced Options Plan - ~6-9 concurrent calls)
  * Speed: <1 second (parallel fetching)
@@ -72,7 +72,7 @@ interface Ghost1DTEContract {
   historicalWinRate: number; // Similar setup win rate
   
   // Metadata
-  entryTime: string; // 3:59pm EST
+  entryTime: string; // 3:00-4:00pm EST window
   exitTime: string; // 9:32am next day
   underlyingPrice: number; // Current stock price
 }
@@ -158,7 +158,7 @@ class OptimizedGreeksCalculator {
   private static cache: Map<string, { d1: number; d2: number; Nd1: number; Nd2: number; nd1: number }> = new Map();
   
   /**
-   * Pre-compute entire 1DTE Greeks surface at 3:58:12pm
+   * Pre-compute entire 1DTE Greeks surface at 3:00pm
    * Vectorized calculation for all strikes at once
    */
   static precomputeSurface(
@@ -257,7 +257,7 @@ export class Ghost1DTEService {
   private static readonly SYMBOLS = ['SPY', 'QQQ', 'IWM'];
   private static readonly RISK_FREE_RATE = 0.045; // 4.5% current rate
   
-  // Cache for 1DTE chains (refreshed at 3:58pm)
+  // Cache for 1DTE chains (refreshed at 3:00pm)
   private static chainCache: Map<string, any> = new Map();
   private static lastCacheTime: number = 0;
   
@@ -357,7 +357,7 @@ export class Ghost1DTEService {
   
   /**
    * Main Ghost 1DTE Scan (Grok Phase 4 Enhanced)
-   * Triggered at 3:58pm EST daily
+   * Triggered in 3:00-4:00pm EST window daily
    * Returns top 3 overnight plays with 94.1%+ win rate
    * 
    * API Usage: Unlimited (Advanced Options Plan)
@@ -626,8 +626,8 @@ export class Ghost1DTEService {
         stopUnderlyingPrice,
         underlyingMoveNeeded,
         historicalWinRate,
-        entryTime: '3:59:11pm EST',
-        exitTime: '9:31:58am EST (next day)',
+        entryTime: '3:30pm EST',
+        exitTime: '9:32am EST (next day)',
         underlyingPrice: currentPrice
       };
       
@@ -925,8 +925,8 @@ export class Ghost1DTEService {
   
   /**
    * Calculate time to expiry for 1DTE overnight hold
-   * Entry: 3:59pm today → Exit: 9:32am tomorrow
-   * Total: ~18 hours
+   * Entry: 3:00-4:00pm today → Exit: 9:32am tomorrow
+   * Total: ~17-18 hours
    */
   private static calculateTimeToExpiry(): number {
     const now = new Date();

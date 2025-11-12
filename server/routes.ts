@@ -1410,7 +1410,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ============================================================
   // GHOST 1DTE OVERNIGHT SCANNER
   // 94.1% win rate across 1,847 overnight holds (SPY/QQQ/IWM)
-  // Entry: 3:59pm → Exit: 9:32am next day
+  // Entry: 3:00-4:00pm → Exit: 9:32am next day
   // ============================================================
   
   // Initialize Ghost 1DTE Scanner (runs once at server startup)
@@ -1437,7 +1437,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  // Run Ghost 1DTE Scan (triggered at 3:58pm or manually)
+  // Run Ghost 1DTE Scan (triggered in 3:00-4:00pm window or manually)
   app.get('/api/ghost/scan', async (req, res) => {
     try {
       console.log('\n👻 Starting Ghost 1DTE Scan...');
@@ -1553,18 +1553,18 @@ Historical win rate same setup: ${play.historicalWinRate.toFixed(1)}%`
       const hour = estTime.getHours();
       const minute = estTime.getMinutes();
       
-      // Market close window: 3:58pm - 4:00pm EST
-      const inScanWindow = (hour === 15 && minute >= 58) || (hour === 16 && minute === 0);
+      // Market close window: 3:00pm - 4:00pm EST
+      const inScanWindow = hour === 15 || (hour === 16 && minute === 0);
       
       // Calculate time until next scan window
       let nextScanTime = new Date(estTime);
-      if (hour < 15 || (hour === 15 && minute < 58)) {
-        // Today at 3:58pm
-        nextScanTime.setHours(15, 58, 0, 0);
+      if (hour < 15) {
+        // Today at 3:00pm
+        nextScanTime.setHours(15, 0, 0, 0);
       } else {
-        // Tomorrow at 3:58pm
+        // Tomorrow at 3:00pm
         nextScanTime.setDate(nextScanTime.getDate() + 1);
-        nextScanTime.setHours(15, 58, 0, 0);
+        nextScanTime.setHours(15, 0, 0, 0);
       }
       
       const timeUntilScan = nextScanTime.getTime() - estTime.getTime();
@@ -1574,14 +1574,14 @@ Historical win rate same setup: ${play.historicalWinRate.toFixed(1)}%`
       res.json({
         currentTime: estTime.toLocaleTimeString('en-US', { timeZone: 'America/New_York' }),
         inScanWindow,
-        scanWindowStart: '3:58pm EST',
+        scanWindowStart: '3:00pm EST',
         scanWindowEnd: '4:00pm EST',
         nextScanTime: nextScanTime.toLocaleTimeString('en-US', { timeZone: 'America/New_York' }),
         timeUntilScan: `${hoursUntil}h ${minutesUntil}m`,
         systemStatus: 'operational',
         targetUniverse: ['SPY', 'QQQ', 'IWM'],
         expectedWinRate: '94.1%',
-        holdPeriod: 'Overnight (3:59pm → 9:32am)',
+        holdPeriod: 'Overnight (3:00-4:00pm → 9:32am)',
         apiLimit: 4,
         speedTarget: '<0.7 seconds'
       });

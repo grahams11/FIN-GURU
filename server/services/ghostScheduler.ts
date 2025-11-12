@@ -2,7 +2,7 @@ import { Ghost1DTEService } from './ghost1DTE';
 
 /**
  * Ghost 1DTE Market Timing Scheduler
- * Auto-triggers scan at 3:58pm EST for overnight setups
+ * Auto-triggers scan in 3:00-4:00pm EST window for overnight setups
  * Tracks 9:32am exit window next day
  * Skips weekends and US market holidays
  */
@@ -113,7 +113,7 @@ export class GhostScheduler {
   
   /**
    * Start the Ghost scheduler
-   * Checks every minute if we're in the 3:58-4:00pm EST window
+   * Checks every minute if we're in the 3:00-4:00pm EST window
    */
   static start(): void {
     console.log('👻 Starting Ghost 1DTE scheduler...');
@@ -126,7 +126,7 @@ export class GhostScheduler {
       this.checkMarketTiming();
     }, 30000); // 30 seconds
     
-    console.log('✅ Ghost scheduler active - monitoring 3:58-4:00pm EST window');
+    console.log('✅ Ghost scheduler active - monitoring 3:00-4:00pm EST window');
   }
   
   /**
@@ -184,8 +184,8 @@ export class GhostScheduler {
         return;
       }
       
-      // Market close window: 3:58pm - 4:00pm EST
-      const inScanWindow = (hour === 15 && minute >= 58) || (hour === 16 && minute === 0);
+      // Market close window: 3:00pm - 4:00pm EST
+      const inScanWindow = hour === 15 || (hour === 16 && minute === 0);
       
       // Only trigger scan once when entering window
       if (inScanWindow && !this.isMarketHours) {

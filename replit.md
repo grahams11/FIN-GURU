@@ -64,9 +64,9 @@ Preferred communication style: Simple, everyday language.
 #### Ghost 1DTE Overnight Scanner (GROK PHASE 4 ENHANCED)
 - **Target Win Rate**: 94.1% across 1,847 consecutive overnight holds
 - **Universe**: SPY, QQQ, IWM only
-- **Strategy**: Overnight holds (Entry: 3:59pm EST → Exit: 9:32am next day)
+- **Strategy**: Overnight holds (Entry: 3:00-4:00pm EST → Exit: 9:32am next day)
 - **Performance**: <1 second scan time, unlimited API usage (6-9 concurrent calls with Advanced Options Plan)
-- **Auto-Trigger**: Scheduler monitors 3:58-4:00pm EST window for automatic scans
+- **Auto-Trigger**: Scheduler monitors 3:00-4:00pm EST window for automatic scans
 - **Phase 4 AI Enhancement (First Major Learning from Grok)**: 
   - 4-layer scoring system replaces simple composite
   - **Layer 1 (30pts)**: Max Pain + Gamma Trap - Detects dealer hedging pressure
