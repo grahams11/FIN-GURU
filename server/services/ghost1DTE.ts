@@ -788,11 +788,12 @@ export class Ghost1DTEService {
   }
   
   /**
-   * Calculate Phase 4 Composite Score (Grok AI System - trigger >= 92)
+   * Calculate Phase 4 Composite Score (Grok AI System - trigger >= 85)
    * Layer 1 (30pts): Max Pain Gamma Trap
    * Layer 2 (25pts): IV Skew Inversion
    * Layer 3 (30pts): Ghost Sweep Detection
    * Layer 4 (15pts): 0-3 DTE + RSI Extreme
+   * Threshold lowered to 85 to allow 3/4 layers to pass (e.g., 30+25+30=85)
    */
   private static async calculateCompositeScore(
     symbol: string,
@@ -900,12 +901,12 @@ export class Ghost1DTEService {
   
   /**
    * Entry gate validation (Phase 4 - simplified)
-   * Main filter is composite score >= 92
+   * Main filter is composite score >= 85
    * Additional gates ensure quality plays
    */
   private static passesEntryGates(contract: Ghost1DTEContract): boolean {
     // PHASE 4: Entry gates now based on layer scores (0-30 scale)
-    // Gate 1: Composite score >= 92 (already checked in main filter)
+    // Gate 1: Composite score >= 85 (already checked in main filter)
     
     // Gate 2: Must have at least 2 layers contributing
     const layersActive = [
