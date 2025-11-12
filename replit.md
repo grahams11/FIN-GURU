@@ -64,9 +64,10 @@ Preferred communication style: Simple, everyday language.
 #### Ghost 1DTE Overnight Scanner (GROK PHASE 4 ENHANCED)
 - **Target Win Rate**: 94.1% across 1,847 consecutive overnight holds
 - **Universe**: SPY, QQQ, IWM only
-- **Strategy**: Overnight holds (Entry: 3:00-4:00pm EST → Exit: 9:32am next day)
+- **Strategy**: Overnight holds (Entry: 2:00-3:00pm CST → Exit: 8:32am CST next day)
 - **Performance**: <1 second scan time, unlimited API usage (6-9 concurrent calls with Advanced Options Plan)
-- **Auto-Trigger**: Scheduler monitors 3:00-4:00pm EST window for automatic scans
+- **Auto-Trigger**: Scheduler monitors 2:00-3:00pm CST window for automatic scans
+- **Timezone**: All times displayed in CST (Central Standard Time)
 - **Phase 4 AI Enhancement (First Major Learning from Grok)**: 
   - 4-layer scoring system replaces simple composite
   - **Layer 1 (30pts)**: Max Pain + Gamma Trap - Detects dealer hedging pressure
@@ -99,7 +100,7 @@ Preferred communication style: Simple, everyday language.
 - **Pre-Trade Checklist (11/12/2025)**:
   - Manual gating UI requiring all 9 items checked before trade execution
   - Checklist resets on every new scan to prevent stale state bypass
-  - Items: Alert ≥94 score, Time 3:00–4:00 PM EST, Strike = Max Pain ±1, 0DTE or 1DTE only, Buy at ask FOK, Risk ≤40% account, Set GTC sell order @ 400%+, Wake up 9:15 AM → sell 10:15 AM sharp, NO FOMO if missed
+  - Items: Alert ≥94 score, Time 2:00–3:00 PM CST, Strike = Max Pain ±1, 0DTE or 1DTE only, Buy at ask FOK, Risk ≤40% account, Set GTC sell order @ 400%+, Wake up 8:15 AM CST → sell 9:15 AM CST sharp, NO FOMO if missed
   - "Ready to Trade" button enabled only when all items checked
   - Confirmation alert reminds user to place trade manually in brokerage
 
