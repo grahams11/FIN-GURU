@@ -36,9 +36,10 @@ Preferred communication style: Simple, everyday language.
 ### Market Scanning
 - **BatchDataService**: Fetches and caches ~11,600 stocks from Polygon Bulk Snapshot, shared across all scanners for efficiency.
 - **Dual Scanner Architecture**:
-    - **UOA Scanner**: Fast background scanner for Unusual Options Activity using a hybrid scoring system (70% traditional UOA + 30% Ghost Phase 4 intelligence).
+    - **UOA Scanner**: Fast background scanner for Unusual Options Activity using a hybrid scoring system (70% traditional UOA + 30% Ghost Phase 4 intelligence). Optimized with smart pre-filtering (volume spike + volatility scoring) reducing scan universe from 11,600 → 500 high-probability stocks, early termination after finding 50 strong candidates, and 25x concurrent API calls. Scan time: ~20 minutes.
     - **Elite Scanner**: Institutional-grade scanner with strict filtering criteria.
 - **Market Data Pipeline**: Efficiently fetches and filters market data, eliminating redundant API calls.
+- **API Rate Limits**: UOA scanner uses 25 calls/minute for option chain fetching (Phase 2) with unlimited batch fetching for historical bars (Phase 2.5) via Polygon Advanced Options Plan.
 - **ExpirationService**: Queries live option chains for accurate expiration dates.
 
 ### Trading Systems
