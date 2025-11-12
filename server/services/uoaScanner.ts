@@ -68,7 +68,11 @@ export class UoaScannerService {
   private static readonly SCAN_CACHE_TTL = 25 * 1000; // 25 seconds
   
   // Concurrency limits to prevent API overload
-  private static readonly PHASE2_CONCURRENCY = 10; // Max 10 parallel option chain requests
+  private static readonly PHASE2_CONCURRENCY = 25; // Max 25 parallel option chain requests (matches rate limit)
+  
+  // Smart filtering thresholds
+  private static readonly MAX_STOCKS_TO_SCAN = 500; // Pre-filter to top 500 high-probability stocks
+  private static readonly EARLY_TERMINATION_COUNT = 50; // Stop after finding 50 strong candidates
   
   // Symbol-level cache for Phase 4 scoring (shared across all strikes)
   private static symbolContextCache: Map<string, SymbolScanContext> = new Map();
@@ -212,10 +216,27 @@ export class UoaScannerService {
           volume: stock.volume,
           changePercent: stock.changePercent || 0,
         }))
-        .sort((a, b) => b.volume - a.volume); // Sort by today's volume (UOA indicator)
+        .sort((a, b) => {
+          // Multi-factor sorting for UOA probability
+          // 1. Volume spike (primary indicator)
+          const aVolumeSpike = a.avgDailyVolume > 0 ? a.volume / a.avgDailyVolume : 0;
+          const bVolumeSpike = b.avgDailyVolume > 0 ? b.volume / b.avgDailyVolume : 0;
+          
+          // 2. Price volatility (secondary indicator, capped at 10% to prevent extreme gaps from dominating)
+          const aVolatility = Math.min(Math.abs(a.changePercent), 10);
+          const bVolatility = Math.min(Math.abs(b.changePercent), 10);
+          
+          // Combined score: 70% volume spike + 30% volatility
+          const aScore = (aVolumeSpike * 0.7) + (aVolatility * 0.3);
+          const bScore = (bVolumeSpike * 0.7) + (bVolatility * 0.3);
+          
+          return bScore - aScore;
+        })
+        .slice(0, this.MAX_STOCKS_TO_SCAN); // Limit to top 500 high-probability stocks
       
       const duration = Date.now() - startTime;
-      console.log(`✅ Stock universe ready: ${candidates.length} liquid stocks in ${duration}ms (from shared cache)`);
+      console.log(`✅ Stock universe ready: ${candidates.length} high-probability stocks in ${duration}ms (from shared cache)`);
+      console.log(`📊 Pre-filtered from ${universe.length} → ${candidates.length} stocks using volume spike + volatility scoring`);
       
       return candidates;
     } catch (error) {
@@ -249,7 +270,7 @@ export class UoaScannerService {
   /**
    * Phase 2: UOA Filtering
    * Scans option chains for unusual activity
-   * Uses batched concurrency to prevent API overload
+   * Uses batched concurrency with early termination for efficiency
    */
   static async scanForUOA(universe: StockCandidate[]): Promise<UOACandidate[]> {
     console.log(`\n🔍 Phase 2: Scanning ${universe.length} stocks for UOA...`);
@@ -257,26 +278,45 @@ export class UoaScannerService {
     
     const limit = pLimit(this.PHASE2_CONCURRENCY);
     const candidates: UOACandidate[] = [];
+    let stocksProcessed = 0;
+    let earlyTermination = false;
     
-    // Process stocks in parallel with concurrency limit
-    const promises = universe.map(stock => limit(async () => {
-      try {
-        return await this.analyzeStock(stock);
-      } catch (error) {
-        console.error(`Error analyzing ${stock.ticker}:`, error);
-        return [];
+    // Process stocks in batches with early termination check
+    const BATCH_SIZE = 50; // Check for early termination every 50 stocks
+    
+    for (let i = 0; i < universe.length; i += BATCH_SIZE) {
+      const batch = universe.slice(i, i + BATCH_SIZE);
+      
+      const promises = batch.map(stock => limit(async () => {
+        try {
+          return await this.analyzeStock(stock);
+        } catch (error) {
+          console.error(`Error analyzing ${stock.ticker}:`, error);
+          return [];
+        }
+      }));
+      
+      const results = await Promise.all(promises);
+      
+      // Flatten batch results
+      for (const stockCandidates of results) {
+        candidates.push(...stockCandidates);
       }
-    }));
-    
-    const results = await Promise.all(promises);
-    
-    // Flatten and filter results
-    for (const stockCandidates of results) {
-      candidates.push(...stockCandidates);
+      
+      stocksProcessed += batch.length;
+      
+      // Early termination check: If we have enough strong candidates, stop scanning
+      if (candidates.length >= this.EARLY_TERMINATION_COUNT) {
+        const uniqueTickers = new Set(candidates.map(c => c.ticker)).size;
+        earlyTermination = true;
+        console.log(`⚡ Early termination: Found ${candidates.length} candidates (${uniqueTickers} unique tickers) after ${stocksProcessed}/${universe.length} stocks`);
+        break;
+      }
     }
     
     const duration = Date.now() - startTime;
-    console.log(`✅ Phase 2 complete: Found ${candidates.length} UOA candidates in ${(duration / 1000).toFixed(1)}s`);
+    const status = earlyTermination ? '(early termination)' : '(complete scan)';
+    console.log(`✅ Phase 2 ${status}: Found ${candidates.length} UOA candidates in ${(duration / 1000).toFixed(1)}s`);
     
     return candidates;
   }
