@@ -1,5 +1,20 @@
 import { db } from "./db";
-import { users, marketData, optionsTrade, aiInsights, portfolioPositions, tradeHistory, watchlists, watchlistItems, priceAlerts } from "@shared/schema";
+import { 
+  users, 
+  marketData, 
+  optionsTrade, 
+  aiInsights, 
+  portfolioPositions, 
+  tradeHistory, 
+  watchlists, 
+  watchlistItems, 
+  priceAlerts,
+  marketInsights,
+  performanceMetrics,
+  learningSessions,
+  recommendationTracking,
+  recommendationPerformance
+} from "@shared/schema";
 import { eq, desc, and, sum, count } from "drizzle-orm";
 import type { 
   User, 
@@ -21,7 +36,15 @@ import type {
   PriceAlert,
   InsertPriceAlert,
   PositionPerformance,
-  PerformanceMetrics
+  PerformanceMetrics,
+  MarketInsight,
+  InsertMarketInsight,
+  PerformanceMetricsRow,
+  InsertPerformanceMetricsRow,
+  LearningSession,
+  InsertLearningSession,
+  RecommendationTracking,
+  RecommendationPerformance
 } from "@shared/schema";
 
 export interface IStorage {
@@ -62,6 +85,35 @@ export interface IStorage {
   getPriceAlerts(userId?: string): Promise<PriceAlert[]>;
   updatePriceAlert(alertId: string, updates: Partial<PriceAlert>): Promise<PriceAlert | undefined>;
   checkAndTriggerAlerts(): Promise<PriceAlert[]>;
+}
+
+// AI Learning Storage Interface
+export interface ILearningStorage {
+  // Learning Sessions
+  createLearningSession(session: InsertLearningSession): Promise<LearningSession>;
+  completeLearningSession(sessionId: string, updates: Partial<LearningSession>): Promise<LearningSession | undefined>;
+  getRecentSessions(limit?: number): Promise<LearningSession[]>;
+  getSessionsByType(sessionType: string): Promise<LearningSession[]>;
+  
+  // Market Insights
+  createInsight(insight: InsertMarketInsight): Promise<MarketInsight>;
+  getActiveInsights(filters?: { marketRegime?: string; sector?: string }): Promise<MarketInsight[]>;
+  deactivateInsight(insightId: string, reason: string): Promise<MarketInsight | undefined>;
+  validateInsight(insightId: string): Promise<MarketInsight | undefined>;
+  getAllInsights(): Promise<MarketInsight[]>;
+  
+  // Performance Metrics
+  getMetrics(strategyVersion: string, marketRegime: string, timeframe: string): Promise<PerformanceMetricsRow | undefined>;
+  upsertMetrics(metrics: InsertPerformanceMetricsRow): Promise<PerformanceMetricsRow>;
+  getLatestMetrics(): Promise<PerformanceMetricsRow[]>;
+  
+  // Trade Outcomes (joins recommendation tracking + performance)
+  getTradeOutcomes(filters: {
+    strategyVersion?: string;
+    startDate?: Date;
+    endDate?: Date;
+    closedOnly?: boolean;
+  }): Promise<Array<RecommendationTracking & { performance?: RecommendationPerformance }>>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -462,3 +514,237 @@ export class DatabaseStorage implements IStorage {
 }
 
 export const storage = new DatabaseStorage();
+
+// AI Learning Storage Implementation
+export class DatabaseLearningStorage implements ILearningStorage {
+  // Learning Sessions
+  async createLearningSession(session: InsertLearningSession): Promise<LearningSession> {
+    const [newSession] = await db
+      .insert(learningSessions)
+      .values(session)
+      .returning();
+    return newSession;
+  }
+  
+  async completeLearningSession(sessionId: string, updates: Partial<LearningSession>): Promise<LearningSession | undefined> {
+    const [updated] = await db
+      .update(learningSessions)
+      .set({
+        ...updates,
+        completedAt: updates.completedAt || new Date(),
+        // Respect caller-provided status for error tracking
+        status: updates.status || 'completed'
+      })
+      .where(eq(learningSessions.id, sessionId))
+      .returning();
+    return updated || undefined;
+  }
+  
+  async getRecentSessions(limit: number = 10): Promise<LearningSession[]> {
+    return await db
+      .select()
+      .from(learningSessions)
+      .orderBy(desc(learningSessions.startedAt))
+      .limit(limit);
+  }
+  
+  async getSessionsByType(sessionType: string): Promise<LearningSession[]> {
+    return await db
+      .select()
+      .from(learningSessions)
+      .where(eq(learningSessions.sessionType, sessionType))
+      .orderBy(desc(learningSessions.startedAt));
+  }
+  
+  // Market Insights
+  async createInsight(insight: InsertMarketInsight): Promise<MarketInsight> {
+    const [newInsight] = await db
+      .insert(marketInsights)
+      .values(insight)
+      .returning();
+    return newInsight;
+  }
+  
+  async getActiveInsights(filters?: { marketRegime?: string; sector?: string }): Promise<MarketInsight[]> {
+    let query = db
+      .select()
+      .from(marketInsights)
+      .where(eq(marketInsights.isActive, true));
+    
+    // Note: Additional filtering by marketRegime/sector would be added here
+    // For now, return all active insights
+    return await query.orderBy(desc(marketInsights.confidence));
+  }
+  
+  async deactivateInsight(insightId: string, reason: string): Promise<MarketInsight | undefined> {
+    const [updated] = await db
+      .update(marketInsights)
+      .set({
+        isActive: false,
+        deactivatedReason: reason
+      })
+      .where(eq(marketInsights.id, insightId))
+      .returning();
+    return updated || undefined;
+  }
+  
+  async validateInsight(insightId: string): Promise<MarketInsight | undefined> {
+    const [updated] = await db
+      .update(marketInsights)
+      .set({
+        lastValidatedAt: new Date()
+      })
+      .where(eq(marketInsights.id, insightId))
+      .returning();
+    return updated || undefined;
+  }
+  
+  async getAllInsights(): Promise<MarketInsight[]> {
+    return await db
+      .select()
+      .from(marketInsights)
+      .orderBy(desc(marketInsights.discoveredAt));
+  }
+  
+  // Performance Metrics
+  async getMetrics(strategyVersion: string, marketRegime: string, timeframe: string): Promise<PerformanceMetricsRow | undefined> {
+    const [metrics] = await db
+      .select()
+      .from(performanceMetrics)
+      .where(
+        and(
+          eq(performanceMetrics.strategyVersion, strategyVersion),
+          eq(performanceMetrics.marketRegime, marketRegime),
+          eq(performanceMetrics.timeframe, timeframe)
+        )
+      );
+    return metrics || undefined;
+  }
+  
+  async upsertMetrics(metrics: InsertPerformanceMetricsRow): Promise<PerformanceMetricsRow> {
+    // Try to find existing metrics
+    const existing = await this.getMetrics(
+      metrics.strategyVersion,
+      metrics.marketRegime,
+      metrics.timeframe || '30d'
+    );
+    
+    if (existing) {
+      // Update existing
+      const [updated] = await db
+        .update(performanceMetrics)
+        .set({
+          ...metrics,
+          lastUpdated: new Date()
+        })
+        .where(eq(performanceMetrics.id, existing.id))
+        .returning();
+      return updated;
+    } else {
+      // Insert new
+      const [newMetrics] = await db
+        .insert(performanceMetrics)
+        .values(metrics)
+        .returning();
+      return newMetrics;
+    }
+  }
+  
+  async getLatestMetrics(): Promise<PerformanceMetricsRow[]> {
+    return await db
+      .select()
+      .from(performanceMetrics)
+      .orderBy(desc(performanceMetrics.lastUpdated))
+      .limit(10);
+  }
+  
+  // Trade Outcomes - joins recommendation tracking + performance
+  async getTradeOutcomes(filters: {
+    strategyVersion?: string;
+    startDate?: Date;
+    endDate?: Date;
+    closedOnly?: boolean;
+  }): Promise<Array<RecommendationTracking & { performance?: RecommendationPerformance }>> {
+    // Build base query with left join to performance
+    let query = db
+      .select({
+        // Recommendation tracking fields
+        id: recommendationTracking.id,
+        ticker: recommendationTracking.ticker,
+        optionType: recommendationTracking.optionType,
+        recommendationType: recommendationTracking.recommendationType,
+        strikePrice: recommendationTracking.strikePrice,
+        expiry: recommendationTracking.expiry,
+        entryPrice: recommendationTracking.entryPrice,
+        premium: recommendationTracking.premium,
+        contracts: recommendationTracking.contracts,
+        projectedROI: recommendationTracking.projectedROI,
+        aiConfidence: recommendationTracking.aiConfidence,
+        rsi: recommendationTracking.rsi,
+        vix: recommendationTracking.vix,
+        ema: recommendationTracking.ema,
+        atrShort: recommendationTracking.atrShort,
+        atrLong: recommendationTracking.atrLong,
+        fibonacciLevel: recommendationTracking.fibonacciLevel,
+        delta: recommendationTracking.delta,
+        theta: recommendationTracking.theta,
+        gamma: recommendationTracking.gamma,
+        vega: recommendationTracking.vega,
+        strategyVersion: recommendationTracking.strategyVersion,
+        parameters: recommendationTracking.parameters,
+        status: recommendationTracking.status,
+        recommendedAt: recommendationTracking.recommendedAt,
+        // Performance fields (nullable)
+        performance: {
+          id: recommendationPerformance.id,
+          recommendationId: recommendationPerformance.recommendationId,
+          exitDate: recommendationPerformance.exitDate,
+          exitPrice: recommendationPerformance.exitPrice,
+          exitPremium: recommendationPerformance.exitPremium,
+          actualROI: recommendationPerformance.actualROI,
+          actualProfit: recommendationPerformance.actualProfit,
+          exitReason: recommendationPerformance.exitReason,
+          holdDays: recommendationPerformance.holdDays,
+          maxDrawdown: recommendationPerformance.maxDrawdown,
+          maxProfit: recommendationPerformance.maxProfit,
+          isWin: recommendationPerformance.isWin,
+          isLoss: recommendationPerformance.isLoss,
+          updatedAt: recommendationPerformance.updatedAt,
+          closedAt: recommendationPerformance.closedAt,
+        }
+      })
+      .from(recommendationTracking)
+      .leftJoin(
+        recommendationPerformance,
+        eq(recommendationTracking.id, recommendationPerformance.recommendationId)
+      );
+    
+    // Apply filters
+    const conditions = [];
+    if (filters.strategyVersion) {
+      conditions.push(eq(recommendationTracking.strategyVersion, filters.strategyVersion));
+    }
+    if (filters.startDate) {
+      // Add date range filter (would need proper date comparison)
+      // conditions.push(gte(recommendationTracking.recommendedAt, filters.startDate));
+    }
+    if (filters.closedOnly) {
+      // Filter to only closed trades
+      conditions.push(eq(recommendationTracking.status, 'closed'));
+    }
+    
+    if (conditions.length > 0) {
+      query = query.where(and(...conditions)) as any;
+    }
+    
+    const results = await query;
+    
+    // Transform results to match return type
+    return results.map((row: any) => ({
+      ...row,
+      performance: row.performance?.id ? row.performance : undefined
+    })) as any;
+  }
+}
+
+export const learningStorage = new DatabaseLearningStorage();
