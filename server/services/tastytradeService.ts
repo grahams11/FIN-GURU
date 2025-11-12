@@ -1,5 +1,6 @@
 import axios, { AxiosInstance } from 'axios';
 import WebSocket from 'ws';
+import { normalizeOptionSymbol } from '../utils/optionSymbols';
 
 interface TastytradeSession {
   'session-token': string;
@@ -469,8 +470,11 @@ class TastytradeService {
           const vega = events[i + 8];
           
           if (greeksType === 'Greeks' && symbol && typeof price === 'number' && typeof volatility === 'number') {
+            // Normalize to canonical format before caching (handles any input format)
+            const canonicalSymbol = normalizeOptionSymbol(symbol);
+            
             const optionData: OptionGreeksData = {
-              symbol,
+              symbol: canonicalSymbol,
               premium: price,
               impliedVolatility: volatility,
               greeks: {
@@ -483,17 +487,18 @@ class TastytradeService {
               timestamp: Date.now(),
             };
             
-            // Update cache
-            this.optionsCache.set(symbol, optionData);
+            // Update cache with canonical key
+            this.optionsCache.set(canonicalSymbol, optionData);
             
-            // Resolve pending promise if exists
-            const pending = this.pendingGreeks.get(symbol);
+            // Resolve pending promise if exists (check both original and canonical keys)
+            const pending = this.pendingGreeks.get(symbol) || this.pendingGreeks.get(canonicalSymbol);
             if (pending) {
               pending.resolve(optionData);
               this.pendingGreeks.delete(symbol);
+              this.pendingGreeks.delete(canonicalSymbol);
             }
             
-            console.log(`✅ Option Greeks cached: ${symbol} - Premium $${price.toFixed(2)}, IV ${(volatility * 100).toFixed(1)}%, Delta ${delta.toFixed(4)}`);
+            console.log(`✅ Option Greeks cached: ${symbol} → ${canonicalSymbol} | Premium $${price.toFixed(2)}, IV ${(volatility * 100).toFixed(1)}%, Delta ${delta.toFixed(4)}`);
             greeksProcessed++;
           }
           
@@ -848,6 +853,40 @@ class TastytradeService {
       console.error(`❌ Error getting option quote from Tastytrade: ${error.message}`);
       return null;
     }
+  }
+
+  /**
+   * Get cached option premium from WebSocket stream
+   * Returns cached option data received from Tastytrade DXLink (Greeks events)
+   * @param optionSymbol Option symbol in canonical OCC format (e.g., ".SPY251113C00680000")
+   * @returns Object with premium, bid, ask, timestamp, and source, or null if not cached
+   */
+  getCachedOptionPremium(optionSymbol: string): { premium: number; bid: number; ask: number; timestamp: number; source: 'tastytrade' } | null {
+    // Normalize to canonical format (handles any input format)
+    const canonicalSymbol = normalizeOptionSymbol(optionSymbol);
+
+    const cached = this.optionsCache.get(canonicalSymbol);
+    
+    if (!cached) {
+      return null;
+    }
+    
+    // Check if data is fresh (within 60 seconds)
+    const now = Date.now();
+    const cacheTTL = 60000; // 1 minute
+    if (now - cached.timestamp > cacheTTL) {
+      // Stale data - remove from cache
+      this.optionsCache.delete(canonicalSymbol);
+      return null;
+    }
+    
+    return {
+      premium: cached.premium,
+      bid: cached.quote?.bidPrice || 0,
+      ask: cached.quote?.askPrice || 0,
+      timestamp: cached.timestamp,
+      source: 'tastytrade'
+    };
   }
 
   /**

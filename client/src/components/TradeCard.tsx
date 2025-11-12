@@ -5,12 +5,20 @@ import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { OptionsTrade, Greeks } from "@shared/schema";
 
+interface OptionPremium {
+  premium: number;
+  bid: number;
+  ask: number;
+  source: 'polygon' | 'tastytrade' | 'model';
+}
+
 interface Quote {
   price: number;
   bid: number;
   ask: number;
   volume: number;
   timestamp: number;
+  source?: string;
   greeks?: {
     delta: number;
     gamma: number;
@@ -18,6 +26,7 @@ interface Quote {
     vega: number;
     rho: number;
   };
+  option?: OptionPremium;
 }
 
 interface TradeCardProps {
@@ -45,6 +54,11 @@ export function TradeCard({ trade, rank, liveQuotes }: TradeCardProps) {
   const liveGreeks = liveQuotes?.[trade.ticker]?.greeks;
   const displayGreeks = liveGreeks || (trade.greeks as Greeks);
   const areGreeksLive = !!liveGreeks;
+  
+  // Get live option premium from SSE if available
+  const liveOptionPremium = liveQuotes?.[trade.ticker]?.option;
+  const displayPremium = liveOptionPremium?.premium ?? trade.premium ?? trade.entryPrice;
+  const isPremiumLive = !!liveOptionPremium && (liveOptionPremium.source === 'polygon' || liveOptionPremium.source === 'tastytrade');
 
   const executeMutation = useMutation({
     mutationFn: () => apiRequest("POST", `/api/execute-trade/${trade.id}`),
@@ -160,14 +174,19 @@ export function TradeCard({ trade, rank, liveQuotes }: TradeCardProps) {
             </p>
           </div>
           <div>
-            <p className="text-xs text-muted-foreground uppercase tracking-wide">Premium/Contract</p>
+            <p className="text-xs text-muted-foreground uppercase tracking-wide flex items-center space-x-1">
+              <span>Premium/Contract</span>
+              {isPremiumLive && <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" title={`Live Premium from ${liveOptionPremium?.source}`}></span>}
+            </p>
             <div className="flex items-center space-x-1">
               <p className="text-sm font-medium text-accent" data-testid={`premium-${trade.ticker}`}>
-                ${formatNumber(trade.premium ?? trade.entryPrice)}
+                ${formatNumber(displayPremium)}
               </p>
-              <span className="text-[10px] text-muted-foreground bg-muted px-1 rounded" title="Estimated using Black-Scholes model. Verify with your broker before trading.">
-                EST
-              </span>
+              {!isPremiumLive && (
+                <span className="text-[10px] text-muted-foreground bg-muted px-1 rounded" title="Estimated using Black-Scholes model. Verify with your broker before trading.">
+                  EST
+                </span>
+              )}
             </div>
           </div>
           <div>

@@ -11,6 +11,7 @@ import { exitAnalysisService } from "./services/exitAnalysis";
 import { portfolioAnalysisEngine } from "./services/portfolioAnalysisEngine";
 import { Ghost1DTEService } from "./services/ghost1DTE";
 import { insertMarketDataSchema, insertOptionsTradeSchema, insertAiInsightsSchema, insertPortfolioPositionSchema, type OptionsTrade } from "@shared/schema";
+import { formatOptionSymbol, toPolygonSubscriptionTopic, toTastytradeOptionSymbol } from "./utils/optionSymbols";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Server-Sent Events endpoint for real-time quote streaming with live Greeks
@@ -32,26 +33,61 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const topTrades = await storage.getTopTrades();
     const tradeMap = new Map<string, OptionsTrade>();
     const symbols: string[] = [];
+    const optionSymbols: string[] = [];
     
     topTrades.forEach(trade => {
       tradeMap.set(trade.ticker, trade);
-      symbols.push(trade.ticker); // Use ticker, not symbol
+      symbols.push(trade.ticker); // Underlying ticker for stock quotes
+      
+      // Generate option symbol for live premium streaming
+      const optionSym = trade.optionSymbol || formatOptionSymbol(
+        trade.ticker,
+        trade.expiry,
+        trade.optionType || 'call',
+        trade.strikePrice
+      );
+      
+      if (optionSym) {
+        optionSymbols.push(optionSym);
+      }
     });
     
-    console.log(`📡 SSE connection established for ${symbols.length} symbols: ${symbols.join(', ')}`);
+    console.log(`📡 SSE connection established for ${symbols.length} underlying symbols: ${symbols.join(', ')}`);
+    console.log(`📡 SSE connection established for ${optionSymbols.length} option contracts: ${optionSymbols.slice(0, 3).join(', ')}${optionSymbols.length > 3 ? '...' : ''}`);
     console.log(`📊 Live Greeks enabled for ${topTrades.length} trades: ${Array.from(tradeMap.keys()).join(', ')}`);
     
-    // Subscribe to symbols via Polygon (primary source)
+    // Subscribe to underlying symbols via Polygon for stock prices
     if (polygonService.isServiceConnected() && symbols.length > 0) {
       polygonService.subscribeToSymbols(symbols).catch(err => {
-        console.warn('⚠️ Polygon subscription failed:', err.message);
+        console.warn('⚠️ Polygon stock subscription failed:', err.message);
       });
     }
     
-    // Subscribe to symbols via Tastytrade (secondary source)
+    // Subscribe to option symbols via Polygon for live premiums
+    // Convert canonical symbols to Polygon WebSocket format (O:SPY251113C00680000)
+    if (polygonService.isServiceConnected() && optionSymbols.length > 0) {
+      const polygonTopics = optionSymbols.map(sym => toPolygonSubscriptionTopic(sym));
+      const polygonOptionPatterns = polygonTopics.flatMap(topic => [`T.${topic}`, `Q.${topic}`]); // Trade and Quote messages
+      console.log(`📡 Subscribing to Polygon option patterns: ${polygonOptionPatterns.slice(0, 3).join(', ')}${polygonOptionPatterns.length > 3 ? '...' : ''}`);
+      polygonService.subscribeToOptionTrades(polygonOptionPatterns).catch(err => {
+        console.warn('⚠️ Polygon option subscription failed:', err.message);
+      });
+    }
+    
+    // Subscribe to underlying symbols via Tastytrade for stock prices
     if (tastytradeService.isServiceConnected() && symbols.length > 0) {
       tastytradeService.subscribeToSymbols(symbols).catch(err => {
-        console.warn('⚠️ Tastytrade subscription failed:', err.message);
+        console.warn('⚠️ Tastytrade stock subscription failed:', err.message);
+      });
+    }
+    
+    // Subscribe to option symbols via Tastytrade for live premiums
+    // Convert canonical symbols to Tastytrade format (.SPY251113C00680000) - same as canonical
+    if (tastytradeService.isServiceConnected() && optionSymbols.length > 0) {
+      const tastySymbols = optionSymbols.map(sym => toTastytradeOptionSymbol(sym));
+      console.log(`📡 Subscribing to Tastytrade option symbols: ${tastySymbols.slice(0, 3).join(', ')}${tastySymbols.length > 3 ? '...' : ''}`);
+      tastytradeService.subscribeToOptionSymbols(tastySymbols).catch(err => {
+        console.warn('⚠️ Tastytrade option subscription failed:', err.message);
       });
     }
     
@@ -91,6 +127,65 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     };
     
+    // Helper function to fetch live option premium
+    const getOptionPremium = async (trade: OptionsTrade): Promise<{ premium: number; bid: number; ask: number; source: 'polygon' | 'tastytrade' | 'model' } | null> => {
+      try {
+        // Get option symbol (use existing or generate)
+        let optionSymbol = trade.optionSymbol;
+        if (!optionSymbol) {
+          optionSymbol = formatOptionSymbol(
+            trade.ticker,
+            trade.expiry,
+            trade.optionType || 'call',
+            trade.strikePrice
+          );
+        }
+        
+        if (!optionSymbol) {
+          return null;
+        }
+        
+        // Data Source Hierarchy: Polygon → Tastytrade → Model (trade.premium)
+        
+        // 1. Try Polygon WebSocket cache first
+        const polygonOption = polygonService.getCachedOptionQuote(optionSymbol);
+        if (polygonOption) {
+          return {
+            premium: polygonOption.premium,
+            bid: polygonOption.bid,
+            ask: polygonOption.ask,
+            source: 'polygon'
+          };
+        }
+        
+        // 2. Try Tastytrade cache
+        const tastyOption = tastytradeService.getCachedOptionPremium(optionSymbol);
+        if (tastyOption) {
+          return {
+            premium: tastyOption.premium,
+            bid: tastyOption.bid,
+            ask: tastyOption.ask,
+            source: 'tastytrade'
+          };
+        }
+        
+        // 3. Fallback to model premium (from trade record)
+        if (trade.premium && trade.premium > 0) {
+          return {
+            premium: trade.premium,
+            bid: 0,
+            ask: 0,
+            source: 'model'
+          };
+        }
+        
+        return null;
+      } catch (error) {
+        console.error(`Error fetching option premium for ${trade.ticker}:`, error);
+        return null;
+      }
+    };
+    
     // Send initial quotes immediately
     const sendQuotes = async () => {
       const quotes: Record<string, any> = {};
@@ -118,6 +213,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
               quote.greeks = liveGreeks;
               console.log(`✅ ${symbol}: Live Greeks calculated - Delta: ${liveGreeks.delta.toFixed(4)}, Gamma: ${liveGreeks.gamma.toFixed(4)}, Theta: ${liveGreeks.theta.toFixed(4)}`);
             }
+            
+            // Fetch live option premium for this trade
+            const optionPremium = await getOptionPremium(trade);
+            if (optionPremium) {
+              quote.option = optionPremium;
+            }
           }
           
           quotes[symbol] = quote;
@@ -143,6 +244,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
             if (liveGreeks) {
               quote.greeks = liveGreeks;
               console.log(`✅ ${symbol}: Live Greeks calculated - Delta: ${liveGreeks.delta.toFixed(4)}, Gamma: ${liveGreeks.gamma.toFixed(4)}, Theta: ${liveGreeks.theta.toFixed(4)}`);
+            }
+            
+            // Fetch live option premium for this trade
+            const optionPremium = await getOptionPremium(trade);
+            if (optionPremium) {
+              quote.option = optionPremium;
             }
           }
           
@@ -181,6 +288,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 if (liveGreeks) {
                   quote.greeks = liveGreeks;
                 }
+                
+                // Fetch live option premium for this trade
+                const optionPremium = await getOptionPremium(trade);
+                if (optionPremium) {
+                  quote.option = optionPremium;
+                }
               }
               
               quotes[symbol] = quote;
@@ -211,6 +324,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
             const liveGreeks = calculateLiveGreeks(trade, cachedScrape.price);
             if (liveGreeks) {
               quote.greeks = liveGreeks;
+            }
+            
+            // Fetch live option premium for this trade
+            const optionPremium = await getOptionPremium(trade);
+            if (optionPremium) {
+              quote.option = optionPremium;
             }
           }
           
@@ -452,8 +571,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
               ? rec.estimatedProfit
               : null;
             
+            // Generate option symbol in OCC format for live premium fetching
+            const optionSymbol = formatOptionSymbol(
+              rec.ticker,
+              rec.expiry,
+              rec.optionType || 'call',
+              rec.strikePrice
+            );
+            
             return await storage.createOptionsTrade({
               ticker: rec.ticker,
+              optionSymbol: optionSymbol || undefined,
               optionType: rec.optionType,
               currentPrice: rec.currentPrice,
               strikePrice: rec.strikePrice,

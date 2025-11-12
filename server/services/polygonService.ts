@@ -1,6 +1,7 @@
 import WebSocket from 'ws';
 import axios from 'axios';
 import { alphaVantageService } from './alphaVantageService';
+import { normalizeOptionSymbol } from '../utils/optionSymbols';
 
 /**
  * Polygon API Rate Limiter
@@ -134,6 +135,17 @@ interface PolygonQuoteMessage {
   x: number; // Exchange ID
 }
 
+interface PolygonOptionQuoteMessage {
+  ev: 'Q'; // Quote event
+  sym: string; // Option symbol (e.g., "O:NVDA251113C00680000")
+  bp: number; // Bid price
+  bs: number; // Bid size
+  ap: number; // Ask price
+  as: number; // Ask size
+  t: number; // Timestamp (Unix ms)
+  x?: number; // Exchange ID
+}
+
 interface PolygonAggregateMessage {
   ev: 'A' | 'AM'; // Aggregate (per second) or Aggregate (per minute)
   sym: string; // Symbol
@@ -156,7 +168,7 @@ export interface PolygonOptionTradeMessage {
   x?: number; // Exchange ID
 }
 
-type PolygonMessage = PolygonTradeMessage | PolygonQuoteMessage | PolygonAggregateMessage | PolygonOptionTradeMessage | { ev: 'status', status: string, message: string };
+type PolygonMessage = PolygonTradeMessage | PolygonQuoteMessage | PolygonOptionQuoteMessage | PolygonAggregateMessage | PolygonOptionTradeMessage | { ev: 'status', status: string, message: string };
 
 enum ConnectionStatus {
   DISCONNECTED = 'disconnected',
@@ -181,9 +193,12 @@ class PolygonService {
   private connectionStatus: ConnectionStatus = ConnectionStatus.DISCONNECTED;
   private quoteFreshnessThreshold = 10000; // 10 seconds - quotes older than this are considered stale
   
-  // Options quote caching (short-lived cache for scan optimization)
-  private optionsQuoteCache: Map<string, { data: any; timestamp: number }> = new Map();
+  // Options quote caching (live option premium data from WebSocket)
+  private optionsQuoteCache: Map<string, { premium: number; bid: number; ask: number; timestamp: number }> = new Map();
   private optionsCacheTTL = 60000; // 1 minute cache for options quotes
+  
+  // Options REST API cache (for REST endpoint responses)
+  private optionsRestCache: Map<string, { data: any; timestamp: number }> = new Map();
 
   // Rate limiter instance
   private rateLimiter = PolygonRateLimiter.getInstance();
@@ -479,7 +494,13 @@ class PolygonService {
             this.handleTradeMessage(tradeMessage);
           }
         } else if (message.ev === 'Q') {
-          this.handleQuoteMessage(message as PolygonQuoteMessage);
+          const quoteMessage = message as PolygonQuoteMessage;
+          // Check if this is an option quote (symbol starts with "O:")
+          if (quoteMessage.sym && quoteMessage.sym.startsWith('O:')) {
+            this.handleOptionQuoteMessage(quoteMessage as PolygonOptionQuoteMessage);
+          } else {
+            this.handleQuoteMessage(quoteMessage);
+          }
         } else if (message.ev === 'A' || message.ev === 'AM') {
           this.handleAggregateMessage(message as PolygonAggregateMessage);
         }
@@ -588,6 +609,32 @@ class PolygonService {
   }
 
   /**
+   * Handle option quote messages (Q.O:*)
+   */
+  private handleOptionQuoteMessage(quote: PolygonOptionQuoteMessage): void {
+    const symbol = quote.sym;
+    const bidPrice = quote.bp;
+    const askPrice = quote.ap;
+    const timestamp = quote.t;
+
+    // Calculate premium as midpoint of bid/ask
+    const premium = (bidPrice + askPrice) / 2;
+
+    // Normalize to canonical format before caching (O:SPY251113C00680000 → .SPY251113C00680000)
+    const canonicalSymbol = normalizeOptionSymbol(symbol);
+
+    // Update options quote cache with canonical key
+    this.optionsQuoteCache.set(canonicalSymbol, {
+      premium,
+      bid: bidPrice,
+      ask: askPrice,
+      timestamp
+    });
+
+    console.log(`📊 Polygon Option Quote: ${symbol} → ${canonicalSymbol} | Bid $${bidPrice.toFixed(2)} Ask $${askPrice.toFixed(2)} Premium $${premium.toFixed(2)}`);
+  }
+
+  /**
    * Handle option trade messages - dispatch to registered callbacks
    */
   private handleOptionTradeMessage(trade: PolygonOptionTradeMessage): void {
@@ -693,6 +740,39 @@ class PolygonService {
 
     // No WebSocket data available - return null to let fallback sources handle it
     return null;
+  }
+
+  /**
+   * Get cached option quote from WebSocket stream
+   * Returns live option premium data received from Polygon WebSocket (Q.O:* messages)
+   * @param optionSymbol Option symbol in canonical OCC format (e.g., ".SPY251113C00680000")
+   * @returns Object with premium, bid, ask, timestamp, and source, or null if not cached
+   */
+  getCachedOptionQuote(optionSymbol: string): { premium: number; bid: number; ask: number; timestamp: number; source: 'polygon' } | null {
+    // Normalize to canonical format (handles any input format)
+    const canonicalSymbol = normalizeOptionSymbol(optionSymbol);
+
+    const cached = this.optionsQuoteCache.get(canonicalSymbol);
+    
+    if (!cached) {
+      return null;
+    }
+    
+    // Check if quote is fresh (within TTL)
+    const now = Date.now();
+    if (now - cached.timestamp > this.optionsCacheTTL) {
+      // Stale data - remove from cache
+      this.optionsQuoteCache.delete(canonicalSymbol);
+      return null;
+    }
+    
+    return {
+      premium: cached.premium,
+      bid: cached.bid,
+      ask: cached.ask,
+      timestamp: cached.timestamp,
+      source: 'polygon'
+    };
   }
 
   /**

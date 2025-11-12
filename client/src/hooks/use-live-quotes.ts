@@ -1,11 +1,27 @@
 import { useState, useEffect, useRef } from 'react';
 
+interface OptionPremium {
+  premium: number;
+  bid: number;
+  ask: number;
+  source: 'polygon' | 'tastytrade' | 'model';
+}
+
 interface Quote {
   price: number;
   bid: number;
   ask: number;
   volume: number;
   timestamp: number;
+  source?: string;
+  greeks?: {
+    delta: number;
+    gamma: number;
+    theta: number;
+    vega: number;
+    rho: number;
+  };
+  option?: OptionPremium;
 }
 
 type QuotesMap = Record<string, Quote>;
