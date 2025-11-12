@@ -267,6 +267,9 @@ export class Ghost1DTEService {
   // IV percentile cache (252-day lookback)
   private static ivPercentileCache: Map<string, number> = new Map();
   
+  // HV distribution cache (252-day rolling 30-day HV values for percentile calculation)
+  private static hvDistributionCache: Map<string, { distribution: number[]; lastUpdated: string }> = new Map();
+  
   // PHASE 4: Symbol-level caches (refreshed per scan)
   private static maxPainCache: Map<string, number> = new Map();
   private static ivSkewCache: Map<string, { callIV: number; putIV: number }> = new Map();
@@ -300,7 +303,7 @@ export class Ghost1DTEService {
     // Bulk fetch historical data for all symbols
     const endDate = new Date();
     const startDate = new Date();
-    startDate.setDate(startDate.getDate() - 35); // 35-day buffer
+    startDate.setDate(startDate.getDate() - 380); // 380 calendar days to ensure 252 trading days
     
     const bulkBars = await polygonService.getBulkHistoricalBars(
       this.SYMBOLS,
@@ -315,7 +318,17 @@ export class Ghost1DTEService {
         const bars = bulkBars.get(symbol.toUpperCase());
         const hv = this.calculate30DayHVFromBars(bars);
         this.hvCache.set(symbol, hv);
-        console.log(`${symbol} 30d HV: ${(hv * 100).toFixed(2)}%`);
+        
+        // Build 252-day HV distribution for IV percentile calculation
+        const hvDistribution = this.buildHVDistributionFromBars(bars);
+        if (hvDistribution.length > 0) {
+          this.hvDistributionCache.set(symbol, {
+            distribution: hvDistribution,
+            lastUpdated: new Date().toISOString().split('T')[0]
+          });
+        }
+        
+        console.log(`${symbol} 30d HV: ${(hv * 100).toFixed(2)}%, 252d Distribution: ${hvDistribution.length} points`);
       } catch (error) {
         console.error(`Error loading HV for ${symbol}:`, error);
         this.hvCache.set(symbol, 0.20); // Default 20% if unavailable
@@ -356,6 +369,59 @@ export class Ghost1DTEService {
   }
   
   /**
+   * Build 252-day HV distribution from historical bars
+   * Computes rolling 30-day HV windows to create IV percentile lookup distribution
+   * This reuses already-fetched historical data (no additional API calls)
+   * Requires at least 252 trading days of data (fetched as ~380 calendar days)
+   */
+  private static buildHVDistributionFromBars(bars: any[] | null | undefined): number[] {
+    try {
+      if (!bars || bars.length < 252) {
+        console.warn(`⚠️ Insufficient bars for 252-day distribution: ${bars?.length || 0} bars`);
+        return []; // Need at least 252 trading days
+      }
+      
+      // Sort bars chronologically (oldest first)
+      const sortedBars = [...bars].sort((a, b) => 
+        new Date(a.t).getTime() - new Date(b.t).getTime()
+      );
+      
+      const hvDistribution: number[] = [];
+      const windowSize = 30; // 30-day rolling window
+      
+      // Slide a 30-day window across the 252-day period
+      for (let i = windowSize; i < sortedBars.length; i++) {
+        const windowBars = sortedBars.slice(i - windowSize, i);
+        
+        // Calculate 30-day HV for this window
+        const returns: number[] = [];
+        for (let j = 1; j < windowBars.length; j++) {
+          const logReturn = Math.log(windowBars[j].c / windowBars[j - 1].c);
+          returns.push(logReturn);
+        }
+        
+        if (returns.length === 0) continue;
+        
+        // Calculate standard deviation and annualize
+        const mean = returns.reduce((sum, r) => sum + r, 0) / returns.length;
+        const variance = returns.reduce((sum, r) => sum + Math.pow(r - mean, 2), 0) / returns.length;
+        const dailyVol = Math.sqrt(variance);
+        const annualizedHV = dailyVol * Math.sqrt(252);
+        
+        hvDistribution.push(annualizedHV);
+      }
+      
+      // Sort distribution for percentile calculation
+      hvDistribution.sort((a, b) => a - b);
+      
+      return hvDistribution;
+    } catch (error) {
+      console.error(`Error building HV distribution from bars:`, error);
+      return [];
+    }
+  }
+  
+  /**
    * Main Ghost 1DTE Scan (Grok Phase 4 Enhanced)
    * Triggered in 2:00-3:00pm CST window daily
    * Returns top 3 overnight plays with 94.1%+ win rate
@@ -389,10 +455,10 @@ export class Ghost1DTEService {
     this.rsiCache.clear();
     
     // BULK OPTIMIZATION: Fetch historical bars for all symbols in parallel (3 API calls made simultaneously)
-    // This data is shared by both HV/VRP and RSI calculations
+    // This data is shared by HV/VRP, RSI, and IV percentile calculations
     const endDate = new Date();
     const startDate = new Date();
-    startDate.setDate(startDate.getDate() - 35); // 35-day buffer for 30-day calculations
+    startDate.setDate(startDate.getDate() - 380); // 380 calendar days to ensure 252 trading days
     
     console.log('\n📊 Fetching bulk historical data for Phase 4...');
     const bulkBarsCache = await polygonService.getBulkHistoricalBars(
@@ -460,6 +526,19 @@ export class Ghost1DTEService {
         // Calculate RSI once per symbol using bulk-fetched historical bars
         const symbolBars = bulkBarsCache.get(symbol.toUpperCase());
         const rsi = this.calculateSymbolRSIFromBars(symbolBars);
+        
+        // Ensure HV distribution is cached for IV percentile calculation (if not already cached from initialization)
+        const today = new Date().toISOString().split('T')[0];
+        const cached = this.hvDistributionCache.get(symbol);
+        if (!cached || cached.lastUpdated !== today) {
+          const hvDistribution = this.buildHVDistributionFromBars(symbolBars);
+          if (hvDistribution.length > 0) {
+            this.hvDistributionCache.set(symbol, {
+              distribution: hvDistribution,
+              lastUpdated: today
+            });
+          }
+        }
         
         if (maxPain) this.maxPainCache.set(symbol, maxPain);
         if (ivSkew) this.ivSkewCache.set(symbol, ivSkew);
@@ -867,19 +946,42 @@ export class Ghost1DTEService {
   
   /**
    * Calculate IV percentile over last 252 trading days
+   * Uses cached 252-day rolling HV distribution as IV proxy (strong correlation)
+   * Returns percentile rank (0-100) where current IV sits in historical distribution
    */
   private static async calculateIVPercentile(symbol: string, currentIV: number): Promise<number> {
-    // Simplified: Use cached value or estimate
-    // In production, would query 252-day IV history
-    const cached = this.ivPercentileCache.get(symbol);
-    if (cached !== undefined) return cached;
-    
-    // Estimate based on current IV vs HV
-    const hv30d = this.hvCache.get(symbol) || 0.20;
-    const percentile = currentIV < hv30d ? 15 : 50; // Simplified
-    
-    this.ivPercentileCache.set(symbol, percentile);
-    return percentile;
+    try {
+      // Get cached HV distribution for this symbol
+      const cached = this.hvDistributionCache.get(symbol);
+      
+      if (!cached || cached.distribution.length === 0) {
+        // Fallback if distribution not available
+        console.warn(`⚠️ No HV distribution for ${symbol}, using fallback`);
+        const hv30d = this.hvCache.get(symbol) || 0.20;
+        return currentIV < hv30d ? 10 : 50; // Conservative fallback
+      }
+      
+      const distribution = cached.distribution;
+      
+      // Binary search to find where currentIV ranks in the sorted distribution
+      let rank = 0;
+      for (const hv of distribution) {
+        if (currentIV > hv) {
+          rank++;
+        } else {
+          break;
+        }
+      }
+      
+      // Calculate percentile (0-100)
+      const percentile = (rank / distribution.length) * 100;
+      
+      return Math.round(percentile * 10) / 10; // Round to 1 decimal
+      
+    } catch (error) {
+      console.error(`Error calculating IV percentile for ${symbol}:`, error);
+      return 50; // Neutral fallback on error
+    }
   }
   
   /**
