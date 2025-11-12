@@ -466,14 +466,15 @@ export class UoaScannerService {
         displayText: `${candidate.ticker} ${candidate.strike}${candidate.optionType === 'call' ? 'C' : 'P'} @ $${candidate.premium.toFixed(2)}`,
         scanTime: now,
         cacheExpiry,
-        // Phase 4 metadata (for UI display)
+        // Scanner Type & Phase 4 Intelligence
+        scannerType: 'uoa',
         phase4Score: phase4Score.totalScore,
         phase4Layer1: phase4Score.layer1,
         phase4Layer2: phase4Score.layer2,
         phase4Layer3: phase4Score.layer3,
         phase4Layer4: phase4Score.layer4,
         phase4ActiveLayers: phase4Score.activeLayers,
-      } as any); // TODO: Update schema to include phase4 fields
+      });
     }
     
     // Sort by hybrid score descending

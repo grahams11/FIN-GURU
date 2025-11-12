@@ -361,6 +361,15 @@ export const uoaTrades = pgTable("uoa_trades", {
   scanTime: timestamp("scan_time").notNull(), // When this was scanned
   cacheExpiry: timestamp("cache_expiry").notNull(), // When to refresh (scan_time + 20-30s)
   createdAt: timestamp("created_at").defaultNow(),
+  
+  // Scanner Type & Phase 4 Enhancement (Added 11/12/2025)
+  scannerType: text("scanner_type"), // 'uoa' | 'elite' - differentiates scanner source
+  phase4Score: real("phase4_score"), // Total Phase 4 score (0-100), null for legacy/Elite
+  phase4Layer1: real("phase4_layer1"), // Max Pain + Gamma Trap (0-30)
+  phase4Layer2: real("phase4_layer2"), // IV Skew Inversion (0-25)
+  phase4Layer3: real("phase4_layer3"), // Ghost Sweep Detection (0-30)
+  phase4Layer4: real("phase4_layer4"), // RSI Extreme + DTE (0-15)
+  phase4ActiveLayers: integer("phase4_active_layers"), // Count of active layers (0-4)
 }, (table) => ({
   // Performance indexes for fast cache queries (<100ms target)
   cacheExpiryIdx: {
