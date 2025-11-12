@@ -387,8 +387,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       // Instantly return whatever trades exist (empty array if none)
       // NO BLOCKING - background workers handle scanning
-      const trades = await storage.getTopTrades();
-      res.json(trades);
+      const allTrades = await storage.getTopTrades();
+      
+      // Filter out stale/invalid recommendations
+      const { RecommendationValidator } = await import('./services/recommendationValidator');
+      const validTrades = await RecommendationValidator.filterValidRecommendations(allTrades);
+      
+      res.json(validTrades);
     } catch (error) {
       console.error('Error fetching top trades:', error);
       res.status(500).json({ message: 'Failed to fetch trade recommendations' });
