@@ -4,14 +4,14 @@ import { alphaVantageService } from './alphaVantageService';
 
 /**
  * Polygon API Rate Limiter
- * Enforces 5 REST API calls per minute globally across the application
- * Free tier limit: 5 calls/minute
+ * Enforces 25 REST API calls per minute globally across the application
+ * Advanced Options Plan: Unlimited API calls (using conservative 25/min limit)
  * Thread-safe for concurrent calls using promise queue
  */
 class PolygonRateLimiter {
   private static instance: PolygonRateLimiter | null = null;
   private callTimestamps: number[] = [];
-  private readonly MAX_CALLS_PER_MINUTE = 5;
+  private readonly MAX_CALLS_PER_MINUTE = 25;
   private readonly MINUTE_MS = 60000;
   private queue: Array<() => void> = [];
   private processing = false;
@@ -54,13 +54,13 @@ class PolygonRateLimiter {
         timestamp => now - timestamp < this.MINUTE_MS
       );
 
-      // If we've made 5 calls in the last minute, wait
+      // If we've made MAX calls in the last minute, wait
       if (this.callTimestamps.length >= this.MAX_CALLS_PER_MINUTE) {
         const oldestCall = this.callTimestamps[0];
         const waitTime = this.MINUTE_MS - (now - oldestCall) + 200; // +200ms buffer
         
         if (waitTime > 0) {
-          console.log(`⏳ Rate limit: Waiting ${(waitTime/1000).toFixed(1)}s (${this.callTimestamps.length}/5 calls used, ${this.queue.length} queued)`);
+          console.log(`⏳ Rate limit: Waiting ${(waitTime/1000).toFixed(1)}s (${this.callTimestamps.length}/${this.MAX_CALLS_PER_MINUTE} calls used, ${this.queue.length} queued)`);
           await new Promise(resolve => setTimeout(resolve, waitTime));
           continue; // Re-check after waiting
         }
