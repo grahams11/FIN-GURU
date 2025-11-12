@@ -30,6 +30,11 @@ Preferred communication style: Simple, everyday language.
 - **Database**: PostgreSQL with Drizzle ORM.
 - **Schema**: Normalized tables for users, market data, options trades, and AI insights.
 - **Storage Strategy**: In-memory storage with an interface for database swapping.
+- **AI Learning Schema (11/12/2025)**: 
+  - `marketInsights`: AI-discovered patterns with structured conditions (JSON), win rate, confidence metrics, market regime/sector filters. Indexed for fast active insight lookup.
+  - `performanceMetrics`: Materialized aggregates by (strategy_version, market_regime, timeframe) with rolling-window stats (win rate, avg ROI, Sharpe ratio, profit factor). Indexed by strategy + regime for fast querying.
+  - `learningSessions`: Audit trail for each AI learning run (outcome analysis, pattern discovery, parameter optimization) with Grok reasoning, findings summary, and generated artifacts.
+  - Enhanced indexes on `recommendationTracking` and `recommendationPerformance` for efficient learning queries by strategy version and closed date.
 
 ## Core Business Logic
 

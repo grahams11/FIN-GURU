@@ -195,7 +195,18 @@ export const recommendationTracking = pgTable("recommendation_tracking", {
   // Status tracking
   status: text("status").notNull().default('pending'), // 'pending' | 'monitoring' | 'closed' | 'expired'
   recommendedAt: timestamp("recommended_at").defaultNow(),
-});
+}, (table) => ({
+  // Fast lookup by strategy version and date for learning analysis
+  strategyVersionIdx: {
+    columns: [table.strategyVersion, table.recommendedAt],
+    name: "idx_tracking_strategy_date",
+  },
+  // GIN index for JSONB parameters filtering
+  parametersIdx: {
+    columns: [table.parameters],
+    name: "idx_tracking_parameters",
+  },
+}));
 
 // Elite Strategy: Performance Monitoring
 export const recommendationPerformance = pgTable("recommendation_performance", {
@@ -222,7 +233,13 @@ export const recommendationPerformance = pgTable("recommendation_performance", {
   // Performance tracking
   updatedAt: timestamp("updated_at").defaultNow(),
   closedAt: timestamp("closed_at"),
-});
+}, (table) => ({
+  // Fast lookup for learning analysis
+  recommendationClosedIdx: {
+    columns: [table.recommendationId, table.closedAt],
+    name: "idx_performance_rec_closed",
+  },
+}));
 
 // Elite Strategy: Adaptive Parameter History
 export const strategyParameters = pgTable("strategy_parameters", {
@@ -437,6 +454,122 @@ export const insertUoaTradeSchema = createInsertSchema(uoaTrades).omit({
   createdAt: true,
 });
 
+// AI Learning: Market Insights (AI-discovered patterns)
+export const marketInsights = pgTable("market_insights", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  insightType: text("insight_type").notNull(), // 'pattern' | 'correlation' | 'regime' | 'anomaly'
+  pattern: text("pattern").notNull(), // Human-readable pattern description
+  conditions: jsonb("conditions").notNull(), // Structured conditions {rsi: '<25', vix: '>20', sector: 'tech'}
+  winRate: real("win_rate").notNull(), // Historical win rate for this pattern
+  sampleSize: integer("sample_size").notNull(), // Number of trades matching this pattern
+  avgROI: real("avg_roi"), // Average ROI when pattern occurs
+  confidence: real("confidence").notNull(), // Statistical confidence (0-1)
+  discoveredBy: text("discovered_by").notNull(), // 'grok_analysis' | 'backtest' | 'manual'
+  marketRegime: text("market_regime"), // 'bull' | 'bear' | 'volatile' | 'choppy' | null (applies to all)
+  sector: text("sector"), // Specific sector or null (applies to all)
+  discoveredAt: timestamp("discovered_at").defaultNow(),
+  lastValidatedAt: timestamp("last_validated_at"),
+  isActive: boolean("is_active").default(true), // Deactivate if pattern stops working
+  deactivatedReason: text("deactivated_reason"),
+}, (table) => ({
+  // Fast lookup for active, high-confidence insights
+  activeConfidenceIdx: {
+    columns: [table.isActive, table.confidence],
+    name: "idx_insights_active_confidence",
+  },
+  // GIN index for JSONB conditions filtering
+  conditionsIdx: {
+    columns: [table.conditions],
+    name: "idx_insights_conditions",
+  },
+}));
+
+// AI Learning: Performance Metrics (Materialized aggregates)
+export const performanceMetrics = pgTable("performance_metrics", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  strategyVersion: text("strategy_version").notNull(),
+  marketRegime: text("market_regime").notNull(), // 'bull' | 'bear' | 'volatile' | 'choppy' | 'all'
+  timeframe: text("timeframe").notNull().default('30d'), // '7d' | '30d' | '90d' | 'all_time'
+  
+  // Performance stats
+  winRate: real("win_rate").notNull(), // Percentage of winning trades
+  avgROI: real("avg_roi").notNull(), // Average return on investment
+  profitFactor: real("profit_factor"), // Gross profit / gross loss
+  sharpeRatio: real("sharpe_ratio"), // Risk-adjusted return
+  maxDrawdown: real("max_drawdown"), // Maximum peak-to-trough decline
+  
+  // Sample size
+  totalTrades: integer("total_trades").notNull(),
+  winningTrades: integer("winning_trades").notNull(),
+  losingTrades: integer("losing_trades").notNull(),
+  
+  // Breakdown by option type
+  callWinRate: real("call_win_rate"),
+  putWinRate: real("put_win_rate"),
+  
+  // Metadata
+  periodStart: timestamp("period_start").notNull(),
+  periodEnd: timestamp("period_end").notNull(),
+  lastUpdated: timestamp("last_updated").defaultNow(),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => ({
+  // Fast lookup by strategy + regime
+  strategyRegimeIdx: {
+    columns: [table.strategyVersion, table.marketRegime, table.timeframe],
+    name: "idx_metrics_strategy_regime",
+  },
+  // Fast lookup for latest metrics
+  updatedIdx: {
+    columns: [table.lastUpdated],
+    name: "idx_metrics_updated",
+  },
+}));
+
+// AI Learning: Learning Sessions (Audit trail)
+export const learningSessions = pgTable("learning_sessions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  sessionType: text("session_type").notNull(), // 'outcome_analysis' | 'pattern_discovery' | 'parameter_optimization'
+  analysisPeriod: jsonb("analysis_period").notNull(), // {startDate, endDate}
+  tradesAnalyzed: integer("trades_analyzed").notNull(),
+  insightsGenerated: integer("insights_generated").default(0),
+  parametersAdjusted: boolean("parameters_adjusted").default(false),
+  newStrategyVersion: text("new_strategy_version"),
+  previousStrategyVersion: text("previous_strategy_version"),
+  summary: jsonb("summary"), // Key findings from Grok {findings: [], recommendations: []}
+  grokReasoning: text("grok_reasoning"), // Full Grok reasoning text
+  startedAt: timestamp("started_at").defaultNow(),
+  completedAt: timestamp("completed_at"),
+  status: text("status").default('running'), // 'running' | 'completed' | 'failed'
+  errorMessage: text("error_message"),
+}, (table) => ({
+  // Fast lookup for recent sessions
+  startedIdx: {
+    columns: [table.startedAt],
+    name: "idx_sessions_started",
+  },
+  // Fast lookup by type
+  typeStatusIdx: {
+    columns: [table.sessionType, table.status],
+    name: "idx_sessions_type_status",
+  },
+}));
+
+export const insertMarketInsightSchema = createInsertSchema(marketInsights).omit({
+  id: true,
+  discoveredAt: true,
+});
+
+export const insertPerformanceMetricsSchema = createInsertSchema(performanceMetrics).omit({
+  id: true,
+  lastUpdated: true,
+  createdAt: true,
+});
+
+export const insertLearningSessionSchema = createInsertSchema(learningSessions).omit({
+  id: true,
+  startedAt: true,
+});
+
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 export type MarketData = typeof marketData.$inferSelect;
@@ -467,6 +600,12 @@ export type StrategyParameters = typeof strategyParameters.$inferSelect;
 export type InsertStrategyParameters = z.infer<typeof insertStrategyParametersSchema>;
 export type UoaTrade = typeof uoaTrades.$inferSelect;
 export type InsertUoaTrade = z.infer<typeof insertUoaTradeSchema>;
+export type MarketInsight = typeof marketInsights.$inferSelect;
+export type InsertMarketInsight = z.infer<typeof insertMarketInsightSchema>;
+export type PerformanceMetricsRow = typeof performanceMetrics.$inferSelect;
+export type InsertPerformanceMetricsRow = z.infer<typeof insertPerformanceMetricsSchema>;
+export type LearningSession = typeof learningSessions.$inferSelect;
+export type InsertLearningSession = z.infer<typeof insertLearningSessionSchema>;
 
 export interface Greeks {
   delta: number;
