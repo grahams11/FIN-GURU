@@ -36,10 +36,11 @@ Preferred communication style: Simple, everyday language.
 ### Market Scanning
 - **BatchDataService**: Fetches and caches ~11,600 stocks from Polygon Bulk Snapshot, shared across all scanners for efficiency.
 - **Dual Scanner Architecture**:
-    - **UOA Scanner**: Fast background scanner for Unusual Options Activity using a hybrid scoring system (70% traditional UOA + 30% Ghost Phase 4 intelligence). Optimized with smart pre-filtering (volume spike + volatility scoring) reducing scan universe from 11,600 → 500 high-probability stocks, early termination after finding 50 strong candidates, and 25x concurrent API calls. Scan time: ~20 minutes.
+    - **Ghost Sweep Detector (Real-Time UOA)**: Real-time institutional sweep detection using Polygon Options WebSocket. Monitors 20 high-volume tickers (NVDA, TSLA, SPY, QQQ, AMD, META, AAPL, AMZN, GOOGL, MSFT, SMCI, COIN, MARA, HOOD, RIVN, IWM, PLTR, SOFI, NKLA, NIO) for $2M+ premium sweeps with trade conditions 10-13. Event-driven architecture triggers instant Phase 4 scoring (Max Pain, IV Skew, RSI, Ghost Intelligence) when sweeps are detected. **Instant alerts** vs. 20-minute sequential scanning.
     - **Elite Scanner**: Institutional-grade scanner with strict filtering criteria.
+- **Shared WebSocket Architecture**: PolygonService provides single shared WebSocket connection for both stock quotes and option trades via callback-based routing. Eliminates duplicate connections and respects Polygon connection limits. Includes health monitoring and exponential backoff reconnection.
 - **Market Data Pipeline**: Efficiently fetches and filters market data, eliminating redundant API calls.
-- **API Rate Limits**: UOA scanner uses 25 calls/minute for option chain fetching (Phase 2) with unlimited batch fetching for historical bars (Phase 2.5) via Polygon Advanced Options Plan.
+- **API Rate Limits**: Advanced Options Plan provides unlimited API calls for real-time option trade streaming and historical data fetching.
 - **ExpirationService**: Queries live option chains for accurate expiration dates.
 
 ### Trading Systems
