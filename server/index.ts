@@ -67,6 +67,11 @@ app.use((req, res, next) => {
   // Start Ghost 1DTE Scheduler (auto-triggers at 3:58pm EST)
   GhostScheduler.start();
   
+  // Start UOA Background Worker (refreshes cache every 30s)
+  const { UoaWorker } = await import('./services/uoaWorker');
+  UoaWorker.start();
+  console.log('✅ UOA Worker started - dashboard will load fast (<100ms)');
+  
   const server = await registerRoutes(app);
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {

@@ -333,6 +333,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // UOA Top Trades endpoint - Fast cached results (<100ms)
+  app.get('/api/uoa-top-trades', async (req, res) => {
+    try {
+      const { UoaCache } = await import('./services/uoaCache');
+      const { trades, lastUpdated, isStale } = UoaCache.get();
+      
+      res.json({
+        success: true,
+        trades,
+        lastUpdated,
+        isStale,
+        count: trades.length,
+      });
+    } catch (error) {
+      console.error('Error fetching UOA trades:', error);
+      res.status(500).json({ 
+        success: false,
+        trades: [],
+        lastUpdated: null,
+        isStale: true,
+        count: 0,
+      });
+    }
+  });
+
   // Top Trades endpoint - Returns existing trades from database (auto-refreshes if empty or old)
   app.get('/api/top-trades', async (req, res) => {
     try {

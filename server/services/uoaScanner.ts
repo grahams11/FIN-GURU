@@ -85,6 +85,16 @@ export class UoaScannerService {
         }))
         .filter(c => c.avgDailyVolume > 1_000_000); // >1M daily volume
       
+      // If Polygon returned 0 results, use fallback
+      if (candidates.length === 0) {
+        console.warn('⚠️ Polygon returned 0 tickers, using fallback universe');
+        const fallback = this.getFallbackUniverse();
+        this.stockUniverse = fallback;
+        this.universeLastUpdated = now;
+        console.log(`✅ Stock universe built: ${fallback.length} stocks (fallback) in ${Date.now() - startTime}ms`);
+        return fallback;
+      }
+      
       this.stockUniverse = candidates;
       this.universeLastUpdated = now;
       
@@ -108,24 +118,13 @@ export class UoaScannerService {
   
   /**
    * Fallback universe if Polygon API fails
-   * Returns curated list of liquid stocks
+   * CONSTRAINED to 5 stocks to respect Polygon 5 calls/min limit
+   * Full scan completes in <60s
    */
   private static getFallbackUniverse(): StockCandidate[] {
     const fallbackTickers = [
-      // Mega caps
-      'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'BRK.B',
-      // Tech
-      'NFLX', 'AMD', 'INTC', 'CRM', 'ORCL', 'ADBE', 'CSCO', 'QCOM',
-      // Finance
-      'JPM', 'BAC', 'WFC', 'GS', 'MS', 'C', 'BLK', 'SCHW',
-      // Healthcare
-      'UNH', 'JNJ', 'PFE', 'ABBV', 'TMO', 'MRK', 'LLY', 'ABT',
-      // Consumer
-      'WMT', 'PG', 'KO', 'PEP', 'COST', 'NKE', 'MCD', 'SBUX',
-      // Energy
-      'XOM', 'CVX', 'COP', 'SLB', 'EOG', 'MPC', 'PSX', 'VLO',
-      // ETFs
-      'SPY', 'QQQ', 'IWM', 'DIA', 'VOO', 'VTI', 'EEM', 'GLD',
+      // Top 5 liquid stocks/ETFs only - respects rate limit
+      'SPY', 'QQQ', 'AAPL', 'TSLA', 'NVDA',
     ];
     
     return fallbackTickers.map(ticker => ({

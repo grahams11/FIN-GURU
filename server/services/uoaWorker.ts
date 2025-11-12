@@ -1,0 +1,78 @@
+import { UoaScannerService } from './uoaScanner';
+import { UoaCache } from './uoaCache';
+
+/**
+ * UOA Background Worker
+ * Continuously scans market for UOA opportunities every 20-30s
+ * Updates cache for instant dashboard access
+ */
+
+export class UoaWorker {
+  private static interval: NodeJS.Timeout | null = null;
+  private static readonly SCAN_INTERVAL = 120000; // 2 minutes (respects 5 API calls/min limit)
+  
+  /**
+   * Start background worker
+   */
+  static start(): void {
+    console.log('🔄 Starting UOA background worker...');
+    
+    // Run first scan immediately
+    this.runScan();
+    
+    // Then run every 30 seconds
+    this.interval = setInterval(() => {
+      this.runScan();
+    }, this.SCAN_INTERVAL);
+    
+    console.log(`✅ UOA worker started - scanning every ${this.SCAN_INTERVAL / 1000}s`);
+  }
+  
+  /**
+   * Stop background worker
+   */
+  static stop(): void {
+    if (this.interval) {
+      clearInterval(this.interval);
+      this.interval = null;
+      console.log('🛑 UOA worker stopped');
+    }
+  }
+  
+  /**
+   * Run a single scan and update cache
+   */
+  private static async runScan(): Promise<void> {
+    // Skip if already scanning
+    if (UoaCache.getScanStatus()) {
+      console.log('⏭️ Skipping scan - previous scan still running');
+      return;
+    }
+    
+    try {
+      UoaCache.setScanStatus(true);
+      console.log('\n🔍 UOA Worker: Starting scheduled scan...');
+      
+      const startTime = Date.now();
+      const topTrades = await UoaScannerService.scan();
+      const duration = Date.now() - startTime;
+      
+      // Update cache
+      UoaCache.set(topTrades);
+      
+      console.log(`✅ UOA scan complete in ${(duration / 1000).toFixed(1)}s - cache updated`);
+    } catch (error) {
+      console.error('❌ UOA scan error:', error);
+    } finally {
+      UoaCache.setScanStatus(false);
+    }
+  }
+  
+  /**
+   * Trigger manual scan
+   */
+  static async triggerManualScan(): Promise<void> {
+    console.log('🔘 Manual scan triggered');
+    await this.runScan();
+  }
+}

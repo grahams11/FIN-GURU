@@ -1240,6 +1240,58 @@ class PolygonService {
   }
 
   /**
+   * Get top tickers by market cap for UOA scanner
+   */
+  async getTopTickers(params: {
+    market: string;
+    type: string;
+    limit: number;
+    sort: string;
+    order: string;
+  }): Promise<any[]> {
+    const apiKey = process.env.POLYGON_API_KEY;
+    if (!apiKey) {
+      throw new Error('No Polygon API key configured');
+    }
+
+    await this.rateLimiter.acquire();
+    
+    const url = `https://api.polygon.io/v3/reference/tickers?market=${params.market}&type=${params.type}&limit=${params.limit}&sort=${params.sort}&order=${params.order}&apiKey=${apiKey}`;
+    
+    try {
+      const response = await axios.get(url, { timeout: 10000 });
+      return response.data.results || [];
+    } catch (error: any) {
+      console.error('Error fetching top tickers from Polygon:', error.response?.data || error.message);
+      throw error; // Re-throw so caller can handle
+    }
+  }
+
+  /**
+   * Get options snapshot for a ticker
+   */
+  async getOptionsSnapshot(ticker: string): Promise<any> {
+    try {
+      const apiKey = process.env.POLYGON_API_KEY;
+      if (!apiKey) {
+        console.warn('No Polygon API key configured');
+        return null;
+      }
+
+      await this.rateLimiter.acquire();
+      
+      const url = `https://api.polygon.io/v3/snapshot/options/${ticker}?apiKey=${apiKey}`;
+      
+      const response = await axios.get(url, { timeout: 10000 });
+      
+      return response.data;
+    } catch (error: any) {
+      console.error(`Error fetching options snapshot for ${ticker}:`, error.message);
+      return null;
+    }
+  }
+
+  /**
    * Close WebSocket connection
    */
   async close(): Promise<void> {
