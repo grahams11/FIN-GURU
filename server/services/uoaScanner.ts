@@ -2,6 +2,7 @@ import { polygonService } from './polygonService';
 import { batchDataService, type StockSnapshot } from './batchDataService';
 import pLimit from 'p-limit';
 import type { UoaTrade, InsertUoaTrade } from '@shared/schema';
+import { Phase4Scoring, type Phase4ScoreResult, type Phase4InputData } from './phase4Scoring';
 
 /**
  * UOA (Unusual Options Activity) Scanner Service
@@ -46,6 +47,21 @@ interface UOACandidate extends StockCandidate {
   vega: number;
   rsi: number;
   priceVolatility: number;
+  dte: number; // Days to expiry
+}
+
+/**
+ * Symbol-level cache for Phase 4 scoring
+ * Reuses option chain and metrics across all strikes for same symbol
+ */
+interface SymbolScanContext {
+  ticker: string;
+  optionContracts: any[]; // Full option chain snapshot
+  historicalBars: any[] | null; // Historical bars for RSI
+  maxPain: number | null; // Precomputed max pain
+  ivSkew: { callIV: number; putIV: number } | null; // Precomputed IV skew
+  rsi: number | null; // Precomputed RSI
+  fetchedAt: number; // Timestamp for cache invalidation
 }
 
 export class UoaScannerService {
@@ -53,6 +69,105 @@ export class UoaScannerService {
   
   // Concurrency limits to prevent API overload
   private static readonly PHASE2_CONCURRENCY = 10; // Max 10 parallel option chain requests
+  
+  // Symbol-level cache for Phase 4 scoring (shared across all strikes)
+  private static symbolContextCache: Map<string, SymbolScanContext> = new Map();
+  
+  /**
+   * Get or create SymbolScanContext for a ticker
+   * Caches option chain and Phase 4 metrics to reuse across all strikes
+   */
+  private static async getSymbolContext(ticker: string, snapshot: any): Promise<SymbolScanContext> {
+    // Check if cached and still valid
+    const cached = this.symbolContextCache.get(ticker);
+    const now = Date.now();
+    
+    if (cached && (now - cached.fetchedAt) < this.SCAN_CACHE_TTL) {
+      return cached;
+    }
+    
+    // Calculate Phase 4 symbol-level metrics from snapshot
+    const optionContracts = snapshot.results || [];
+    const maxPain = Phase4Scoring.calculateMaxPain(optionContracts);
+    const ivSkew = Phase4Scoring.calculateIVSkew(optionContracts);
+    
+    // Note: historicalBars and RSI will be filled in batch later (after Phase 2)
+    const context: SymbolScanContext = {
+      ticker,
+      optionContracts,
+      historicalBars: null, // Filled later in batch
+      maxPain,
+      ivSkew,
+      rsi: null, // Calculated from historicalBars later
+      fetchedAt: now
+    };
+    
+    this.symbolContextCache.set(ticker, context);
+    return context;
+  }
+  
+  /**
+   * Clear symbol context cache (call at start of each scan)
+   */
+  private static clearSymbolContextCache(): void {
+    this.symbolContextCache.clear();
+  }
+  
+  /**
+   * Batch fetch historical bars for top candidates (after Phase 2)
+   * Only fetches for unique tickers to minimize API calls
+   * Populates RSI in SymbolScanContext
+   */
+  private static async batchFetchHistoricalBars(candidates: UOACandidate[]): Promise<void> {
+    console.log(`\n📊 Fetching historical bars for RSI calculation...`);
+    const startTime = Date.now();
+    
+    // Get unique tickers from candidates
+    const uniqueTickers = [...new Set(candidates.map(c => c.ticker))];
+    console.log(`📈 Found ${uniqueTickers.length} unique tickers to fetch`);
+    
+    // Limit concurrency to avoid API rate limits
+    const limit = pLimit(5);
+    let successCount = 0;
+    let errorCount = 0;
+    
+    await Promise.all(uniqueTickers.map(ticker => limit(async () => {
+      try {
+        const context = this.symbolContextCache.get(ticker);
+        if (!context) return;
+        
+        // Fetch 30 days of historical bars for RSI (14-day period)
+        const toDate = new Date();
+        const fromDate = new Date();
+        fromDate.setDate(fromDate.getDate() - 30);
+        
+        const bars = await polygonService.getHistoricalBars(
+          ticker,
+          fromDate.toISOString().split('T')[0],
+          toDate.toISOString().split('T')[0]
+        );
+        
+        if (bars && bars.length >= 15) {
+          // Calculate RSI from bars
+          const rsi = Phase4Scoring.calculateRSI(bars);
+          
+          // Update context
+          context.historicalBars = bars;
+          context.rsi = rsi;
+          
+          successCount++;
+        } else {
+          errorCount++;
+        }
+        
+      } catch (error) {
+        errorCount++;
+      }
+    })));
+    
+    const duration = Date.now() - startTime;
+    console.log(`✅ Historical bars fetched: ${successCount} success, ${errorCount} failed in ${(duration / 1000).toFixed(1)}s`);
+  }
   
   /**
    * Phase 1: Get Stock Universe from BatchDataService
@@ -166,6 +281,7 @@ export class UoaScannerService {
   /**
    * Analyze a single stock for UOA signals
    * Returns array of option contracts meeting UOA criteria
+   * Now uses SymbolScanContext for Phase 4 integration
    */
   private static async analyzeStock(stock: StockCandidate): Promise<UOACandidate[]> {
     try {
@@ -176,8 +292,12 @@ export class UoaScannerService {
         return [];
       }
       
+      // Get or create symbol context (caches Phase 4 metrics)
+      const symbolContext = await this.getSymbolContext(stock.ticker, snapshot);
+      
       const candidates: UOACandidate[] = [];
       const stockPrice = snapshot.underlying?.price || 0;
+      const now = new Date();
       
       // Filter options for UOA signals
       for (const contract of snapshot.results) {
@@ -218,11 +338,13 @@ export class UoaScannerService {
           continue;
         }
         
-        // Calculate price volatility (simplified - would need historical data for accuracy)
-        const priceVolatility = 1.5; // Placeholder - implement with historical bars
+        // Calculate DTE (days to expiry)
+        const expiryDate = new Date(contract.details.expiration_date);
+        const dte = Math.max(0, Math.ceil((expiryDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
         
-        // Calculate RSI (simplified - would need historical data)
-        const rsi = 50; // Placeholder - implement with historical bars
+        // Placeholder values (will be filled from symbol context later)
+        const rsi = symbolContext.rsi || 50;
+        const priceVolatility = 1.5;
         
         candidates.push({
           ...stock,
@@ -243,6 +365,7 @@ export class UoaScannerService {
           vega: contract.greeks.vega || 0,
           rsi,
           priceVolatility,
+          dte
         });
       }
       
@@ -253,21 +376,59 @@ export class UoaScannerService {
   }
   
   /**
-   * Phase 3: Composite Scoring
-   * Ranks candidates by 60% likelihood + 40% ROI
+   * Phase 3: Hybrid Scoring (70% UOA + 30% Phase 4)
+   * Applies Phase 4 gating and blends scores
    * Returns top 5 winners
    */
   static async scoreAndRank(candidates: UOACandidate[]): Promise<InsertUoaTrade[]> {
-    console.log(`\n🎯 Phase 3: Scoring ${candidates.length} candidates...`);
+    console.log(`\n🎯 Phase 3: Hybrid Scoring ${candidates.length} candidates (70% UOA + 30% Phase 4)...`);
     const startTime = Date.now();
     
     const scoredTrades: InsertUoaTrade[] = [];
+    let phase4Passed = 0;
+    let phase4Failed = 0;
     
     for (const candidate of candidates) {
-      const scores = this.calculateCompositeScore(candidate);
+      // Get symbol context with Phase 4 metrics
+      const context = this.symbolContextCache.get(candidate.ticker);
       
-      // Filter: only keep if composite score > 70 and prob > 60%
-      if (scores.compositeScore < 70 || scores.directionProb < 0.6) {
+      // Update candidate RSI from context (populated by batchFetchHistoricalBars)
+      if (context && context.rsi !== null) {
+        candidate.rsi = context.rsi;
+      }
+      
+      // Calculate original UOA composite score
+      const uoaScores = this.calculateCompositeScore(candidate);
+      
+      // Calculate Phase 4 score using cached symbol metrics
+      const phase4Input: Phase4InputData = {
+        symbol: candidate.ticker,
+        currentPrice: candidate.stockPrice,
+        volume: candidate.volume,
+        openInterest: candidate.openInterest,
+        dte: candidate.dte,
+        optionContracts: context?.optionContracts,
+        historicalBars: context?.historicalBars || undefined,
+        precomputedMaxPain: context?.maxPain || undefined,
+        precomputedIvSkew: context?.ivSkew || undefined,
+        precomputedRsi: context?.rsi || undefined
+      };
+      
+      const phase4Score = Phase4Scoring.calculateScore(phase4Input);
+      
+      // Apply Phase 4 gating: must score ≥70 with ≥2 active layers
+      if (!Phase4Scoring.meetsThreshold(phase4Score, 70, 2)) {
+        phase4Failed++;
+        continue;
+      }
+      
+      phase4Passed++;
+      
+      // Hybrid scoring: 70% UOA + 30% Phase 4
+      const hybridScore = (uoaScores.compositeScore * 0.7) + (phase4Score.totalScore * 0.3);
+      
+      // Filter: only keep if hybrid score > 70 and UOA prob > 60%
+      if (hybridScore < 70 || uoaScores.directionProb < 0.6) {
         continue;
       }
       
@@ -296,7 +457,8 @@ export class UoaScannerService {
         theta: candidate.theta,
         gamma: candidate.gamma,
         vega: candidate.vega,
-        ...scores,
+        ...uoaScores,
+        compositeScore: hybridScore, // Override with hybrid score
         marketCap: candidate.marketCap,
         avgDailyVolume: candidate.avgDailyVolume,
         bidAskSpread: ((candidate.ask - candidate.bid) / candidate.premium) * 100,
@@ -304,10 +466,17 @@ export class UoaScannerService {
         displayText: `${candidate.ticker} ${candidate.strike}${candidate.optionType === 'call' ? 'C' : 'P'} @ $${candidate.premium.toFixed(2)}`,
         scanTime: now,
         cacheExpiry,
-      });
+        // Phase 4 metadata (for UI display)
+        phase4Score: phase4Score.totalScore,
+        phase4Layer1: phase4Score.layer1,
+        phase4Layer2: phase4Score.layer2,
+        phase4Layer3: phase4Score.layer3,
+        phase4Layer4: phase4Score.layer4,
+        phase4ActiveLayers: phase4Score.activeLayers,
+      } as any); // TODO: Update schema to include phase4 fields
     }
     
-    // Sort by composite score descending
+    // Sort by hybrid score descending
     scoredTrades.sort((a, b) => b.compositeScore - a.compositeScore);
     
     // Take top 5 and assign ranks
@@ -317,7 +486,8 @@ export class UoaScannerService {
     }));
     
     const duration = Date.now() - startTime;
-    console.log(`✅ Phase 3 complete: Top ${top5.length} plays scored in ${duration}ms`);
+    console.log(`✅ Phase 3 complete: ${phase4Passed} passed Phase 4 gate, ${phase4Failed} failed`);
+    console.log(`📊 Top ${top5.length} plays with hybrid scoring (70% UOA + 30% Phase 4) in ${duration}ms`);
     
     return top5;
   }
@@ -388,25 +558,34 @@ export class UoaScannerService {
   
   /**
    * Main scan entry point
-   * Executes all 3 phases and returns top 5 trades
+   * Now with Phase 4 intelligence integration
+   * Executes 4 phases: Stock Universe → UOA Filtering → Historical Data → Hybrid Scoring
    */
   static async scan(): Promise<InsertUoaTrade[]> {
-    console.log('\n👻 ========== UOA SCANNER START ==========');
+    console.log('\n👻 ========== ENHANCED UOA SCANNER START (Phase 4) ==========');
     const totalStart = Date.now();
     
     try {
+      // Clear symbol context cache from previous scan
+      this.clearSymbolContextCache();
+      
       // Phase 1: Build stock universe
       const universe = await this.buildStockUniverse();
       
-      // Phase 2: Scan for UOA signals
+      // Phase 2: Scan for UOA signals (caches max pain, IV skew per symbol)
       const candidates = await this.scanForUOA(universe);
       
-      // Phase 3: Score and rank
+      // Phase 2.5: Batch fetch historical bars for RSI (only for top candidates)
+      if (candidates.length > 0) {
+        await this.batchFetchHistoricalBars(candidates);
+      }
+      
+      // Phase 3: Hybrid scoring (70% UOA + 30% Phase 4)
       const topTrades = await this.scoreAndRank(candidates);
       
       const totalTime = Date.now() - totalStart;
-      console.log(`\n✅ UOA SCAN COMPLETE in ${(totalTime / 1000).toFixed(1)}s`);
-      console.log(`📊 Results: ${topTrades.length} top plays`);
+      console.log(`\n✅ ENHANCED UOA SCAN COMPLETE in ${(totalTime / 1000).toFixed(1)}s`);
+      console.log(`📊 Results: ${topTrades.length} top plays with Phase 4 scoring`);
       
       return topTrades;
     } catch (error) {
