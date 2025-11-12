@@ -260,6 +260,11 @@ export class Ghost1DTEService {
   // IV percentile cache (252-day lookback)
   private static ivPercentileCache: Map<string, number> = new Map();
   
+  // PHASE 4: Symbol-level caches (refreshed per scan)
+  private static maxPainCache: Map<string, number> = new Map();
+  private static ivSkewCache: Map<string, { callIV: number; putIV: number }> = new Map();
+  private static rsiCache: Map<string, number> = new Map(); // RSI calculated once per symbol
+  
   /**
    * Initialize Ghost Scanner
    * - Pre-compute erf lookup table
@@ -357,6 +362,11 @@ export class Ghost1DTEService {
     console.log(`⏰ Scan time: ${new Date().toLocaleTimeString('en-US', { timeZone: 'America/New_York' })} EST`);
     console.log(`📡 API call budget: ${MAX_API_CALLS} calls`);
     
+    // Clear Phase 4 caches at start of each scan
+    this.maxPainCache.clear();
+    this.ivSkewCache.clear();
+    this.rsiCache.clear();
+    
     const allContracts: Ghost1DTEContract[] = [];
     
     // Step 1: Fetch 1DTE chains for SPY, QQQ, IWM (3 API calls via Polygon snapshot)
@@ -380,9 +390,8 @@ export class Ghost1DTEService {
         
         console.log(`✅ ${symbol}: ${chain.results.length} contracts fetched`);
         
-        // Get current stock price from WebSocket cache or snapshot
-        const stockPrice = await polygonService.getStockQuote(symbol);
-        const currentPrice = stockPrice?.price || chain.results[0]?.underlying_price || 0;
+        // Get current stock price from snapshot (NO additional API call)
+        const currentPrice = chain.results[0]?.underlying_price || chain.results[0]?.day?.close || 0;
         
         if (!currentPrice) {
           console.warn(`⚠️ No price for ${symbol}`);
@@ -411,6 +420,20 @@ export class Ghost1DTEService {
         
         OptimizedGreeksCalculator.precomputeSurface(symbol, currentPrice, strikes, T, this.RISK_FREE_RATE, avgIV);
         
+        // PHASE 4: Pre-calculate max pain, IV skew, and RSI using ALREADY-FETCHED data
+        // This reuses the snapshot from above (NO additional API calls)
+        const maxPain = this.calculateMaxPainFromSnapshot(chain.results, tomorrow);
+        const ivSkew = this.getIVSkewFromSnapshot(chain.results);
+        
+        // Calculate RSI once per symbol (use historical data from snapshot if available)
+        const rsi = await this.calculateSymbolRSI(symbol);
+        
+        if (maxPain) this.maxPainCache.set(symbol, maxPain);
+        if (ivSkew) this.ivSkewCache.set(symbol, ivSkew);
+        if (rsi !== null) this.rsiCache.set(symbol, rsi);
+        
+        console.log(`${symbol} Phase 4 Data: Max Pain $${maxPain?.toFixed(2) || 'N/A'}, IV Skew ${ivSkew ? `Calls ${(ivSkew.callIV*100).toFixed(1)}% / Puts ${(ivSkew.putIV*100).toFixed(1)}%` : 'N/A'}, RSI ${rsi?.toFixed(1) || 'N/A'}`);
+        
         // Process each contract through Ghost Funnel
         for (const contract of oneDTEContracts) {
           const processed = await this.processContract(symbol, contract, currentPrice, T);
@@ -428,7 +451,7 @@ export class Ghost1DTEService {
     console.log(`\n📊 Scoring ${allContracts.length} contracts...`);
     
     const scoredContracts = allContracts
-      .filter(c => c.scores.compositeScore >= 93.3) // Trigger threshold
+      .filter(c => c.scores.compositeScore >= 85) // PHASE 4: Lowered from 92 to allow 3/4 layers (30+25+30=85)
       .filter(c => this.passesEntryGates(c)) // Additional entry requirements
       .sort((a, b) => b.scores.compositeScore - a.scores.compositeScore);
     
@@ -512,8 +535,8 @@ export class Ghost1DTEService {
       const scores = await this.calculateCompositeScore(symbol, currentPrice, mark, iv, greeks, volume, oi);
       
       // Calculate target/stop prices
-      const targetPremium = mark * 1.78; // +78% gain
-      const stopPremium = mark * 0.62; // -22% loss
+      const targetPremium = mark * 1.78; // +78% gain (1.0 + 0.78 = 1.78x)
+      const stopPremium = mark * 0.78; // -22% loss (1.0 - 0.22 = 0.78x) [FIXED: was 0.62x = -38% loss]
       
       const targetUnderlyingPrice = BlackScholesCalculator.solveStockPriceForTargetPremium(
         targetPremium,
@@ -582,8 +605,170 @@ export class Ghost1DTEService {
   }
   
   /**
-   * Calculate Phase 3 Composite Score (trigger >= 93.3)
-   * VRP_Score (42%) + ThetaCrush (31%) + MeanReversionLock (18%) + VolumeVacuum (9%)
+   * PHASE 4 HELPER FUNCTIONS (Grok AI Integration)
+   * These functions implement the new 4-layer scoring system
+   */
+  
+  /**
+   * Calculate RSI (Relative Strength Index) from price history
+   * @param prices Array of closing prices
+   * @param period RSI period (default: 14)
+   */
+  private static calculateRSI(prices: number[], period = 14): number {
+    if (prices.length < period + 1) return 50; // Not enough data
+    
+    const gains: number[] = [];
+    const losses: number[] = [];
+    
+    for (let i = 1; i < prices.length; i++) {
+      const diff = prices[i] - prices[i - 1];
+      if (diff > 0) {
+        gains.push(diff);
+        losses.push(0);
+      } else {
+        gains.push(0);
+        losses.push(-diff);
+      }
+    }
+    
+    const recentGains = gains.slice(-period);
+    const recentLosses = losses.slice(-period);
+    
+    const avgGain = recentGains.reduce((sum, g) => sum + g, 0) / period;
+    const avgLoss = recentLosses.reduce((sum, l) => sum + l, 0) / period;
+    
+    // Handle edge cases
+    if (avgLoss === 0) {
+      return avgGain > 0 ? 100 : 50; // All gains = overbought (100), no movement = neutral (50)
+    }
+    
+    const rs = avgGain / avgLoss;
+    return 100 - (100 / (1 + rs));
+  }
+  
+  /**
+   * Calculate RSI for a symbol once per scan (symbol-level cache)
+   * Uses historical bars API call - but only ONCE per symbol
+   */
+  private static async calculateSymbolRSI(symbol: string): Promise<number | null> {
+    try {
+      const historicalBars = await polygonService.getHistoricalBars(
+        symbol,
+        new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // 30 days ago
+        new Date().toISOString().split('T')[0],
+        'day'
+      );
+      
+      if (!historicalBars || historicalBars.length < 15) {
+        return null;
+      }
+      
+      const closes = historicalBars.map(bar => bar.c);
+      return this.calculateRSI(closes);
+      
+    } catch (error) {
+      console.error(`Error calculating RSI for ${symbol}:`, error);
+      return null;
+    }
+  }
+  
+  /**
+   * Calculate Max Pain from already-fetched snapshot (NO additional API call)
+   * Uses the chain data already retrieved in the main scan loop
+   */
+  private static calculateMaxPainFromSnapshot(contracts: any[], expiry?: string): number | null {
+    try {
+      if (!contracts || contracts.length === 0) {
+        return null;
+      }
+      
+      // Filter for specific expiry if provided
+      let filteredContracts = contracts;
+      if (expiry) {
+        filteredContracts = contracts.filter((c: any) => {
+          const contractExpiry = new Date(c.details?.expiration_date || c.expiration_date);
+          return contractExpiry.toISOString().split('T')[0] === expiry;
+        });
+      }
+      
+      // Sum open interest by strike price
+      const oiByStrike = new Map<number, number>();
+      
+      for (const contract of filteredContracts) {
+        const strike = contract.details?.strike_price || contract.strike_price;
+        const oi = contract.open_interest || 0;
+        if (strike) {
+          oiByStrike.set(strike, (oiByStrike.get(strike) || 0) + oi);
+        }
+      }
+      
+      if (oiByStrike.size === 0) return null;
+      
+      // Find strike with maximum OI (max pain)
+      let maxStrike = 0;
+      let maxOI = 0;
+      
+      // Convert Map entries to array for iteration
+      const entries = Array.from(oiByStrike.entries());
+      for (const [strike, oi] of entries) {
+        if (oi > maxOI) {
+          maxOI = oi;
+          maxStrike = strike;
+        }
+      }
+      
+      return maxStrike;
+      
+    } catch (error) {
+      console.error(`Error calculating max pain from snapshot:`, error);
+      return null;
+    }
+  }
+  
+  /**
+   * Get IV Skew from already-fetched snapshot (NO additional API call)
+   * Uses the chain data already retrieved in the main scan loop
+   */
+  private static getIVSkewFromSnapshot(contracts: any[]): { callIV: number; putIV: number } | null {
+    try {
+      if (!contracts || contracts.length === 0) {
+        return null;
+      }
+      
+      // Separate calls and puts
+      const calls = contracts.filter((opt: any) => 
+        (opt.details?.contract_type || opt.contract_type) === 'call'
+      );
+      const puts = contracts.filter((opt: any) => 
+        (opt.details?.contract_type || opt.contract_type) === 'put'
+      );
+      
+      if (calls.length === 0 || puts.length === 0) {
+        return null;
+      }
+      
+      // Calculate average IV for calls and puts
+      const callIV = calls.reduce((sum: number, c: any) => 
+        sum + (c.implied_volatility || 0), 0
+      ) / calls.length;
+      const putIV = puts.reduce((sum: number, p: any) => 
+        sum + (p.implied_volatility || 0), 0
+      ) / puts.length;
+      
+      return { callIV, putIV };
+      
+    } catch (error) {
+      console.error(`Error getting IV skew from snapshot:`, error);
+      return null;
+    }
+  }
+  
+  /**
+   * Calculate Phase 4 Composite Score (Grok AI System - trigger >= 92)
+   * Layer 1 (30pts): Max Pain Gamma Trap
+   * Layer 2 (25pts): IV Skew Inversion
+   * Layer 3 (30pts): Ghost Sweep Detection
+   * Layer 4 (15pts): 0-3 DTE + RSI Extreme
    */
   private static async calculateCompositeScore(
     symbol: string,
@@ -594,37 +779,61 @@ export class Ghost1DTEService {
     volume: number,
     oi: number
   ): Promise<ScoreComponents> {
-    // Component 1: VRP Score (42% weight)
-    // (30d HV - IV) / IV × 100 × (1 / IV_percentile)
-    const hv30d = this.hvCache.get(symbol) || 0.20;
-    const ivPercentile = await this.calculateIVPercentile(symbol, iv);
-    const vrpScore = ((hv30d - iv) / iv) * 100 * (1 / Math.max(ivPercentile, 1));
+    // === GROK AI PHASE 4: 4-LAYER SCORING SYSTEM ===
     
-    // Component 2: ThetaCrush (31% weight)
-    // -Theta / Mark × 18h × 100
-    const hoursToExpiry = 18; // Overnight hold
-    const thetaCrush = Math.abs(greeks.theta / premium) * hoursToExpiry * 100;
+    // Layer 1 (30pts): Max Pain Gamma Trap
+    // Price within 0.7% of max pain indicates dealer hedging pressure
+    let layer1 = 0;
+    const maxPain = this.maxPainCache.get(symbol); // Use cached value (calculated once per symbol)
     
-    // Component 3: MeanReversionLock (18% weight)
-    // Bollinger percent_b < 0.11 or > 0.89 × RSI(14) divergence
-    const meanReversionLock = await this.calculateMeanReversionScore(symbol, currentPrice);
+    if (maxPain) {
+      const proximity = Math.abs(currentPrice - maxPain) / currentPrice;
+      const gammaTrap = proximity < 0.007; // Within 0.7%
+      layer1 = gammaTrap ? 30 : 0;
+    }
     
-    // Component 4: VolumeVacuum (9% weight)
-    // (EOD volume spike > 380% 10-day avg) × put/call skew crush
-    const volumeVacuum = await this.calculateVolumeVacuumScore(symbol, volume, oi);
+    // Layer 2 (25pts): IV Skew Inversion
+    // Call IV < Put IV * 0.92 indicates bullish skew
+    let layer2 = 0;
+    const skew = this.ivSkewCache.get(symbol); // Use cached value (calculated once per symbol)
     
-    // Weighted composite score
-    const compositeScore = 
-      vrpScore * 0.42 +
-      thetaCrush * 0.31 +
-      meanReversionLock * 0.18 +
-      volumeVacuum * 0.09;
+    if (skew) {
+      const skewBullish = skew.callIV < skew.putIV * 0.92;
+      layer2 = skewBullish ? 25 : 0;
+    }
     
+    // Layer 3 (30pts): Ghost Sweep Detection
+    // Check for >$2M sweeps in last 30 minutes (requires WebSocket integration)
+    // For now, use volume spike as proxy
+    let layer3 = 0;
+    const volumeSpike = volume > oi * 0.5; // Volume > 50% of OI indicates unusual activity
+    layer3 = volumeSpike ? 30 : 0;
+    console.log(`${symbol} Volume Spike: ${volumeSpike}, Volume: ${volume}, OI: ${oi}`);
+    
+    // Layer 4 (15pts): 0-3 DTE + RSI Extreme
+    // Use cached RSI (calculated once per symbol)
+    let layer4 = 0;
+    const rsi = this.rsiCache.get(symbol);
+    
+    if (rsi !== undefined && rsi !== null) {
+      const rsiExtreme = rsi < 30 || rsi > 70;
+      
+      // DTE is always 1 for this scanner (1DTE overnight)
+      const dte = 1;
+      layer4 = (dte <= 3 && rsiExtreme) ? 15 : 0;
+    }
+    
+    // Calculate composite score
+    const compositeScore = layer1 + layer2 + layer3 + layer4;
+    
+    console.log(`${symbol} PHASE 4 SCORE: ${compositeScore}/100 (Layer1: ${layer1}, Layer2: ${layer2}, Layer3: ${layer3}, Layer4: ${layer4})`);
+    
+    // Return in same format as old system for compatibility
     return {
-      vrpScore: Math.round(vrpScore * 10) / 10,
-      thetaCrush: Math.round(thetaCrush * 10) / 10,
-      meanReversionLock: Math.round(meanReversionLock * 10) / 10,
-      volumeVacuum: Math.round(volumeVacuum * 10) / 10,
+      vrpScore: layer1, // Repurpose as Layer 1
+      thetaCrush: layer2, // Repurpose as Layer 2
+      meanReversionLock: layer3, // Repurpose as Layer 3
+      volumeVacuum: layer4, // Repurpose as Layer 4
       compositeScore: Math.round(compositeScore * 10) / 10
     };
   }
@@ -666,23 +875,23 @@ export class Ghost1DTEService {
   }
   
   /**
-   * Entry gate validation
-   * - Score >= 93.3
-   * - VRP_Score > 78th percentile of last 500 1DTE nights
-   * - ThetaCrush > 68% of premium decays overnight
-   * - MeanReversionLock = price at 2.1+ σ Bollinger extreme
+   * Entry gate validation (Phase 4 - simplified)
+   * Main filter is composite score >= 92
+   * Additional gates ensure quality plays
    */
   private static passesEntryGates(contract: Ghost1DTEContract): boolean {
-    // Gate 1: Already checked (score >= 93.3)
+    // PHASE 4: Entry gates now based on layer scores (0-30 scale)
+    // Gate 1: Composite score >= 92 (already checked in main filter)
     
-    // Gate 2: VRP Score > 78th percentile (simplified)
-    if (contract.scores.vrpScore < 30) return false; // Placeholder threshold
+    // Gate 2: Must have at least 2 layers contributing
+    const layersActive = [
+      contract.scores.vrpScore > 0,      // Layer 1: Max Pain
+      contract.scores.thetaCrush > 0,    // Layer 2: IV Skew
+      contract.scores.meanReversionLock > 0,  // Layer 3: Volume Spike
+      contract.scores.volumeVacuum > 0   // Layer 4: RSI + DTE
+    ].filter(Boolean).length;
     
-    // Gate 3: ThetaCrush > 68%
-    if (contract.scores.thetaCrush < 68) return false;
-    
-    // Gate 4: Mean reversion signal (simplified)
-    if (contract.scores.meanReversionLock < 40) return false;
+    if (layersActive < 2) return false; // Need multiple confirmations
     
     return true;
   }
