@@ -1466,6 +1466,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log('\n👻 Starting Ghost 1DTE Scan...');
       const scanStartTime = Date.now();
       
+      // Initialize scanner if not already done
+      await Ghost1DTEService.initialize();
+      
       // Run the scan
       const result = await Ghost1DTEService.scan();
       

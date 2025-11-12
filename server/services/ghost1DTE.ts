@@ -607,19 +607,34 @@ export class Ghost1DTEService {
       const oi = contract.open_interest || 0;
       const iv = contract.implied_volatility || this.hvCache.get(symbol) || 0.20;
       
+      const contractLabel = `${symbol} ${strike}${optionType[0].toUpperCase()}`;
+      console.log(`\n🔍 Processing ${contractLabel}: Mark=$${mark.toFixed(2)}, IV=${(iv*100).toFixed(1)}%, Vol=${volume}, OI=${oi}`);
+      
       // Ghost Funnel Filter 1: Premium range
-      if (mark < 0.42 || mark > 1.85) return null;
+      if (mark < 0.42 || mark > 1.85) {
+        console.log(`  ❌ Filter 1: Premium $${mark.toFixed(2)} outside range [$0.42-$1.85]`);
+        return null;
+      }
       
       // Ghost Funnel Filter 2: Bid/Ask spread
       const spread = ask - bid;
-      if (spread > 0.03) return null;
+      if (spread > 0.03) {
+        console.log(`  ❌ Filter 2: Spread $${spread.toFixed(3)} > $0.03`);
+        return null;
+      }
       
       // Ghost Funnel Filter 3: Volume & OI (last 15 min of day)
-      if (volume < 8000 || oi < 45000) return null;
+      if (volume < 8000 || oi < 45000) {
+        console.log(`  ❌ Filter 3: Vol ${volume} < 8000 or OI ${oi} < 45000`);
+        return null;
+      }
       
       // Ghost Funnel Filter 4: IV limits by symbol
       const ivLimits = { SPY: 0.28, QQQ: 0.38, IWM: 0.45 };
-      if (iv > ivLimits[symbol as keyof typeof ivLimits]) return null;
+      if (iv > ivLimits[symbol as keyof typeof ivLimits]) {
+        console.log(`  ❌ Filter 4: IV ${(iv*100).toFixed(1)}% > ${(ivLimits[symbol as keyof typeof ivLimits]*100).toFixed(1)}%`);
+        return null;
+      }
       
       // Calculate Greeks using optimized calculator
       const greeks = OptimizedGreeksCalculator.calculateGreeks(
@@ -634,14 +649,26 @@ export class Ghost1DTEService {
       
       // Ghost Funnel Filter 5: Delta range
       if (optionType === 'call') {
-        if (greeks.delta < 0.12 || greeks.delta > 0.27) return null;
+        if (greeks.delta < 0.12 || greeks.delta > 0.27) {
+          console.log(`  ❌ Filter 5: Delta ${greeks.delta.toFixed(3)} outside [0.12-0.27]`);
+          return null;
+        }
       } else {
-        if (greeks.delta > -0.12 || greeks.delta < -0.27) return null;
+        if (greeks.delta > -0.12 || greeks.delta < -0.27) {
+          console.log(`  ❌ Filter 5: Delta ${greeks.delta.toFixed(3)} outside [-0.27--0.12]`);
+          return null;
+        }
       }
+      
+      console.log(`  ✅ Passed Filters 1-5, checking IV percentile...`);
       
       // Ghost Funnel Filter 6: IV percentile < 18th (fear crush setup)
       const ivPercentile = await this.calculateIVPercentile(symbol, iv);
-      if (ivPercentile > 18) return null;
+      console.log(`${symbol} ${strike}${optionType}: IV=${(iv*100).toFixed(1)}%, Percentile=${ivPercentile.toFixed(1)}%`);
+      if (ivPercentile > 18) {
+        console.log(`  ❌ Rejected: IV percentile ${ivPercentile.toFixed(1)}% > 18%`);
+        return null;
+      }
       
       // Calculate composite score
       const scores = await this.calculateCompositeScore(symbol, currentPrice, mark, iv, greeks, volume, oi);
