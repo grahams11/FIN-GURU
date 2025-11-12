@@ -916,6 +916,55 @@ class PolygonService {
   }
 
   /**
+   * BULK OPTIMIZATION: Get historical bars for multiple tickers in parallel
+   * Makes one API call PER ticker (not one call total, but fetches in parallel)
+   * Still more efficient than sequential calls
+   * 
+   * @param tickers Array of stock symbols to fetch
+   * @param startDate Start date (YYYY-MM-DD)
+   * @param endDate End date (YYYY-MM-DD)
+   * @returns Map of ticker -> array of bars
+   */
+  async getBulkHistoricalBars(
+    tickers: string[],
+    startDate: string,
+    endDate: string
+  ): Promise<Map<string, HistoricalBar[]>> {
+    const result = new Map<string, HistoricalBar[]>();
+    
+    try {
+      console.log(`📊 Fetching historical data for ${tickers.join(', ')} in parallel...`);
+      
+      // Fetch all tickers in parallel (3 API calls made simultaneously)
+      const promises = tickers.map(async (ticker) => {
+        try {
+          const bars = await this.getHistoricalBars(ticker, startDate, endDate, 'day');
+          return { ticker: ticker.toUpperCase(), bars };
+        } catch (error: any) {
+          console.error(`Error fetching bars for ${ticker}:`, error.message);
+          return { ticker: ticker.toUpperCase(), bars: null };
+        }
+      });
+      
+      const results = await Promise.all(promises);
+      
+      // Build result map
+      for (const { ticker, bars } of results) {
+        if (bars && bars.length > 0) {
+          result.set(ticker, bars);
+          console.log(`✅ ${ticker}: ${bars.length} days of historical data`);
+        }
+      }
+      
+      return result;
+      
+    } catch (error: any) {
+      console.error(`❌ Error in bulk historical bars fetch:`, error.message);
+      return result;
+    }
+  }
+  
+  /**
    * Get historical price bars (aggregates) for Fibonacci calculations
    * Uses Polygon REST API with Alpha Vantage fallback
    * 
