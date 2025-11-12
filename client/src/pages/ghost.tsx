@@ -76,8 +76,12 @@ interface GhostScanResult {
   targetTime: string;
   meetsTarget: boolean;
   apiCalls: number;
-  apiLimit: number;
-  withinLimit: boolean;
+  apiUsage: {
+    mode: 'unlimited' | 'metered';
+    callsUsed: number;
+    statusLabel: string;
+    withinLimit: boolean;
+  };
   topPlays: GhostPlay[];
   stats: {
     contractsAnalyzed: number;
@@ -253,8 +257,10 @@ export default function GhostScanner() {
                   <div className="text-3xl font-bold text-white">{scanResult.apiCalls}</div>
                   <div className="text-sm text-slate-400">API Calls</div>
                   <div className="text-xs mt-1">
-                    {scanResult.withinLimit ? (
-                      <span className="text-green-400">✅ Within limit (4)</span>
+                    {scanResult.apiUsage.mode === 'unlimited' ? (
+                      <span className="text-green-400">✅ {scanResult.apiUsage.statusLabel}</span>
+                    ) : scanResult.apiUsage.withinLimit ? (
+                      <span className="text-green-400">✅ Within limit</span>
                     ) : (
                       <span className="text-red-400">❌ Exceeds limit</span>
                     )}
