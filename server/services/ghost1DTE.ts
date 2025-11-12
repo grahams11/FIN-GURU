@@ -292,14 +292,27 @@ export class Ghost1DTEService {
   /**
    * Load 30-day historical volatility for SPY, QQQ, IWM
    * Used for VRP (Volatility Risk Premium) calculation
+   * Now uses bulk historical fetch for efficiency
    */
   private static async loadHistoricalVolatility(): Promise<void> {
     console.log('📊 Loading 30-day historical volatility...');
     
+    // Bulk fetch historical data for all symbols
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - 35); // 35-day buffer
+    
+    const bulkBars = await polygonService.getBulkHistoricalBars(
+      this.SYMBOLS,
+      startDate.toISOString().split('T')[0],
+      endDate.toISOString().split('T')[0]
+    );
+    
     for (const symbol of this.SYMBOLS) {
       try {
-        // Calculate HV from last 30 days of price data
-        const hv = await this.calculate30DayHV(symbol);
+        // Calculate HV from cached bars
+        const bars = bulkBars.get(symbol.toUpperCase());
+        const hv = this.calculate30DayHVFromBars(bars);
         this.hvCache.set(symbol, hv);
         console.log(`${symbol} 30d HV: ${(hv * 100).toFixed(2)}%`);
       } catch (error) {
@@ -311,21 +324,10 @@ export class Ghost1DTEService {
   
   /**
    * Calculate 30-day historical volatility from daily returns
+   * Now uses cached historical bars (no API call)
    */
-  private static async calculate30DayHV(symbol: string): Promise<number> {
-    // Get last 30 days of daily bars from Polygon
-    const endDate = new Date();
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - 35); // Extra buffer
-    
+  private static calculate30DayHVFromBars(bars: any[] | null | undefined): number {
     try {
-      const bars = await polygonService.getHistoricalBars(
-        symbol,
-        startDate.toISOString().split('T')[0],
-        endDate.toISOString().split('T')[0],
-        'day'
-      );
-      
       if (!bars || bars.length < 20) {
         return 0.20; // Default if insufficient data
       }
@@ -347,7 +349,7 @@ export class Ghost1DTEService {
       
       return annualizedVol;
     } catch (error) {
-      console.error(`Error calculating HV for ${symbol}:`, error);
+      console.error(`Error calculating HV from bars:`, error);
       return 0.20;
     }
   }
@@ -384,6 +386,21 @@ export class Ghost1DTEService {
     this.maxPainCache.clear();
     this.ivSkewCache.clear();
     this.rsiCache.clear();
+    
+    // BULK OPTIMIZATION: Fetch historical bars for all symbols in parallel (3 API calls made simultaneously)
+    // This data is shared by both HV/VRP and RSI calculations
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - 35); // 35-day buffer for 30-day calculations
+    
+    console.log('\n📊 Fetching bulk historical data for Phase 4...');
+    const bulkBarsCache = await polygonService.getBulkHistoricalBars(
+      this.SYMBOLS,
+      startDate.toISOString().split('T')[0],
+      endDate.toISOString().split('T')[0]
+    );
+    apiCalls += this.SYMBOLS.length; // Count the parallel fetches
+    console.log(`✅ Bulk historical data loaded for ${bulkBarsCache.size}/${this.SYMBOLS.length} symbols`);
     
     const allContracts: Ghost1DTEContract[] = [];
     
@@ -438,8 +455,9 @@ export class Ghost1DTEService {
         const maxPain = this.calculateMaxPainFromSnapshot(chain.results, tomorrow);
         const ivSkew = this.getIVSkewFromSnapshot(chain.results);
         
-        // Calculate RSI once per symbol (use historical data from snapshot if available)
-        const rsi = await this.calculateSymbolRSI(symbol);
+        // Calculate RSI once per symbol using bulk-fetched historical bars
+        const symbolBars = bulkBarsCache.get(symbol.toUpperCase());
+        const rsi = this.calculateSymbolRSIFromBars(symbolBars);
         
         if (maxPain) this.maxPainCache.set(symbol, maxPain);
         if (ivSkew) this.ivSkewCache.set(symbol, ivSkew);
@@ -660,27 +678,20 @@ export class Ghost1DTEService {
   }
   
   /**
-   * Calculate RSI for a symbol once per scan (symbol-level cache)
-   * Uses historical bars API call - but only ONCE per symbol
+   * Calculate RSI for a symbol from cached bars (no API call)
+   * Uses bulk-fetched historical bars shared across all Phase 4 layers
    */
-  private static async calculateSymbolRSI(symbol: string): Promise<number | null> {
+  private static calculateSymbolRSIFromBars(bars: any[] | null | undefined): number | null {
     try {
-      const historicalBars = await polygonService.getHistoricalBars(
-        symbol,
-        new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // 30 days ago
-        new Date().toISOString().split('T')[0],
-        'day'
-      );
-      
-      if (!historicalBars || historicalBars.length < 15) {
+      if (!bars || bars.length < 15) {
         return null;
       }
       
-      const closes = historicalBars.map(bar => bar.c);
+      const closes = bars.map(bar => bar.c);
       return this.calculateRSI(closes);
       
     } catch (error) {
-      console.error(`Error calculating RSI for ${symbol}:`, error);
+      console.error(`Error calculating RSI from bars:`, error);
       return null;
     }
   }
