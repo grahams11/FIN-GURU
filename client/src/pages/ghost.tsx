@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Checkbox } from '@/components/ui/checkbox';
 import { 
   Play, 
   Ghost, 
@@ -18,7 +19,8 @@ import {
   Zap,
   Database,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  ClipboardCheck
 } from 'lucide-react';
 
 /**
@@ -118,6 +120,19 @@ export default function GhostScanner() {
   const [isScanning, setIsScanning] = useState(false);
   const [lastScanTime, setLastScanTime] = useState<string | null>(null);
 
+  // Pre-trade checklist state
+  const [checklist, setChecklist] = useState({
+    alertScore: false,
+    timeWindow: false,
+    maxPainStrike: false,
+    dteCriteria: false,
+    buyAtAsk: false,
+    riskLimit: false,
+    gtcSellOrder: false,
+    wakeUpTime: false,
+    noFomo: false,
+  });
+
   // Fetch system status
   const { data: status, isLoading: statusLoading } = useQuery<GhostStatus>({
     queryKey: ['/api/ghost/status'],
@@ -144,6 +159,19 @@ export default function GhostScanner() {
     setIsScanning(true);
     setScanResult(null);
     
+    // Reset checklist for new scan
+    setChecklist({
+      alertScore: false,
+      timeWindow: false,
+      maxPainStrike: false,
+      dteCriteria: false,
+      buyAtAsk: false,
+      riskLimit: false,
+      gtcSellOrder: false,
+      wakeUpTime: false,
+      noFomo: false,
+    });
+    
     try {
       const response = await fetch('/api/ghost/scan');
       const data: GhostScanResult = await response.json();
@@ -155,6 +183,19 @@ export default function GhostScanner() {
     } finally {
       setIsScanning(false);
     }
+  };
+
+  // Check if all checklist items are checked
+  const allChecklistItemsChecked = Object.values(checklist).every(item => item === true);
+
+  // Toggle checklist item
+  const toggleChecklistItem = (key: keyof typeof checklist) => {
+    setChecklist(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  // Handle "Ready to Trade" button click
+  const handleReadyToTrade = () => {
+    alert('✅ Pre-trade checklist complete!\n\nYou are now ready to place your trade manually in your brokerage account.\n\nRemember:\n• Buy at ask with FOK order\n• Set GTC sell order @ 400%+\n• Wake up 9:15 AM → sell 10:15 AM sharp');
   };
 
   return (
@@ -276,6 +317,178 @@ export default function GhostScanner() {
                   <div className="text-sm text-slate-400">Filtered</div>
                   <div className="text-xs text-slate-500 mt-1">{scanResult.stats.filterRate} pass rate</div>
                 </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Pre-Trade Checklist */}
+        {scanResult && scanResult.topPlays.length > 0 && (
+          <Card className="bg-gradient-to-r from-purple-900/50 to-slate-800/50 border-purple-500/50">
+            <CardHeader>
+              <CardTitle className="text-white flex items-center gap-2">
+                <ClipboardCheck className="w-6 h-6 text-purple-400" />
+                GHOST CHECKLIST (Tape to Monitor)
+              </CardTitle>
+              <CardDescription className="text-slate-300">
+                Complete all items before executing trade. All boxes must be checked.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex items-center space-x-3 p-3 rounded-lg hover:bg-slate-900/30 transition-colors">
+                <Checkbox
+                  id="alert-score"
+                  checked={checklist.alertScore}
+                  onCheckedChange={() => toggleChecklistItem('alertScore')}
+                  data-testid="checkbox-alert-score"
+                />
+                <label
+                  htmlFor="alert-score"
+                  className="text-sm font-medium text-white cursor-pointer flex-1"
+                >
+                  Alert ≥94 score
+                </label>
+              </div>
+
+              <div className="flex items-center space-x-3 p-3 rounded-lg hover:bg-slate-900/30 transition-colors">
+                <Checkbox
+                  id="time-window"
+                  checked={checklist.timeWindow}
+                  onCheckedChange={() => toggleChecklistItem('timeWindow')}
+                  data-testid="checkbox-time-window"
+                />
+                <label
+                  htmlFor="time-window"
+                  className="text-sm font-medium text-white cursor-pointer flex-1"
+                >
+                  Time 3:00–4:00 PM EST
+                </label>
+              </div>
+
+              <div className="flex items-center space-x-3 p-3 rounded-lg hover:bg-slate-900/30 transition-colors">
+                <Checkbox
+                  id="max-pain-strike"
+                  checked={checklist.maxPainStrike}
+                  onCheckedChange={() => toggleChecklistItem('maxPainStrike')}
+                  data-testid="checkbox-max-pain-strike"
+                />
+                <label
+                  htmlFor="max-pain-strike"
+                  className="text-sm font-medium text-white cursor-pointer flex-1"
+                >
+                  Strike = Max Pain ±1
+                </label>
+              </div>
+
+              <div className="flex items-center space-x-3 p-3 rounded-lg hover:bg-slate-900/30 transition-colors">
+                <Checkbox
+                  id="dte-criteria"
+                  checked={checklist.dteCriteria}
+                  onCheckedChange={() => toggleChecklistItem('dteCriteria')}
+                  data-testid="checkbox-dte-criteria"
+                />
+                <label
+                  htmlFor="dte-criteria"
+                  className="text-sm font-medium text-white cursor-pointer flex-1"
+                >
+                  0DTE or 1DTE only
+                </label>
+              </div>
+
+              <div className="flex items-center space-x-3 p-3 rounded-lg hover:bg-slate-900/30 transition-colors">
+                <Checkbox
+                  id="buy-at-ask"
+                  checked={checklist.buyAtAsk}
+                  onCheckedChange={() => toggleChecklistItem('buyAtAsk')}
+                  data-testid="checkbox-buy-at-ask"
+                />
+                <label
+                  htmlFor="buy-at-ask"
+                  className="text-sm font-medium text-white cursor-pointer flex-1"
+                >
+                  Buy at ask, FOK
+                </label>
+              </div>
+
+              <div className="flex items-center space-x-3 p-3 rounded-lg hover:bg-slate-900/30 transition-colors">
+                <Checkbox
+                  id="risk-limit"
+                  checked={checklist.riskLimit}
+                  onCheckedChange={() => toggleChecklistItem('riskLimit')}
+                  data-testid="checkbox-risk-limit"
+                />
+                <label
+                  htmlFor="risk-limit"
+                  className="text-sm font-medium text-white cursor-pointer flex-1"
+                >
+                  Risk ≤40% account
+                </label>
+              </div>
+
+              <div className="flex items-center space-x-3 p-3 rounded-lg hover:bg-slate-900/30 transition-colors">
+                <Checkbox
+                  id="gtc-sell-order"
+                  checked={checklist.gtcSellOrder}
+                  onCheckedChange={() => toggleChecklistItem('gtcSellOrder')}
+                  data-testid="checkbox-gtc-sell-order"
+                />
+                <label
+                  htmlFor="gtc-sell-order"
+                  className="text-sm font-medium text-white cursor-pointer flex-1"
+                >
+                  Set GTC sell order @ 400%+ for overnight
+                </label>
+              </div>
+
+              <div className="flex items-center space-x-3 p-3 rounded-lg hover:bg-slate-900/30 transition-colors">
+                <Checkbox
+                  id="wake-up-time"
+                  checked={checklist.wakeUpTime}
+                  onCheckedChange={() => toggleChecklistItem('wakeUpTime')}
+                  data-testid="checkbox-wake-up-time"
+                />
+                <label
+                  htmlFor="wake-up-time"
+                  className="text-sm font-medium text-white cursor-pointer flex-1"
+                >
+                  Wake up 9:15 AM → sell 10:15 AM sharp
+                </label>
+              </div>
+
+              <div className="flex items-center space-x-3 p-3 rounded-lg hover:bg-slate-900/30 transition-colors">
+                <Checkbox
+                  id="no-fomo"
+                  checked={checklist.noFomo}
+                  onCheckedChange={() => toggleChecklistItem('noFomo')}
+                  data-testid="checkbox-no-fomo"
+                />
+                <label
+                  htmlFor="no-fomo"
+                  className="text-sm font-medium text-white cursor-pointer flex-1"
+                >
+                  NO FOMO if missed → next ghost tomorrow
+                </label>
+              </div>
+
+              <Separator className="bg-purple-500/30 my-4" />
+
+              <div className="flex items-center justify-between pt-2">
+                <div className="text-sm text-slate-400">
+                  {Object.values(checklist).filter(v => v).length} / 9 items checked
+                </div>
+                <Button
+                  onClick={handleReadyToTrade}
+                  disabled={!allChecklistItemsChecked}
+                  className={`${
+                    allChecklistItemsChecked
+                      ? 'bg-green-600 hover:bg-green-700'
+                      : 'bg-slate-700 cursor-not-allowed'
+                  }`}
+                  data-testid="button-ready-to-trade"
+                >
+                  <CheckCircle2 className="w-4 h-4 mr-2" />
+                  {allChecklistItemsChecked ? 'Ready to Trade' : 'Complete Checklist First'}
+                </Button>
               </div>
             </CardContent>
           </Card>
