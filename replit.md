@@ -33,15 +33,19 @@ Preferred communication style: Simple, everyday language.
 
 ## Core Business Logic
 
-### Market Scanning (Elite Two-Stage Market Scanner - COMPLETE COVERAGE)
-- **Stage 1 (Complete Pre-Screen)**: Fetches ALL ~9,000 stocks from Polygon Bulk Snapshot (all pages, ~40-100s). **NO CACHING** for fresh opportunities every scan. Guarantees COMPLETE market coverage including all stocks A-Z, ensuring no opportunity is missed. Every scan finds NEW movers as market evolves.
-- **Stage 2 (Deep Analysis)**: Performs detailed analysis on top 200 candidates, including Fibonacci validation, Greeks calculations, market sentiment, and RSI-based momentum signals, yielding top 15 swing trades.
-- **Output**: Top 20 plays (SPX day trades + 15 swing trades).
-- **Performance**: ~40-100s Stage 1 + ~2-3min Stage 2 = **~3-5 minutes total per scan** (comprehensive fresh data).
-- **Coverage**: ALL ~9,000 liquid stocks (COMPLETE market, A-Z alphabetically, no gaps).
-- **Guaranteed Symbols**: ALL stocks including TSLA, NVDA, SPY, QQQ, META, MSFT, UBER, PLTR, etc.
+### Market Scanning
+
+#### Dual Scanner Architecture
+- **UOA Scanner (Primary)**: Fast background scanner running every 2 minutes, scans 5 high-liquidity stocks (SPY, QQQ, AAPL, TSLA, NVDA) for Unusual Options Activity. Completes in <60s respecting Polygon 5 API calls/min limit.
+- **Elite Scanner (Quality Filter)**: Institutional-grade scanner with strict filtering (RSI cross, IV rank ≤18%, Fibonacci proximity ≤0.5%, VIX requirements). Only triggers when perfect setups align, maintaining 80%+ win rate target.
+- **Dashboard Loading**: Instant (<100ms) non-blocking response. Shows empty state if no plays meet strict criteria, auto-populates as plays become eligible, removes as they invalidate.
+
+#### Elite Two-Stage Market Scanner
+- **Stage 1 (Complete Pre-Screen)**: Fetches ALL ~9,000 stocks from Polygon Bulk Snapshot (all pages, ~40-100s). **NO CACHING** for fresh opportunities every scan.
+- **Stage 2 (Deep Analysis)**: Performs detailed analysis on top 200 candidates, including Fibonacci validation, Greeks calculations, market sentiment, and RSI-based momentum signals.
+- **Performance**: ~3-5 minutes total per scan (comprehensive fresh data).
 - **Fallback System**: Grouped daily bars with 10-day holiday-aware lookup, curated stock universe with p-limit throttling.
-- **ExpirationService**: Queries live option chains from Polygon (stocks) and Tastytrade (SPX) for accurate expiration dates, including weeklies, monthlies, and quarterlies, with pagination, circuit breaker, and caching.
+- **ExpirationService**: Queries live option chains from Polygon (stocks) and Tastytrade (SPX) for accurate expiration dates, including weeklies, monthlies, and quarterlies.
 
 ### Trading Systems
 

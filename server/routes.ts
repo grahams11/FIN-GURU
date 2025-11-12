@@ -358,92 +358,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Top Trades endpoint - Returns existing trades from database (auto-refreshes if empty or old)
+  // Top Trades endpoint - Returns existing trades from database (instant, non-blocking)
+  // Background workers (UOA + Elite) populate trades when market conditions are met
   app.get('/api/top-trades', async (req, res) => {
     try {
-      // Check if we have existing trades
-      let trades = await storage.getTopTrades();
-      
-      // Auto-regenerate if: (1) no trades exist OR (2) cached trades are older than 5 minutes
-      // BUT skip regeneration if trades were just created (within 60 seconds) to prevent duplicate generation after POST /api/refresh-trades
-      const shouldRegenerate = trades.length === 0 || (
-        trades.length > 0 && 
-        trades[0].createdAt && 
-        (Date.now() - new Date(trades[0].createdAt).getTime()) > 5 * 60 * 1000
-      );
-      
-      const recentlyCreated = trades.length > 0 && 
-        trades[0].createdAt && 
-        (Date.now() - new Date(trades[0].createdAt).getTime()) < 60 * 1000; // Created within last 60 seconds
-      
-      if (shouldRegenerate && !recentlyCreated) {
-        const reason = trades.length === 0 ? 'No trades in cache' : 'Cache expired (>5 min old)';
-        console.log(`${reason}, automatically refreshing with fresh market data...`);
-        
-        // Clear old trades
-        await storage.clearTrades();
-        
-        // Generate fresh recommendations with current market prices
-        const recommendations = await AIAnalysisService.generateTradeRecommendations();
-        
-        const validRecommendations = recommendations.filter(rec => {
-          return rec && rec.ticker && isFinite(rec.strikePrice) && rec.strikePrice > 0 &&
-                 isFinite(rec.entryPrice) && rec.entryPrice > 0 &&
-                 isFinite(rec.exitPrice) && rec.exitPrice > 0 &&
-                 isFinite(rec.currentPrice) && rec.currentPrice > 0;
-        });
-        
-        // Store the valid recommendations
-        const storedTrades = await Promise.all(
-          validRecommendations.map(async (rec) => {
-            try {
-              // Validate Fibonacci level (must be 0.618 or 0.707 if present)
-              const validFibLevel = rec.fibonacciLevel === 0.618 || rec.fibonacciLevel === 0.707 
-                ? rec.fibonacciLevel 
-                : null;
-              
-              // Validate estimated profit (must be finite number)
-              const validEstimatedProfit = rec.estimatedProfit !== undefined && Number.isFinite(rec.estimatedProfit)
-                ? rec.estimatedProfit
-                : null;
-              
-              return await storage.createOptionsTrade({
-                ticker: rec.ticker,
-                optionType: rec.optionType,
-                currentPrice: rec.currentPrice,
-                strikePrice: rec.strikePrice,
-                expiry: rec.expiry,
-                stockEntryPrice: rec.stockEntryPrice || 0,
-                stockExitPrice: rec.stockExitPrice || null,
-                premium: rec.premium || 0,
-                entryPrice: rec.entryPrice,
-                exitPrice: rec.exitPrice,
-                holdDays: rec.holdDays,
-                totalCost: rec.totalCost,
-                contracts: rec.contracts,
-                projectedROI: rec.projectedROI,
-                aiConfidence: rec.aiConfidence,
-                greeks: rec.greeks,
-                sentiment: rec.sentiment,
-                score: rec.score,
-                fibonacciLevel: validFibLevel,
-                fibonacciColor: rec.fibonacciColor ?? null,
-                estimatedProfit: validEstimatedProfit,
-                isExecuted: false
-              });
-            } catch (error) {
-              console.error(`Error storing trade for ${rec.ticker}:`, error);
-              return null;
-            }
-          })
-        );
-        
-        trades = storedTrades.filter(trade => trade !== null) as OptionsTrade[];
-        console.log(`✅ Fresh market scan complete: ${trades.length} trades with latest prices`);
-      } else if (recentlyCreated) {
-        console.log(`Skipping regeneration: trades were created ${Math.floor((Date.now() - new Date(trades[0].createdAt!).getTime()) / 1000)}s ago`);
-      }
-      
+      // Instantly return whatever trades exist (empty array if none)
+      // NO BLOCKING - background workers handle scanning
+      const trades = await storage.getTopTrades();
       res.json(trades);
     } catch (error) {
       console.error('Error fetching top trades:', error);
