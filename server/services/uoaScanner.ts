@@ -144,7 +144,10 @@ export class UoaScannerService {
         const bars = await polygonService.getHistoricalBars(
           ticker,
           fromDate.toISOString().split('T')[0],
-          toDate.toISOString().split('T')[0]
+          toDate.toISOString().split('T')[0],
+          'day',
+          1,
+          true // Unlimited API (Advanced Options Plan)
         );
         
         if (bars && bars.length >= 15) {
