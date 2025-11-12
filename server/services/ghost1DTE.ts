@@ -30,6 +30,30 @@ interface GhostFunnelCriteria {
   ivPercentileMax: 18; // "Fear crush" setup - IV must be < 18th percentile (252d)
 }
 
+// Mode-Specific Filter Parameters
+interface DTEFilterParams {
+  volumeMin: number;
+  openInterestMin: number;
+  bidAskSpreadMax: number;
+  premiumRange: { min: number; max: number };
+}
+
+// Filter configurations by DTE mode
+const DTE_FILTERS: Record<'0DTE' | '1DTE', DTEFilterParams> = {
+  '0DTE': {
+    volumeMin: 1000,        // 0DTE: Lower volume requirement for same-day trades
+    openInterestMin: 500,   // 0DTE: Lower OI requirement (contracts less established)
+    bidAskSpreadMax: 0.05,  // 0DTE: Wider spread tolerance (more volatile)
+    premiumRange: { min: 0.42, max: 1.85 }
+  },
+  '1DTE': {
+    volumeMin: 8000,        // 1DTE: Higher volume for overnight safety
+    openInterestMin: 45000, // 1DTE: Higher OI for liquidity overnight
+    bidAskSpreadMax: 0.03,  // 1DTE: Tighter spread for overnight holds
+    premiumRange: { min: 0.42, max: 1.85 }
+  }
+};
+
 // Phase 3 Composite Score Components
 interface ScoreComponents {
   vrpScore: number; // 42% weight
@@ -444,8 +468,12 @@ export class Ghost1DTEService {
     const scanStartTime = Date.now();
     let apiCalls = 0;
     
-    console.log('\n👻 ========== GHOST 1DTE SCAN START (PHASE 4) ==========');
+    // Determine DTE mode based on current time
+    const dteTarget = this.determineTargetDTE();
+    
+    console.log('\n👻 ========== GHOST SCANNER START (PHASE 4) ==========');
     console.log(`⏰ Scan time: ${new Date().toLocaleTimeString('en-US', { timeZone: 'America/Chicago' })} CST`);
+    console.log(`🎯 Mode: ${dteTarget.mode} (expiry: ${dteTarget.expiryDate}, exit: ${dteTarget.exitTime})`);
     console.log(`🚀 API Usage: Unlimited (Advanced Options Plan)`);
     console.log(`🧠 Grok Phase 4: 4-layer scoring system active`);
     
@@ -472,10 +500,10 @@ export class Ghost1DTEService {
     
     const allContracts: Ghost1DTEContract[] = [];
     
-    // Step 1: Fetch 1DTE chains for SPY, QQQ, IWM (3 API calls via Polygon snapshot)
+    // Step 1: Fetch chains for SPY, QQQ, IWM (3 API calls via Polygon snapshot)
     for (const symbol of this.SYMBOLS) {
       try {
-        console.log(`\n📡 Fetching 1DTE chain for ${symbol}...`);
+        console.log(`\n📡 Fetching options chain for ${symbol}...`);
         
         // Single Polygon snapshot call per symbol
         const chain = await this.getOptionsChainSnapshot(symbol);
@@ -496,31 +524,53 @@ export class Ghost1DTEService {
           continue;
         }
         
-        // Filter for 1DTE contracts (expiring tomorrow)
-        const tomorrow = this.getTomorrowDate();
-        const oneDTEContracts = chain.results.filter((c: any) => {
-          const expiryDate = new Date(c.expiration_date);
-          return expiryDate.toISOString().split('T')[0] === tomorrow;
+        // Get all unique expiration dates from the actual chain data
+        const uniqueExpiries = Array.from(new Set(
+          chain.results.map((c: any) => c.expiration_date)
+        )).sort();
+        
+        // Find the appropriate expiration based on mode
+        const today = new Date().toISOString().split('T')[0];
+        const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        
+        let targetExpiry: string | null = null;
+        if (dteTarget.mode === '0DTE') {
+          // Find today's expiration (or nearest future expiration)
+          targetExpiry = uniqueExpiries.find(exp => exp >= today) || null;
+        } else {
+          // Find tomorrow's expiration (or nearest future expiration after today)
+          targetExpiry = uniqueExpiries.find(exp => exp > today) || null;
+        }
+        
+        if (!targetExpiry) {
+          console.warn(`⚠️ No suitable ${dteTarget.mode} expiration found for ${symbol}`);
+          console.log(`Available expirations: ${uniqueExpiries.join(', ')}`);
+          continue;
+        }
+        
+        // Filter for target expiration contracts
+        const targetContracts = chain.results.filter((c: any) => {
+          return c.expiration_date === targetExpiry;
         });
         
-        console.log(`🔍 ${symbol}: ${oneDTEContracts.length} contracts match 1DTE (expiry: ${tomorrow})`);
+        console.log(`🔍 ${symbol}: ${targetContracts.length} contracts match ${dteTarget.mode} (expiry: ${targetExpiry})`);
         
         // Pre-compute Greeks surface for all strikes
         const strikeSet = new Set<number>();
-        oneDTEContracts.forEach((c: any) => {
+        targetContracts.forEach((c: any) => {
           if (typeof c.strike_price === 'number') {
             strikeSet.add(c.strike_price);
           }
         });
         const strikes = Array.from(strikeSet);
-        const T = this.calculateTimeToExpiry(); // ~18 hours overnight
+        const T = dteTarget.timeToExpiryYears; // Time to expiry based on DTE mode
         const avgIV = this.hvCache.get(symbol) || 0.20;
         
         OptimizedGreeksCalculator.precomputeSurface(symbol, currentPrice, strikes, T, this.RISK_FREE_RATE, avgIV);
         
         // PHASE 4: Pre-calculate max pain, IV skew, and RSI using ALREADY-FETCHED data
         // This reuses the snapshot from above (NO additional API calls)
-        const maxPain = this.calculateMaxPainFromSnapshot(chain.results, tomorrow);
+        const maxPain = this.calculateMaxPainFromSnapshot(chain.results, targetExpiry);
         const ivSkew = this.getIVSkewFromSnapshot(chain.results);
         
         // Calculate RSI once per symbol using bulk-fetched historical bars
@@ -528,14 +578,14 @@ export class Ghost1DTEService {
         const rsi = this.calculateSymbolRSIFromBars(symbolBars);
         
         // Ensure HV distribution is cached for IV percentile calculation (if not already cached from initialization)
-        const today = new Date().toISOString().split('T')[0];
+        const currentDate = new Date().toISOString().split('T')[0];
         const cached = this.hvDistributionCache.get(symbol);
-        if (!cached || cached.lastUpdated !== today) {
+        if (!cached || cached.lastUpdated !== currentDate) {
           const hvDistribution = this.buildHVDistributionFromBars(symbolBars);
           if (hvDistribution.length > 0) {
             this.hvDistributionCache.set(symbol, {
               distribution: hvDistribution,
-              lastUpdated: today
+              lastUpdated: currentDate
             });
           }
         }
@@ -547,8 +597,8 @@ export class Ghost1DTEService {
         console.log(`${symbol} Phase 4 Data: Max Pain $${maxPain?.toFixed(2) || 'N/A'}, IV Skew ${ivSkew ? `Calls ${(ivSkew.callIV*100).toFixed(1)}% / Puts ${(ivSkew.putIV*100).toFixed(1)}%` : 'N/A'}, RSI ${rsi?.toFixed(1) || 'N/A'}`);
         
         // Process each contract through Ghost Funnel
-        for (const contract of oneDTEContracts) {
-          const processed = await this.processContract(symbol, contract, currentPrice, T);
+        for (const contract of targetContracts) {
+          const processed = await this.processContract(symbol, contract, currentPrice, T, targetExpiry);
           if (processed) {
             allContracts.push(processed);
           }
@@ -594,7 +644,8 @@ export class Ghost1DTEService {
     symbol: string,
     contract: any,
     currentPrice: number,
-    T: number
+    T: number,
+    targetExpiry: string
   ): Promise<Ghost1DTEContract | null> {
     try {
       // Extract contract details
@@ -607,25 +658,23 @@ export class Ghost1DTEService {
       const oi = contract.open_interest || 0;
       const iv = contract.implied_volatility || this.hvCache.get(symbol) || 0.20;
       
-      const contractLabel = `${symbol} ${strike}${optionType[0].toUpperCase()}`;
-      console.log(`\n🔍 Processing ${contractLabel}: Mark=$${mark.toFixed(2)}, IV=${(iv*100).toFixed(1)}%, Vol=${volume}, OI=${oi}`);
+      // Get mode-specific filter params
+      const dteMode = this.determineTargetDTE().mode;
+      const filters = DTE_FILTERS[dteMode];
       
       // Ghost Funnel Filter 1: Premium range
-      if (mark < 0.42 || mark > 1.85) {
-        console.log(`  ❌ Filter 1: Premium $${mark.toFixed(2)} outside range [$0.42-$1.85]`);
+      if (mark < filters.premiumRange.min || mark > filters.premiumRange.max) {
         return null;
       }
       
       // Ghost Funnel Filter 2: Bid/Ask spread
       const spread = ask - bid;
-      if (spread > 0.03) {
-        console.log(`  ❌ Filter 2: Spread $${spread.toFixed(3)} > $0.03`);
+      if (spread > filters.bidAskSpreadMax) {
         return null;
       }
       
-      // Ghost Funnel Filter 3: Volume & OI (last 15 min of day)
-      if (volume < 8000 || oi < 45000) {
-        console.log(`  ❌ Filter 3: Vol ${volume} < 8000 or OI ${oi} < 45000`);
+      // Ghost Funnel Filter 3: Volume & OI
+      if (volume < filters.volumeMin || oi < filters.openInterestMin) {
         return null;
       }
       
@@ -712,7 +761,7 @@ export class Ghost1DTEService {
         symbol,
         strike,
         optionType,
-        expiry: this.getTomorrowDate(),
+        expiry: targetExpiry,
         premium: mark,
         bid,
         ask,
@@ -1053,29 +1102,75 @@ export class Ghost1DTEService {
   }
   
   /**
-   * Calculate time to expiry for 1DTE overnight hold
-   * Entry: 2:00-3:00pm CST today → Exit: 8:32am CST tomorrow
-   * Total: ~17-18 hours
+   * Get current time in Chicago (CST/CDT) timezone
    */
-  private static calculateTimeToExpiry(): number {
+  private static getCurrentChicagoTime(): Date {
     const now = new Date();
-    const tomorrow = new Date(now);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    tomorrow.setHours(8, 32, 0, 0); // 8:32am CST next day
-    
-    const hoursToExpiry = (tomorrow.getTime() - now.getTime()) / (1000 * 60 * 60);
-    const yearsToExpiry = hoursToExpiry / (24 * 365);
-    
-    return yearsToExpiry;
+    const cstString = now.toLocaleString('en-US', { timeZone: 'America/Chicago' });
+    return new Date(cstString);
   }
   
   /**
-   * Get tomorrow's date in YYYY-MM-DD format
+   * Determine target DTE mode and expiry based on current time
+   * Morning (before 2pm CST): 0DTE - scan for same-day expiration
+   * Afternoon (2pm+ CST): 1DTE - scan for overnight plays
+   */
+  private static determineTargetDTE(): { mode: '0DTE' | '1DTE'; expiryDate: string; timeToExpiryYears: number; exitTime: string } {
+    const now = new Date();
+    const cstTime = this.getCurrentChicagoTime();
+    const hour = cstTime.getHours();
+    
+    // Before 2pm CST: scan for 0DTE (same-day expiration at 4pm)
+    if (hour < 14) {
+      const expiryDate = now.toISOString().split('T')[0]; // Today
+      const exitTime = new Date(cstTime);
+      exitTime.setHours(16, 0, 0, 0); // 4:00pm CST today
+      
+      const hoursToExpiry = Math.max(0.5, (exitTime.getTime() - now.getTime()) / (1000 * 60 * 60));
+      const yearsToExpiry = hoursToExpiry / (24 * 365);
+      
+      return {
+        mode: '0DTE',
+        expiryDate,
+        timeToExpiryYears: yearsToExpiry,
+        exitTime: '4:00pm CST today'
+      };
+    } else {
+      // 2pm+ CST: scan for 1DTE (overnight play, exit 8:32am next day)
+      const tomorrow = new Date(now);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const expiryDate = tomorrow.toISOString().split('T')[0];
+      
+      const exitTime = new Date(tomorrow);
+      exitTime.setHours(8, 32, 0, 0); // 8:32am CST next day
+      
+      const hoursToExpiry = (exitTime.getTime() - now.getTime()) / (1000 * 60 * 60);
+      const yearsToExpiry = hoursToExpiry / (24 * 365);
+      
+      return {
+        mode: '1DTE',
+        expiryDate,
+        timeToExpiryYears: yearsToExpiry,
+        exitTime: '8:32am CST tomorrow'
+      };
+    }
+  }
+  
+  /**
+   * Calculate time to expiry (in years for Black-Scholes)
+   * Uses time-aware DTE mode (0DTE morning, 1DTE afternoon)
+   * @deprecated Use determineTargetDTE() instead
+   */
+  private static calculateTimeToExpiry(): number {
+    return this.determineTargetDTE().timeToExpiryYears;
+  }
+  
+  /**
+   * Get target expiration date based on time of day
+   * @deprecated Use determineTargetDTE() instead
    */
   private static getTomorrowDate(): string {
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    return tomorrow.toISOString().split('T')[0];
+    return this.determineTargetDTE().expiryDate;
   }
   
   /**
