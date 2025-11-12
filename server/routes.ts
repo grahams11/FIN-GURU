@@ -1508,8 +1508,14 @@ Historical win rate same setup: ${play.historicalWinRate.toFixed(1)}%`
         targetTime: '<0.7 seconds',
         meetsTarget: scanTime < 700,
         apiCalls: result.apiCalls,
-        apiLimit: 4,
-        withinLimit: result.apiCalls <= 4,
+        
+        // API usage information for unlimited mode
+        apiUsage: {
+          mode: 'unlimited' as const,
+          callsUsed: result.apiCalls,
+          statusLabel: 'Unlimited',
+          withinLimit: true
+        },
         
         topPlays: formattedPlays,
         
@@ -1525,7 +1531,7 @@ Historical win rate same setup: ${play.historicalWinRate.toFixed(1)}%`
           scanTimeSec: (scanTime / 1000).toFixed(2),
           apiCallsUsed: result.apiCalls,
           speedStatus: scanTime < 700 ? '✅ Under 0.7s target' : '⚠️ Exceeds target',
-          apiStatus: result.apiCalls <= 4 ? '✅ Within 4 API limit' : '⚠️ Exceeds API limit'
+          apiStatus: '✅ Unlimited (Advanced Options Plan)'
         }
       });
       
