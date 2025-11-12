@@ -168,10 +168,27 @@ export class GhostScheduler {
   private static async checkMarketTiming(): Promise<void> {
     try {
       const now = new Date();
-      const cstTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/Chicago' }));
-      const hour = cstTime.getHours();
-      const minute = cstTime.getMinutes();
-      const dayOfWeek = cstTime.getDay(); // 0 = Sunday, 6 = Saturday
+      
+      // Get CST hour/minute/day properly using Intl API
+      const cstHour = parseInt(now.toLocaleString('en-US', { 
+        timeZone: 'America/Chicago', 
+        hour: 'numeric', 
+        hour12: false 
+      }));
+      const cstMinute = parseInt(now.toLocaleString('en-US', { 
+        timeZone: 'America/Chicago', 
+        minute: 'numeric' 
+      }));
+      
+      // Get day of week in CST timezone
+      const cstDateStr = now.toLocaleDateString('en-US', { 
+        timeZone: 'America/Chicago',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      });
+      const cstDate = new Date(cstDateStr);
+      const dayOfWeek = cstDate.getDay(); // 0 = Sunday, 6 = Saturday
       
       // Skip weekends
       if (dayOfWeek === 0 || dayOfWeek === 6) {
@@ -179,22 +196,34 @@ export class GhostScheduler {
       }
       
       // Skip market holidays
-      if (this.isMarketHoliday(cstTime)) {
-        console.log(`📅 Skipping scan - Market holiday: ${cstTime.toISOString().split('T')[0]}`);
+      if (this.isMarketHoliday(cstDate)) {
+        console.log(`📅 Skipping scan - Market holiday: ${cstDate.toISOString().split('T')[0]}`);
         return;
       }
       
-      // Market close window: 2:00pm - 3:00pm CST
-      const inScanWindow = hour === 14 || (hour === 15 && minute === 0);
+      // Market close window: 2:00pm - 3:00pm CST (14:00 - 15:00)
+      const inScanWindow = cstHour === 14 || (cstHour === 15 && cstMinute === 0);
       
       // Only trigger scan once when entering window
       if (inScanWindow && !this.isMarketHours) {
         this.isMarketHours = true;
-        console.log(`\n🔔 Ghost scan window OPEN (${cstTime.toLocaleTimeString('en-US', { timeZone: 'America/Chicago' })} CST)`);
+        const timeStr = now.toLocaleString('en-US', { 
+          timeZone: 'America/Chicago',
+          hour: 'numeric',
+          minute: '2-digit',
+          hour12: true
+        });
+        console.log(`\n🔔 Ghost scan window OPEN (${timeStr} CST)`);
         await this.runAutomatedScan();
       } else if (!inScanWindow && this.isMarketHours) {
         this.isMarketHours = false;
-        console.log(`\n🔕 Ghost scan window CLOSED (${cstTime.toLocaleTimeString('en-US', { timeZone: 'America/Chicago' })} CST)`);
+        const timeStr = now.toLocaleString('en-US', { 
+          timeZone: 'America/Chicago',
+          hour: 'numeric',
+          minute: '2-digit',
+          hour12: true
+        });
+        console.log(`\n🔕 Ghost scan window CLOSED (${timeStr} CST)`);
       }
       
     } catch (error) {

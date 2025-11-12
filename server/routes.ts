@@ -1580,39 +1580,70 @@ Historical win rate same setup: ${play.historicalWinRate.toFixed(1)}%`
   app.get('/api/ghost/status', async (req, res) => {
     try {
       const now = new Date();
-      const cstTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/Chicago' }));
-      const hour = cstTime.getHours();
-      const minute = cstTime.getMinutes();
       
-      // Market close window: 2:00pm - 3:00pm CST
-      const inScanWindow = hour === 14 || (hour === 15 && minute === 0);
+      // Get CST hour and minute directly using Intl API
+      const cstHour = parseInt(now.toLocaleString('en-US', { 
+        timeZone: 'America/Chicago', 
+        hour: 'numeric', 
+        hour12: false 
+      }));
+      const cstMinute = parseInt(now.toLocaleString('en-US', { 
+        timeZone: 'America/Chicago', 
+        minute: 'numeric' 
+      }));
+      
+      // Market close window: 2:00pm - 3:00pm CST (14:00 - 15:00)
+      const inScanWindow = cstHour === 14 || (cstHour === 15 && cstMinute === 0);
       
       // Calculate time until next scan window
-      let nextScanTime = new Date(cstTime);
-      if (hour < 14) {
-        // Today at 2:00pm
+      const cstOffset = -6 * 60; // CST is UTC-6
+      const localOffset = now.getTimezoneOffset();
+      const offsetDiff = localOffset + cstOffset;
+      
+      const nowInCST = new Date(now.getTime() - offsetDiff * 60 * 1000);
+      let nextScanTime = new Date(nowInCST);
+      
+      if (cstHour < 14) {
+        // Today at 2:00pm CST
         nextScanTime.setHours(14, 0, 0, 0);
       } else {
-        // Tomorrow at 2:00pm
+        // Tomorrow at 2:00pm CST
         nextScanTime.setDate(nextScanTime.getDate() + 1);
         nextScanTime.setHours(14, 0, 0, 0);
       }
       
-      const timeUntilScan = nextScanTime.getTime() - cstTime.getTime();
+      const timeUntilScan = nextScanTime.getTime() - nowInCST.getTime();
       const hoursUntil = Math.floor(timeUntilScan / (1000 * 60 * 60));
       const minutesUntil = Math.floor((timeUntilScan % (1000 * 60 * 60)) / (1000 * 60));
       
+      // Format current time in CST with 12-hour format
+      const currentTimeStr = now.toLocaleString('en-US', { 
+        timeZone: 'America/Chicago',
+        hour: 'numeric',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: true
+      });
+      
+      // Format next scan time
+      const nextScanStr = nextScanTime.toLocaleString('en-US', { 
+        timeZone: 'America/Chicago',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true
+      });
+      
       res.json({
-        currentTime: cstTime.toLocaleTimeString('en-US', { timeZone: 'America/Chicago' }),
+        currentTime: currentTimeStr,
         inScanWindow,
-        scanWindowStart: '2:00pm CST',
-        scanWindowEnd: '3:00pm CST',
-        nextScanTime: nextScanTime.toLocaleTimeString('en-US', { timeZone: 'America/Chicago' }),
+        scanWindowStart: '2:00 PM CST',
+        scanWindowEnd: '3:00 PM CST',
+        nextScanTime: nextScanStr,
         timeUntilScan: `${hoursUntil}h ${minutesUntil}m`,
         systemStatus: 'operational',
         targetUniverse: ['SPY', 'QQQ', 'IWM'],
         expectedWinRate: '94.1%',
-        holdPeriod: 'Overnight (2:00-3:00pm → 8:32am CST)',
+        holdPeriod: 'Overnight (2:00-3:00 PM → 8:32 AM CST)',
         apiLimit: 4,
         speedTarget: '<0.7 seconds'
       });
