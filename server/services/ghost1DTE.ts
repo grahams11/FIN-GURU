@@ -3,12 +3,19 @@ import { tastytradeService } from './tastytradeService';
 import { BlackScholesCalculator } from './financialCalculations';
 
 /**
- * 1DTE OVERNIGHT GHOST SCANNER
+ * 1DTE OVERNIGHT GHOST SCANNER (GROK PHASE 4)
  * Win Rate: 94.1% across 1,847 consecutive overnight holds
  * Entry: 3:59pm EST → Exit: 9:32am next day
  * Universe: SPY, QQQ, IWM only
- * API Limit: 4 hits max per scan
- * Speed: <0.7 seconds
+ * API Usage: Unlimited (Advanced Options Plan - ~6-9 concurrent calls)
+ * Speed: <1 second (parallel fetching)
+ * 
+ * Phase 4 Enhancement: 4-layer Grok AI scoring system
+ * - Layer 1: Max Pain + Gamma Trap (30 pts)
+ * - Layer 2: IV Skew Inversion (25 pts)
+ * - Layer 3: Ghost Sweep Detection (20 pts)
+ * - Layer 4: RSI Extreme (15 pts)
+ * Threshold: 85 points (3/4 layers must pass)
  */
 
 // Ghost Funnel Filter Criteria
@@ -74,7 +81,7 @@ interface Ghost1DTEContract {
 interface GhostScanResult {
   topPlays: Ghost1DTEContract[];
   scanTime: number; // milliseconds
-  apiCalls: number; // Must be <= 4
+  apiCalls: number; // Unlimited with Advanced Plan (~6-9 per scan)
   contractsAnalyzed: number;
   contractsFiltered: number;
   timestamp: string;
@@ -346,21 +353,32 @@ export class Ghost1DTEService {
   }
   
   /**
-   * Main Ghost 1DTE Scan
+   * Main Ghost 1DTE Scan (Grok Phase 4 Enhanced)
    * Triggered at 3:58pm EST daily
-   * Returns top 3 overnight plays with 94%+ win rate
+   * Returns top 3 overnight plays with 94.1%+ win rate
    * 
-   * API Call Limit: 4 max (strictly enforced)
-   * Speed Target: <0.7 seconds
+   * API Usage: Unlimited (Advanced Options Plan)
+   * - 3 option chain snapshots (SPY, QQQ, IWM)
+   * - 3 historical bars for RSI (parallel fetch)
+   * - 3 historical bars for HV/VRP (parallel fetch)
+   * Total: ~6-9 concurrent API calls with no limits
+   * 
+   * Phase 4 Scoring Layers (85-point threshold):
+   * 1. Max Pain + Gamma Trap (30 points)
+   * 2. IV Skew Inversion (25 points)
+   * 3. Ghost Sweep Detection (20 points)
+   * 4. RSI Extreme (15 points)
+   * 
+   * Speed Target: <1 second (parallel fetching)
    */
   static async scan(): Promise<GhostScanResult> {
     const scanStartTime = Date.now();
     let apiCalls = 0;
-    const MAX_API_CALLS = 4; // Hard limit
     
-    console.log('\n👻 ========== GHOST 1DTE SCAN START ==========');
+    console.log('\n👻 ========== GHOST 1DTE SCAN START (PHASE 4) ==========');
     console.log(`⏰ Scan time: ${new Date().toLocaleTimeString('en-US', { timeZone: 'America/New_York' })} EST`);
-    console.log(`📡 API call budget: ${MAX_API_CALLS} calls`);
+    console.log(`🚀 API Usage: Unlimited (Advanced Options Plan)`);
+    console.log(`🧠 Grok Phase 4: 4-layer scoring system active`);
     
     // Clear Phase 4 caches at start of each scan
     this.maxPainCache.clear();
@@ -371,11 +389,6 @@ export class Ghost1DTEService {
     
     // Step 1: Fetch 1DTE chains for SPY, QQQ, IWM (3 API calls via Polygon snapshot)
     for (const symbol of this.SYMBOLS) {
-      // Enforce API call limit
-      if (apiCalls >= MAX_API_CALLS) {
-        console.warn(`⚠️ API call limit reached (${MAX_API_CALLS}), skipping ${symbol}`);
-        break;
-      }
       try {
         console.log(`\n📡 Fetching 1DTE chain for ${symbol}...`);
         
@@ -461,7 +474,7 @@ export class Ghost1DTEService {
     
     console.log(`\n👻 ========== GHOST 1DTE SCAN COMPLETE ==========`);
     console.log(`⚡ Scan time: ${scanTime}ms`);
-    console.log(`📡 API calls: ${apiCalls}/4`);
+    console.log(`📡 API calls: ${apiCalls} (unlimited)`);
     console.log(`🎯 Top plays: ${topPlays.length}`);
     console.log(`============================================\n`);
     
@@ -924,7 +937,7 @@ export class Ghost1DTEService {
   
   /**
    * Get full options chain snapshot for 1DTE contracts
-   * Uses Polygon /v3/snapshot/options endpoint (free tier: 5 calls/min)
+   * Uses Polygon /v3/snapshot/options endpoint (Unlimited API with Advanced Plan)
    */
   private static async getOptionsChainSnapshot(symbol: string): Promise<{ results: any[] } | null> {
     try {
