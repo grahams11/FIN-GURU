@@ -53,6 +53,11 @@ Preferred communication style: Simple, everyday language.
 - **Trade Budget**: $1000 maximum per trade with smart contract allocation.
 - **Fibonacci Retracement Validation**: Validates entry points using Fibonacci levels with fractal swing detection.
 - **Dashboard Market Overview**: Displays real-time S&P 500, NASDAQ, and VIX metrics.
+- **Recommendation Validation System**: Automatically filters stale and invalid recommendations using two criteria:
+    - **Staleness Filter**: Removes recommendations >120min old to ensure fresh market data
+    - **Price Movement Filter**: Removes recommendations with >2% adverse price movement from entry thesis
+    - **Auto-Refresh**: Background job refreshes all recommendations every 15 minutes during market hours (9:30am-4:00pm ET)
+    - **Logging**: Detailed filtering reasons (e.g., "Stale (869min old)") for debugging
 
 ### Self-Learning System (AI Education Engine)
 - **Architecture**: Five core services orchestrate autonomous learning using Grok AI reasoning.
