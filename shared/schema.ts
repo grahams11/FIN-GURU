@@ -22,6 +22,7 @@ export const marketData = pgTable("market_data", {
 export const optionsTrade = pgTable("options_trades", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   ticker: text("ticker").notNull(),
+  optionSymbol: text("option_symbol"), // OCC format for live premium fetching (e.g., ".SPY251113C00680000")
   optionType: text("option_type"), // 'call' | 'put'
   currentPrice: real("current_price").notNull(),
   strikePrice: real("strike_price").notNull(),
