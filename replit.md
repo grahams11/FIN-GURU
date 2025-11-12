@@ -61,13 +61,25 @@ Preferred communication style: Simple, everyday language.
 
 ### Trading Systems
 
-#### Ghost 1DTE Overnight Scanner (NEW)
+#### Ghost 1DTE Overnight Scanner (GROK PHASE 4 ENHANCED)
 - **Target Win Rate**: 94.1% across 1,847 consecutive overnight holds
 - **Universe**: SPY, QQQ, IWM only
 - **Strategy**: Overnight holds (Entry: 3:59pm EST → Exit: 9:32am next day)
-- **Performance**: <0.7 second scan time, ≤4 API calls per scan
+- **Performance**: <1 second scan time, unlimited API usage (6-9 concurrent calls with Advanced Options Plan)
 - **Auto-Trigger**: Scheduler monitors 3:58-4:00pm EST window for automatic scans
-- **Composite Score**: VRP Score (42%), Theta Crush (31%), Mean Reversion Lock (18%), Volume Vacuum (9%)
+- **Phase 4 AI Enhancement (First Major Learning from Grok)**: 
+  - 4-layer scoring system replaces simple composite
+  - **Layer 1 (30pts)**: Max Pain + Gamma Trap - Detects dealer hedging pressure
+  - **Layer 2 (25pts)**: IV Skew Inversion - Identifies bullish/bearish skew anomalies
+  - **Layer 3 (30pts)**: Ghost Sweep Detection - Captures institutional sweep activity via volume spikes
+  - **Layer 4 (15pts)**: RSI Extreme + DTE - Combines technical oversold/overbought with time decay
+  - **Threshold**: 85 points (allows 3/4 layers to pass, e.g., 30+25+30=85)
+  - **Validation**: Requires at least 2 active layers for quality assurance
+- **Data Optimization**:
+  - Bulk parallel historical data fetching (3 API calls made simultaneously)
+  - Shared historical bars cache for both HV/VRP and RSI calculations
+  - Zero redundant API calls across Phase 4 layers
+  - All scoring layers use pre-fetched snapshot and bulk historical data
 - **Entry Criteria**:
   - Exact 1DTE (tomorrow expiry)
   - Delta 0.12-0.27 (calls) or -0.27--0.12 (puts)
@@ -77,12 +89,13 @@ Preferred communication style: Simple, everyday language.
   - Volume > 8,000 AND OI > 45,000 in last 15 minutes
   - Bid/Ask spread ≤ $0.03
 - **Targets**: +78% premium gain target, -22% stop loss, ≤0.28% underlying move required
-- **Optimizations**:
+- **Technical Optimizations**:
   - Fast erf lookup table (20,000 entries, 0.00005 step)
   - Pre-computed Greeks surface with Float32Array caching
   - Optimized d1/d2/N(d1)/N(d2) calculations
   - 30-day HV cache for VRP calculation
   - IV percentile tracking (252-day lookback)
+  - Symbol-level caching for Max Pain, IV Skew, RSI (refreshed per scan)
 
 #### Day Trading System (SPX Only)
 - **Strategy**: Uses VIX + RSI for BUY/SELL signals on SPX
