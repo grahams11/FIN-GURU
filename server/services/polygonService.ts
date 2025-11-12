@@ -146,7 +146,17 @@ interface PolygonAggregateMessage {
   e: number; // End timestamp
 }
 
-type PolygonMessage = PolygonTradeMessage | PolygonQuoteMessage | PolygonAggregateMessage | { ev: 'status', status: string, message: string };
+export interface PolygonOptionTradeMessage {
+  ev: 'T'; // Trade event
+  sym: string; // Option contract symbol (e.g., "O:NVDA250117C00200000")
+  p: number; // Trade price
+  s: number; // Trade size (contracts)
+  t: number; // Timestamp (Unix ms)
+  c?: number[]; // Trade conditions
+  x?: number; // Exchange ID
+}
+
+type PolygonMessage = PolygonTradeMessage | PolygonQuoteMessage | PolygonAggregateMessage | PolygonOptionTradeMessage | { ev: 'status', status: string, message: string };
 
 enum ConnectionStatus {
   DISCONNECTED = 'disconnected',
@@ -162,8 +172,7 @@ class PolygonService {
   private isConnected = false;
   private subscribedSymbols: Set<string> = new Set();
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 5;
-  private reconnectDelay = 5000; // 5 seconds
+  private reconnectDelay = 5000; // Initial delay: 5 seconds
   private apiKey: string;
   
   // Health tracking
@@ -184,6 +193,9 @@ class PolygonService {
 
   // NOTE: No bulk snapshot caching - we need fresh data for real-time opportunities
   // Caching would give stale movers; users want to see NEW opportunities as they emerge
+  
+  // Option trade callback registry for routing option trades to registered handlers
+  private optionTradeHandlers: Map<string, (trade: PolygonOptionTradeMessage) => void> = new Map();
 
   constructor() {
     // Use the main Polygon API key for WebSocket authentication
@@ -459,7 +471,13 @@ class PolygonService {
         if (message.ev === 'status') {
           this.handleStatusMessage(message);
         } else if (message.ev === 'T') {
-          this.handleTradeMessage(message as PolygonTradeMessage);
+          const tradeMessage = message as PolygonTradeMessage;
+          // Check if this is an option trade (symbol starts with "O:")
+          if (tradeMessage.sym && tradeMessage.sym.startsWith('O:')) {
+            this.handleOptionTradeMessage(tradeMessage as PolygonOptionTradeMessage);
+          } else {
+            this.handleTradeMessage(tradeMessage);
+          }
         } else if (message.ev === 'Q') {
           this.handleQuoteMessage(message as PolygonQuoteMessage);
         } else if (message.ev === 'A' || message.ev === 'AM') {
@@ -567,6 +585,74 @@ class PolygonService {
     });
 
     console.log(`📊 Polygon Aggregate: ${symbol} Close $${close.toFixed(2)} Vol ${volume}`);
+  }
+
+  /**
+   * Handle option trade messages - dispatch to registered callbacks
+   */
+  private handleOptionTradeMessage(trade: PolygonOptionTradeMessage): void {
+    // Dispatch to all registered option trade handlers
+    if (this.optionTradeHandlers.size > 0) {
+      this.optionTradeHandlers.forEach((handler, id) => {
+        try {
+          handler(trade);
+        } catch (error: any) {
+          console.error(`❌ Error in option trade handler '${id}':`, error.message);
+        }
+      });
+    }
+  }
+
+  /**
+   * Register a callback handler for option trade messages
+   */
+  registerOptionTradeHandler(id: string, callback: (trade: PolygonOptionTradeMessage) => void): void {
+    this.optionTradeHandlers.set(id, callback);
+    console.log(`✅ Registered option trade handler: ${id}`);
+  }
+
+  /**
+   * Unregister an option trade callback handler
+   */
+  unregisterOptionTradeHandler(id: string): void {
+    if (this.optionTradeHandlers.delete(id)) {
+      console.log(`✅ Unregistered option trade handler: ${id}`);
+    }
+  }
+
+  /**
+   * Subscribe to option trades for specific patterns
+   * @param patterns Array of patterns like ['T.O:NVDA.*', 'T.O:TSLA.*', ...]
+   */
+  async subscribeToOptionTrades(patterns: string[]): Promise<void> {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      console.warn('⚠️ Cannot subscribe to option trades: WebSocket not connected');
+      return;
+    }
+
+    console.log(`📡 Subscribing to ${patterns.length} option trade patterns...`);
+
+    const subscribeMessage = {
+      action: 'subscribe',
+      params: patterns.join(',')
+    };
+
+    this.ws.send(JSON.stringify(subscribeMessage));
+  }
+
+  /**
+   * Get health status of WebSocket connection
+   */
+  getHealthStatus(): { isConnected: boolean; lastMessageTime: number; isStale: boolean } {
+    const now = Date.now();
+    const lastMessageAge = this.lastMessageTimestamp ? now - this.lastMessageTimestamp : -1;
+    const isStale = lastMessageAge > 30000; // Consider stale if no message in 30 seconds
+    
+    return {
+      isConnected: this.isServiceConnected(),
+      lastMessageTime: this.lastMessageTimestamp,
+      isStale
+    };
   }
 
   /**
@@ -685,27 +771,36 @@ class PolygonService {
   }
 
   /**
-   * Attempt to reconnect to WebSocket
+   * Attempt to reconnect to WebSocket with exponential backoff and unlimited retries
    */
   private attemptReconnect(): void {
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error('❌ Max reconnection attempts reached for Polygon WebSocket');
-      return;
-    }
-
     this.reconnectAttempts++;
-    console.log(`🔄 Attempting to reconnect to Polygon WebSocket (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`);
+    
+    // Exponential backoff: 5s, 10s, 20s, 40s, capped at 60s
+    const delay = Math.min(this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1), 60000);
+    
+    console.log(`🔄 Attempting to reconnect to Polygon WebSocket (attempt ${this.reconnectAttempts}, delay ${(delay/1000).toFixed(1)}s)...`);
 
     setTimeout(() => {
       this.connect().then((success) => {
-        if (success && this.subscribedSymbols.size > 0) {
-          // Re-subscribe to previous symbols
-          const symbols = Array.from(this.subscribedSymbols);
-          this.subscribedSymbols.clear(); // Clear to allow re-subscription
-          this.subscribeToSymbols(symbols);
+        if (success) {
+          // Reset reconnect attempts on successful connection
+          this.reconnectAttempts = 0;
+          
+          // Re-subscribe to previous stock symbols
+          if (this.subscribedSymbols.size > 0) {
+            const symbols = Array.from(this.subscribedSymbols);
+            this.subscribedSymbols.clear(); // Clear to allow re-subscription
+            this.subscribeToSymbols(symbols);
+          }
+          
+          // Re-register option trade handlers (they need to re-subscribe)
+          if (this.optionTradeHandlers.size > 0) {
+            console.log(`🔄 Re-establishing ${this.optionTradeHandlers.size} option trade handlers after reconnect`);
+          }
         }
       });
-    }, this.reconnectDelay);
+    }, delay);
   }
 
   /**

@@ -1,132 +1,90 @@
-import { UoaScannerService } from './uoaScanner';
-import { UoaCache } from './uoaCache';
-import { storage } from '../storage';
+import { ghostSweepDetector, type SweepAlert } from './ghostSweepDetector';
+import { SweepCache } from './sweepCache';
 
 /**
- * UOA Background Worker
- * Continuously scans market for UOA opportunities every 20-30s
- * Updates cache for instant dashboard access
+ * UOA Background Worker - Real-Time Sweep Detection
+ * 
+ * Replaced sequential scanning with event-driven WebSocket monitoring
+ * Listens for institutional sweeps from Ghost Sweep Detector
+ * Updates cache instantly for sub-100ms dashboard responses
+ * 
+ * OLD: Scan 500 stocks sequentially every 2 minutes (20 min scan time)
+ * NEW: Real-time sweep detection via WebSocket (instant alerts)
  */
 
 export class UoaWorker {
-  private static interval: NodeJS.Timeout | null = null;
-  private static readonly SCAN_INTERVAL = 120000; // 2 minutes (respects 5 API calls/min limit)
+  private static initialized = false;
   
   /**
-   * Start background worker
+   * Start background worker - initialize Ghost Sweep Detector
    */
-  static start(): void {
-    console.log('🔄 Starting UOA background worker...');
+  static async start(): Promise<void> {
+    if (this.initialized) {
+      console.log('⚠️ UOA Worker already initialized');
+      return;
+    }
+
+    console.log('🔄 Starting Real-Time UOA Worker...');
     
-    // Run first scan immediately
-    this.runScan();
+    // Initialize Ghost Sweep Detector
+    const success = await ghostSweepDetector.initialize();
     
-    // Then run every 30 seconds
-    this.interval = setInterval(() => {
-      this.runScan();
-    }, this.SCAN_INTERVAL);
-    
-    console.log(`✅ UOA worker started - scanning every ${this.SCAN_INTERVAL / 1000}s`);
+    if (!success) {
+      console.error('❌ Failed to initialize Ghost Sweep Detector');
+      return;
+    }
+
+    // Listen for ghost alerts (score 94+)
+    ghostSweepDetector.on('ghostAlert', (sweep: SweepAlert) => {
+      console.log(`🚨 Ghost Alert: ${sweep.ticker} ${sweep.side} $${sweep.strike} | Score ${sweep.phase4Score?.totalScore}/100 | Premium $${sweep.premium.toLocaleString()}`);
+      this.handleGhostAlert(sweep);
+    });
+
+    // Initialize cache with empty state
+    SweepCache.clear();
+
+    this.initialized = true;
+    console.log('✅ Real-Time UOA Worker active - monitoring for institutional sweeps');
+    console.log(`📊 Watching ${20} high-volume tickers for $2M+ sweeps`);
   }
   
   /**
    * Stop background worker
    */
   static stop(): void {
-    if (this.interval) {
-      clearInterval(this.interval);
-      this.interval = null;
-      console.log('🛑 UOA worker stopped');
+    if (ghostSweepDetector) {
+      ghostSweepDetector.cleanup();
+      this.initialized = false;
+      console.log('🛑 Real-Time UOA Worker stopped');
     }
   }
   
   /**
-   * Run a single scan and update cache + storage
+   * Handle incoming ghost alert
+   * Update cache instantly
    */
-  private static async runScan(): Promise<void> {
-    // Skip if already scanning
-    if (UoaCache.getScanStatus()) {
-      console.log('⏭️ Skipping scan - previous scan still running');
-      return;
-    }
-    
+  private static handleGhostAlert(sweep: SweepAlert): void {
     try {
-      UoaCache.setScanStatus(true);
-      console.log('\n🔍 UOA Worker: Starting scheduled scan...');
+      // Add sweep to cache (automatically manages top 50)
+      SweepCache.add(sweep);
       
-      const startTime = Date.now();
-      const topTrades = await UoaScannerService.scan();
-      const duration = Date.now() - startTime;
-      
-      // Update cache for instant API responses
-      UoaCache.set(topTrades);
-      
-      // Persist to database so /api/top-trades can serve them
-      await this.persistToStorage(topTrades);
-      
-      console.log(`✅ UOA scan complete in ${(duration / 1000).toFixed(1)}s - cache + DB updated`);
-    } catch (error) {
-      console.error('❌ UOA scan error:', error);
-    } finally {
-      UoaCache.setScanStatus(false);
+      console.log(`✅ Sweep cache updated - ${SweepCache.count()} total alerts`);
+    } catch (error: any) {
+      console.error('❌ Error handling ghost alert:', error.message);
     }
   }
   
   /**
-   * Persist UOA trades to database
-   * Clears old trades and writes new ones
+   * Get current sweep alerts (for API endpoints)
    */
-  private static async persistToStorage(trades: any[]): Promise<void> {
-    try {
-      // Clear all existing trades
-      await storage.clearTrades();
-      
-      // Convert UOA trades to OptionsTrade format and store
-      for (const trade of trades) {
-        await storage.createOptionsTrade({
-          ticker: trade.ticker,
-          optionSymbol: trade.optionSymbol,
-          optionType: trade.optionType,
-          strike: trade.strike,
-          expiry: trade.expiry,
-          stockEntryPrice: trade.stockPrice,
-          stockExitPrice: null,
-          currentPrice: trade.stockPrice,
-          premium: trade.premium,
-          entryPrice: trade.bid,
-          exitPrice: trade.ask,
-          holdDays: trade.daysToExpiry,
-          totalCost: trade.premium * 100, // 1 contract
-          contracts: 1,
-          strikePrice: trade.strike,
-          projectedROI: trade.roiScore,
-          aiConfidence: trade.likelihoodScore / 100,
-          greeks: {
-            delta: trade.delta,
-            theta: trade.theta,
-            gamma: trade.gamma,
-            vega: trade.vega,
-          },
-          sentiment: 0.5, // Neutral
-          score: trade.compositeScore,
-          fibonacciLevel: null,
-          fibonacciColor: null,
-          estimatedProfit: null,
-          isExecuted: false,
-        });
-      }
-      
-      console.log(`💾 Persisted ${trades.length} UOA trades to database`);
-    } catch (error) {
-      console.error('❌ Error persisting trades to storage:', error);
-    }
+  static getRecentAlerts(): { sweeps: SweepAlert[]; lastUpdated: Date | null } {
+    return SweepCache.get();
   }
   
   /**
-   * Trigger manual scan
+   * Get top N sweeps by score
    */
-  static async triggerManualScan(): Promise<void> {
-    console.log('🔘 Manual scan triggered');
-    await this.runScan();
+  static getTopSweeps(n: number = 10): SweepAlert[] {
+    return SweepCache.getTopN(n);
   }
 }
