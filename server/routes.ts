@@ -1549,39 +1549,39 @@ Historical win rate same setup: ${play.historicalWinRate.toFixed(1)}%`
   app.get('/api/ghost/status', async (req, res) => {
     try {
       const now = new Date();
-      const estTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
-      const hour = estTime.getHours();
-      const minute = estTime.getMinutes();
+      const cstTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/Chicago' }));
+      const hour = cstTime.getHours();
+      const minute = cstTime.getMinutes();
       
-      // Market close window: 3:00pm - 4:00pm EST
-      const inScanWindow = hour === 15 || (hour === 16 && minute === 0);
+      // Market close window: 2:00pm - 3:00pm CST
+      const inScanWindow = hour === 14 || (hour === 15 && minute === 0);
       
       // Calculate time until next scan window
-      let nextScanTime = new Date(estTime);
-      if (hour < 15) {
-        // Today at 3:00pm
-        nextScanTime.setHours(15, 0, 0, 0);
+      let nextScanTime = new Date(cstTime);
+      if (hour < 14) {
+        // Today at 2:00pm
+        nextScanTime.setHours(14, 0, 0, 0);
       } else {
-        // Tomorrow at 3:00pm
+        // Tomorrow at 2:00pm
         nextScanTime.setDate(nextScanTime.getDate() + 1);
-        nextScanTime.setHours(15, 0, 0, 0);
+        nextScanTime.setHours(14, 0, 0, 0);
       }
       
-      const timeUntilScan = nextScanTime.getTime() - estTime.getTime();
+      const timeUntilScan = nextScanTime.getTime() - cstTime.getTime();
       const hoursUntil = Math.floor(timeUntilScan / (1000 * 60 * 60));
       const minutesUntil = Math.floor((timeUntilScan % (1000 * 60 * 60)) / (1000 * 60));
       
       res.json({
-        currentTime: estTime.toLocaleTimeString('en-US', { timeZone: 'America/New_York' }),
+        currentTime: cstTime.toLocaleTimeString('en-US', { timeZone: 'America/Chicago' }),
         inScanWindow,
-        scanWindowStart: '3:00pm EST',
-        scanWindowEnd: '4:00pm EST',
-        nextScanTime: nextScanTime.toLocaleTimeString('en-US', { timeZone: 'America/New_York' }),
+        scanWindowStart: '2:00pm CST',
+        scanWindowEnd: '3:00pm CST',
+        nextScanTime: nextScanTime.toLocaleTimeString('en-US', { timeZone: 'America/Chicago' }),
         timeUntilScan: `${hoursUntil}h ${minutesUntil}m`,
         systemStatus: 'operational',
         targetUniverse: ['SPY', 'QQQ', 'IWM'],
         expectedWinRate: '94.1%',
-        holdPeriod: 'Overnight (3:00-4:00pm → 9:32am)',
+        holdPeriod: 'Overnight (2:00-3:00pm → 8:32am CST)',
         apiLimit: 4,
         speedTarget: '<0.7 seconds'
       });
