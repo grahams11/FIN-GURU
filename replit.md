@@ -40,16 +40,23 @@ Preferred communication style: Simple, everyday language.
 
 ### Market Scanning
 
+#### BatchDataService (Shared Cache Architecture)
+- **Single API Call**: Fetches ALL ~11,600 stocks from Polygon Bulk Snapshot in ONE request (~2-5s).
+- **Cache Duration**: 6 hours shared across all scanners to minimize API usage.
+- **Fallback**: Grouped daily bars with 10-day holiday-aware lookup if bulk snapshot fails.
+- **Performance**: UOA and Elite scanners share cached data with ZERO duplicate API calls.
+- **Liquid Filter**: Extracts 4,400+ stocks meeting minimum liquidity thresholds (price >$1, volume >10K).
+
 #### Dual Scanner Architecture
-- **UOA Scanner (Primary)**: Fast background scanner running every 2 minutes, scans 5 high-liquidity stocks (SPY, QQQ, AAPL, TSLA, NVDA) for Unusual Options Activity. Completes in <60s respecting Polygon 5 API calls/min limit.
-- **Elite Scanner (Quality Filter)**: Institutional-grade scanner with strict filtering (RSI cross, IV rank ≤18%, Fibonacci proximity ≤0.5%, VIX requirements). Only triggers when perfect setups align, maintaining 80%+ win rate target.
+- **UOA Scanner (Primary)**: Fast background scanner running every 2 minutes, scans 4,429 liquid stocks for Unusual Options Activity using BatchDataService cache. Respects Polygon 5 API calls/min rate limit.
+- **Elite Scanner (Quality Filter)**: Institutional-grade scanner with strict filtering (RSI cross, IV rank ≤18%, Fibonacci proximity ≤0.5%, VIX requirements). Uses same BatchDataService cache.
 - **Dashboard Loading**: Instant (<100ms) non-blocking response. Shows empty state if no plays meet strict criteria, auto-populates as plays become eligible, removes as they invalidate.
 
-#### Elite Two-Stage Market Scanner
-- **Stage 1 (Complete Pre-Screen)**: Fetches ALL ~9,000 stocks from Polygon Bulk Snapshot (all pages, ~40-100s). **NO CACHING** for fresh opportunities every scan.
-- **Stage 2 (Deep Analysis)**: Performs detailed analysis on top 200 candidates, including Fibonacci validation, Greeks calculations, market sentiment, and RSI-based momentum signals.
-- **Performance**: ~3-5 minutes total per scan (comprehensive fresh data).
-- **Fallback System**: Grouped daily bars with 10-day holiday-aware lookup, curated stock universe with p-limit throttling.
+#### Market Data Pipeline
+- **Stage 1 (Batch Fetch)**: BatchDataService fetches all stocks in single API call, caches for 6 hours.
+- **Stage 2 (Local Filtering)**: Scanners filter cached data locally without additional API calls.
+- **Stage 3 (Deep Analysis)**: Selected candidates undergo detailed analysis (Fibonacci, Greeks, sentiment).
+- **Performance**: Eliminates redundant API calls, respects rate limits, provides fresh data every 6 hours.
 - **ExpirationService**: Queries live option chains from Polygon (stocks) and Tastytrade (SPX) for accurate expiration dates, including weeklies, monthlies, and quarterlies.
 
 ### Trading Systems
@@ -96,13 +103,34 @@ Preferred communication style: Simple, everyday language.
 - **Fibonacci Retracement Validation**: Validates entry points using 0.707 and 0.618 Fibonacci retracement levels based on 4-hour chart data, adding +10% AI confidence. Incorporates 5-bar fractal swing detection to identify meaningful support/resistance.
 - **Dashboard Market Overview**: Displays S&P 500, NASDAQ, and VIX % and point changes from open to close, with real-time intraday updates.
 
-### Self-Learning System (Elite Strategy Engine)
-- **Architecture**: Singleton pattern ensures single shared EliteStrategyEngine instance across AIAnalysisService and RecommendationTracker, enabling parameter adjustments to immediately affect live recommendations.
-- **Database Initialization**: Server startup loads active strategy parameters (v1.0.0) from strategy_parameters table, ensuring settings persist across restarts.
-- **Elite Filters**: Delta 0.35-0.45 (liquid sweet spot), Theta < -0.5 (quality decay), IV Rank > 30 (elevated volatility), VIX-based market regime detection.
-- **Recommendation Tracking**: Automatically tracks all generated recommendations to database with initial metrics (confidence, projected ROI, Greeks) for outcome analysis.
-- **Strategy Analytics Dashboard**: Full-featured page at /strategy route displaying live metrics, win rate trends, parameter evolution history, and tracked recommendation outcomes.
-- **Learning Loop**: RecommendationTracker.finalizeRecommendation() updates outcomes, StrategyOptimizer analyzes performance weekly, EliteStrategyEngine adjusts parameters automatically to maintain 80%+ win rate target.
+### Self-Learning System (AI Education Engine)
+- **Architecture**: Five core services orchestrate autonomous learning using Grok AI reasoning.
+- **Database Schema**: Three learning tables (marketInsights, performanceMetrics, learningSessions) track AI's education journey with strategic indexes for fast pattern queries.
+
+#### Core Services
+1. **ILearningStorage + DatabaseLearningStorage**: Persistence layer for sessions, insights, metrics, and trade outcomes.
+2. **LearningAnalyticsService**: Computes statistical metrics (win rate, avg ROI, Sharpe ratio, profit factor) from closed trades with rolling time windows (7d, 30d, 90d, all-time).
+3. **InsightLifecycleService**: Monitors active patterns for performance degradation. Auto-deactivates insights falling below 45% win rate. Creates new insights from Grok discoveries.
+4. **TradeOutcomeRepository**: Facade for querying trade data by time window, strategy version, or market conditions (RSI/VIX/optionType filters).
+5. **SelfLearningEngine**: Main orchestrator running three-tier learning loop with Grok integration.
+
+#### Learning Loop (Automated)
+- **Daily (Outcome Analysis)**: Analyzes closed trades vs predictions, identifies what worked/failed.
+- **Weekly (Pattern Discovery)**: Grok discovers new trading patterns from winning/losing trades (e.g., "RSI <30 + VIX >20 = 85% win rate").
+- **Bi-Weekly (Parameter Optimization)**: Adjusts strategy parameters (delta ranges, IV thresholds) based on performance data.
+
+#### Grok AI Integration
+- **Full Context Prompts**: Sends trade summaries (winners, losers, RSI, VIX, Greeks, ROI) to Grok for deep pattern analysis.
+- **Structured Responses**: Grok returns JSON with findings, recommendations, reasoning, and discovered patterns.
+- **Fallback Logic**: Basic statistical analysis when Grok unavailable.
+- **Session Tracking**: All learning runs logged to learningSessions table with Grok's reasoning and discovered artifacts.
+
+#### Strategy Evolution
+- **Recommendation Tracking**: All generated recommendations auto-saved to database with initial metrics.
+- **Outcome Analysis**: System compares predicted vs actual ROI for each closed trade.
+- **Parameter Adjustment**: EliteStrategyEngine singleton allows live parameter updates affecting all recommendations immediately.
+- **Knowledge Base**: marketInsights table stores AI-discovered patterns with validation rules (min 20 trades sample size).
+- **Strategy Analytics Dashboard**: Full-featured page at /strategy route displaying live metrics, win rate trends, parameter evolution history.
 
 ### Portfolio Management (Hybrid AI)
 - **Data Source**: Fetches ALL portfolio positions from real Tastytrade API.
