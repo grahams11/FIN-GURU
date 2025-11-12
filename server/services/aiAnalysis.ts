@@ -1,6 +1,7 @@
 import type { TradeRecommendation, MarketOverviewData, Greeks } from '@shared/schema';
 import { WebScraperService, type OptionsChain } from './webScraper';
 import { polygonService } from './polygonService';
+import { batchDataService } from './batchDataService';
 import { FibonacciService } from './fibonacciService';
 import { expirationService, type ExpirationDate } from './expirationService';
 import { EliteStrategyEngine } from './eliteStrategyEngine';
@@ -659,25 +660,41 @@ export class AIAnalysisService {
   ];
 
   /**
-   * STAGE 1: OPTIMIZED Pre-screening using bulk market snapshot
-   * Fetches 5,000 stocks in ONE API call, then filters in-memory
+   * STAGE 1: OPTIMIZED Pre-screening using shared batch data
+   * Uses BatchDataService (shared cache with UOA Scanner)
+   * NO additional API calls - data already fetched in bulk
    * Returns: Top 40-50 candidates with strong momentum signals
-   * Performance: ~5-10 seconds instead of 8-10 minutes!
+   * Performance: <1 second (cached) or ~5-10 seconds (fresh fetch)
    */
   private static async preScreenMarket(marketContext: any): Promise<string[]> {
     const startTime = Date.now();
     
-    console.log(`🚀 OPTIMIZED SCANNER: Fetching bulk market snapshot (5,000 stocks in 1 call)...`);
+    console.log(`🚀 ELITE SCANNER: Getting stock universe from BatchDataService...`);
     
-    // PHASE 1: Bulk snapshot (1 API call, ~5 seconds)
-    const snapshot = await polygonService.getBulkMarketSnapshot();
+    // PHASE 1: Get shared cached stock universe (NO API call if cached)
+    const universeData = await batchDataService.getStockUniverse();
     
-    if (!snapshot || snapshot.length === 0) {
-      console.warn('⚠️ Bulk snapshot failed, falling back to curated universe scan');
+    if (!universeData || universeData.length === 0) {
+      console.warn('⚠️ BatchDataService returned no data, falling back to curated universe scan');
       return this.preScreenMarketFallback(marketContext);
     }
     
-    console.log(`✅ Retrieved ${snapshot.length} stock snapshots`);
+    // Transform to snapshot format (compatible with existing code)
+    const snapshot = universeData.map(stock => ({
+      ticker: stock.ticker,
+      price: stock.price,
+      volume: stock.volume,
+      open: stock.open || stock.price,
+      high: stock.high || stock.price,
+      low: stock.low || stock.price,
+      close: stock.close || stock.price,
+      changePercent: stock.changePercent,
+      change: stock.change,
+      marketCap: stock.marketCap,
+      avgVolume: stock.avgVolume
+    }));
+    
+    console.log(`✅ Retrieved ${snapshot.length} stock snapshots (from shared cache)`);
     
     // PHASE 2: Smart filtering (NO API calls - analyze snapshot data directly)
     const candidates: { ticker: string; score: number }[] = [];

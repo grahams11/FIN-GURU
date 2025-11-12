@@ -1,22 +1,31 @@
 import { polygonService } from './polygonService';
+import { batchDataService, type StockSnapshot } from './batchDataService';
 import pLimit from 'p-limit';
 import type { UoaTrade, InsertUoaTrade } from '@shared/schema';
 
 /**
  * UOA (Unusual Options Activity) Scanner Service
  * 
+ * OPTIMIZED STRATEGY:
+ * - Uses shared BatchDataService (fetches ~9,000 stocks in ONE API call)
+ * - Applies UOA filters locally (no additional API calls)
+ * - Scans option chains only for UOA candidates (batched concurrency)
+ * 
  * Three-phase scanning approach:
- * Phase 1: Build curated 1K stock universe (S&P 500 + high-volume stocks)
- * Phase 2: Filter to 50-100 UOA candidates using Polygon snapshots
+ * Phase 1: Get stock universe from BatchDataService (cached, shared with Elite Scanner)
+ * Phase 2: Filter to 50-100 UOA candidates using volume/OI signals
  * Phase 3: Score and rank top 5 winners (60% likelihood + 40% ROI)
  * 
- * Target: <30 seconds per scan with results cached for 20-30s
+ * Target: <60 seconds per scan with minimal API usage
  */
 
 interface StockCandidate {
   ticker: string;
   marketCap: number; // In billions
   avgDailyVolume: number;
+  price: number;
+  volume: number;
+  changePercent: number;
 }
 
 interface UOACandidate extends StockCandidate {
@@ -40,97 +49,82 @@ interface UOACandidate extends StockCandidate {
 }
 
 export class UoaScannerService {
-  private static stockUniverse: StockCandidate[] = [];
-  private static universeLastUpdated: number = 0;
-  private static readonly UNIVERSE_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
   private static readonly SCAN_CACHE_TTL = 25 * 1000; // 25 seconds
   
   // Concurrency limits to prevent API overload
   private static readonly PHASE2_CONCURRENCY = 10; // Max 10 parallel option chain requests
   
   /**
-   * Phase 1: Build Curated Stock Universe
-   * Fetches top 1000 stocks by market cap + volume
-   * Caches for 24 hours
+   * Phase 1: Get Stock Universe from BatchDataService
+   * Uses shared cache (same data as Elite Scanner)
+   * NO additional API calls - data already fetched in bulk
    */
   static async buildStockUniverse(): Promise<StockCandidate[]> {
-    const now = Date.now();
-    
-    // Return cached universe if still valid
-    if (this.stockUniverse.length > 0 && (now - this.universeLastUpdated) < this.UNIVERSE_CACHE_TTL) {
-      console.log(`📚 Using cached stock universe (${this.stockUniverse.length} stocks)`);
-      return this.stockUniverse;
-    }
-    
-    console.log('🔄 Building fresh stock universe...');
+    console.log('📊 Getting stock universe from BatchDataService...');
     const startTime = Date.now();
     
     try {
-      // Fetch from Polygon /v3/reference/tickers
-      // Filter: market cap >$1B, avg daily volume >1M shares
-      const tickers = await polygonService.getTopTickers({
-        market: 'stocks',
-        type: 'CS', // Common stock only
-        limit: 1000,
-        sort: 'market_cap',
-        order: 'desc',
-      });
+      // Get cached bulk snapshot (shared with Elite Scanner)
+      const universe = await batchDataService.getStockUniverse();
       
-      const candidates: StockCandidate[] = tickers
-        .filter(t => t.market_cap && t.market_cap > 1_000_000_000) // >$1B market cap
-        .map(t => ({
-          ticker: t.ticker,
-          marketCap: t.market_cap ? t.market_cap / 1_000_000_000 : 0, // Convert to billions
-          avgDailyVolume: t.sip_volume || 0,
+      // Filter for liquid stocks suitable for options trading
+      const candidates: StockCandidate[] = universe
+        .filter(stock => {
+          // Must have price data
+          if (!stock.price || stock.price <= 0) return false;
+          
+          // Filter out extreme penny stocks (< $5) and very expensive stocks
+          if (stock.price < 5 || stock.price > 1000) return false;
+          
+          // Prefer stocks with market cap data, but don't require it (fallback data may not have it)
+          // If market cap exists, require >$500M for decent liquidity
+          if (stock.marketCap && stock.marketCap < 500_000_000) return false;
+          
+          // Must have volume data (>100K shares for minimal liquidity)
+          // Lower threshold since we're using fallback data from previous days
+          if (!stock.volume || stock.volume < 100_000) return false;
+          
+          return true;
+        })
+        .map(stock => ({
+          ticker: stock.ticker,
+          price: stock.price,
+          marketCap: stock.marketCap ? stock.marketCap / 1_000_000_000 : 0, // Convert to billions, default to 0 if missing
+          avgDailyVolume: stock.avgVolume || stock.volume,
+          volume: stock.volume,
+          changePercent: stock.changePercent || 0,
         }))
-        .filter(c => c.avgDailyVolume > 1_000_000); // >1M daily volume
-      
-      // If Polygon returned 0 results, use fallback
-      if (candidates.length === 0) {
-        console.warn('⚠️ Polygon returned 0 tickers, using fallback universe');
-        const fallback = this.getFallbackUniverse();
-        this.stockUniverse = fallback;
-        this.universeLastUpdated = now;
-        console.log(`✅ Stock universe built: ${fallback.length} stocks (fallback) in ${Date.now() - startTime}ms`);
-        return fallback;
-      }
-      
-      this.stockUniverse = candidates;
-      this.universeLastUpdated = now;
+        .sort((a, b) => b.volume - a.volume); // Sort by today's volume (UOA indicator)
       
       const duration = Date.now() - startTime;
-      console.log(`✅ Stock universe built: ${candidates.length} stocks in ${duration}ms`);
+      console.log(`✅ Stock universe ready: ${candidates.length} liquid stocks in ${duration}ms (from shared cache)`);
       
       return candidates;
     } catch (error) {
-      console.error('❌ Error building stock universe:', error);
+      console.error('❌ Error getting stock universe:', error);
       
-      // Fallback to curated list if API fails
-      if (this.stockUniverse.length > 0) {
-        console.log(`⚠️ Using stale universe (${this.stockUniverse.length} stocks)`);
-        return this.stockUniverse;
-      }
-      
-      // Hard-coded fallback for critical stocks
+      // Hard-coded fallback for critical liquid stocks
       return this.getFallbackUniverse();
     }
   }
   
   /**
-   * Fallback universe if Polygon API fails
-   * CONSTRAINED to 5 stocks to respect Polygon 5 calls/min limit
-   * Full scan completes in <60s
+   * Fallback universe if BatchDataService fails
+   * Uses top 20 most liquid stocks for options
    */
   private static getFallbackUniverse(): StockCandidate[] {
     const fallbackTickers = [
-      // Top 5 liquid stocks/ETFs only - respects rate limit
-      'SPY', 'QQQ', 'AAPL', 'TSLA', 'NVDA',
+      'SPY', 'QQQ', 'AAPL', 'TSLA', 'NVDA', 'MSFT', 'AMZN', 'META', 'GOOGL', 'AMD',
+      'JPM', 'BAC', 'WMT', 'DIS', 'NFLX', 'PYPL', 'INTC', 'CSCO', 'PFE', 'KO'
     ];
     
     return fallbackTickers.map(ticker => ({
       ticker,
+      price: 100, // Placeholder
       marketCap: 100, // Assume $100B+ for fallback
       avgDailyVolume: 10_000_000, // Assume 10M+ volume
+      volume: 10_000_000,
+      changePercent: 0,
     }));
   }
   

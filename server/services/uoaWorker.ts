@@ -1,5 +1,6 @@
 import { UoaScannerService } from './uoaScanner';
 import { UoaCache } from './uoaCache';
+import { storage } from '../storage';
 
 /**
  * UOA Background Worker
@@ -77,9 +78,6 @@ export class UoaWorker {
    */
   private static async persistToStorage(trades: any[]): Promise<void> {
     try {
-      // Dynamically import storage to avoid circular dependencies
-      const { storage } = await import('../index');
-      
       // Clear all existing trades
       await storage.clearTrades();
       
