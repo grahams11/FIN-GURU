@@ -72,6 +72,11 @@ app.use((req, res, next) => {
   UoaWorker.start();
   console.log('✅ UOA Worker started - dashboard will load fast (<100ms)');
   
+  // Start Recommendation Auto-Refresh Service (15min interval during market hours)
+  const { RecommendationRefreshService } = await import('./services/recommendationRefreshService');
+  RecommendationRefreshService.start();
+  console.log('✅ Recommendation auto-refresh service started');
+  
   const server = await registerRoutes(app);
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
