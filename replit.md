@@ -96,6 +96,12 @@ Preferred communication style: Simple, everyday language.
   - 30-day HV cache for VRP calculation
   - IV percentile tracking (252-day lookback)
   - Symbol-level caching for Max Pain, IV Skew, RSI (refreshed per scan)
+- **Pre-Trade Checklist (11/12/2025)**:
+  - Manual gating UI requiring all 9 items checked before trade execution
+  - Checklist resets on every new scan to prevent stale state bypass
+  - Items: Alert ≥94 score, Time 3:00–4:00 PM EST, Strike = Max Pain ±1, 0DTE or 1DTE only, Buy at ask FOK, Risk ≤40% account, Set GTC sell order @ 400%+, Wake up 9:15 AM → sell 10:15 AM sharp, NO FOMO if missed
+  - "Ready to Trade" button enabled only when all items checked
+  - Confirmation alert reminds user to place trade manually in brokerage
 
 #### Day Trading System (SPX Only)
 - **Strategy**: Uses VIX + RSI for BUY/SELL signals on SPX
