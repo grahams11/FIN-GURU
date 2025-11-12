@@ -305,7 +305,8 @@ export class Ghost1DTEService {
     const bulkBars = await polygonService.getBulkHistoricalBars(
       this.SYMBOLS,
       startDate.toISOString().split('T')[0],
-      endDate.toISOString().split('T')[0]
+      endDate.toISOString().split('T')[0],
+      true // Unlimited API (Advanced Options Plan)
     );
     
     for (const symbol of this.SYMBOLS) {
@@ -397,7 +398,8 @@ export class Ghost1DTEService {
     const bulkBarsCache = await polygonService.getBulkHistoricalBars(
       this.SYMBOLS,
       startDate.toISOString().split('T')[0],
-      endDate.toISOString().split('T')[0]
+      endDate.toISOString().split('T')[0],
+      true // Unlimited API (Advanced Options Plan)
     );
     apiCalls += this.SYMBOLS.length; // Count the parallel fetches
     console.log(`✅ Bulk historical data loaded for ${bulkBarsCache.size}/${this.SYMBOLS.length} symbols`);

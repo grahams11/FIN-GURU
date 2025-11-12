@@ -196,7 +196,7 @@ class PolygonService {
 
   /**
    * Shared rate-limited request wrapper for all Polygon REST API calls
-   * - Enforces 5 calls/minute rate limit globally
+   * - Enforces 5 calls/minute rate limit globally (can be bypassed with unlimited flag)
    * - Retries with exponential backoff on 429/5xx errors
    * - Optional caching for idempotent GETs
    */
@@ -207,13 +207,15 @@ class PolygonService {
       timeout?: number;
       cacheTTL?: number; // Cache time-to-live in ms (0 = no cache)
       maxRetries?: number;
+      unlimited?: boolean; // Bypass rate limiter (Advanced Options Plan)
     } = {}
   ): Promise<T | null> {
     const {
       method = 'GET',
       timeout = 10000,
       cacheTTL = 0,
-      maxRetries = 3
+      maxRetries = 3,
+      unlimited = false
     } = options;
 
     // Check cache for idempotent GETs
@@ -228,8 +230,10 @@ class PolygonService {
     // Retry loop with exponential backoff
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        // Acquire rate limit slot (waits if necessary)
-        await this.rateLimiter.acquire();
+        // Acquire rate limit slot (waits if necessary) - skip if unlimited mode
+        if (!unlimited) {
+          await this.rateLimiter.acquire();
+        }
 
         // Make the API call
         const response = await axios.get(url, { timeout });
@@ -923,22 +927,25 @@ class PolygonService {
    * @param tickers Array of stock symbols to fetch
    * @param startDate Start date (YYYY-MM-DD)
    * @param endDate End date (YYYY-MM-DD)
+   * @param unlimited Bypass rate limiter for premium scanners (Advanced Options Plan)
    * @returns Map of ticker -> array of bars
    */
   async getBulkHistoricalBars(
     tickers: string[],
     startDate: string,
-    endDate: string
+    endDate: string,
+    unlimited: boolean = false
   ): Promise<Map<string, HistoricalBar[]>> {
     const result = new Map<string, HistoricalBar[]>();
     
     try {
-      console.log(`📊 Fetching historical data for ${tickers.join(', ')} in parallel...`);
+      const mode = unlimited ? 'UNLIMITED' : 'RATE-LIMITED';
+      console.log(`📊 Fetching historical data for ${tickers.join(', ')} in parallel (${mode})...`);
       
       // Fetch all tickers in parallel (3 API calls made simultaneously)
       const promises = tickers.map(async (ticker) => {
         try {
-          const bars = await this.getHistoricalBars(ticker, startDate, endDate, 'day');
+          const bars = await this.getHistoricalBars(ticker, startDate, endDate, 'day', 1, unlimited);
           return { ticker: ticker.toUpperCase(), bars };
         } catch (error: any) {
           console.error(`Error fetching bars for ${ticker}:`, error.message);
@@ -969,7 +976,7 @@ class PolygonService {
    * Uses Polygon REST API with Alpha Vantage fallback
    * 
    * Circuit breaker: Automatically switches to Alpha Vantage when:
-   * - Polygon rate limiter queue is congested (>10 queued)
+   * - Polygon rate limiter queue is congested (>10 queued) - SKIPPED IN UNLIMITED MODE
    * - Polygon request fails (network, timeout, 429, etc.)
    * 
    * @param symbol Stock symbol
@@ -977,6 +984,7 @@ class PolygonService {
    * @param to End date (YYYY-MM-DD)
    * @param timespan 'day' or 'hour'
    * @param multiplier Number of units (1 = 1 day/hour, 4 = 4 hours, etc.)
+   * @param unlimited Bypass rate limiter (Advanced Options Plan)
    * @returns Array of historical bars or null on error
    */
   async getHistoricalBars(
@@ -984,28 +992,31 @@ class PolygonService {
     from: string,
     to: string,
     timespan: 'day' | 'hour' = 'day',
-    multiplier: number = 1
+    multiplier: number = 1,
+    unlimited: boolean = false
   ): Promise<HistoricalBar[] | null> {
     const startTime = Date.now();
     
-    // Circuit breaker: Check Polygon rate limiter status
-    const limiterStatus = this.rateLimiter.getStatus();
-    const shouldUseAlphaVantage = limiterStatus.queuedCalls > 10 && alphaVantageService.isConfigured();
-    
-    if (shouldUseAlphaVantage) {
-      console.log(`⚡ ${symbol}: Polygon queue congested (${limiterStatus.queuedCalls} queued), using Alpha Vantage fallback`);
-      const avBars = await alphaVantageService.getHistoricalBars(
-        symbol,
-        from,
-        to,
-        timespan === 'hour' && multiplier === 4 ? '4hour' : 'day',
-        100
-      );
+    // Circuit breaker: Check Polygon rate limiter status (skip in unlimited mode)
+    if (!unlimited) {
+      const limiterStatus = this.rateLimiter.getStatus();
+      const shouldUseAlphaVantage = limiterStatus.queuedCalls > 10 && alphaVantageService.isConfigured();
       
-      if (avBars) {
-        const latency = Date.now() - startTime;
-        console.log(`✅ ${symbol}: Alpha Vantage provided ${avBars.length} bars (${latency}ms)`);
-        return avBars;
+      if (shouldUseAlphaVantage) {
+        console.log(`⚡ ${symbol}: Polygon queue congested (${limiterStatus.queuedCalls} queued), using Alpha Vantage fallback`);
+        const avBars = await alphaVantageService.getHistoricalBars(
+          symbol,
+          from,
+          to,
+          timespan === 'hour' && multiplier === 4 ? '4hour' : 'day',
+          100
+        );
+        
+        if (avBars) {
+          const latency = Date.now() - startTime;
+          console.log(`✅ ${symbol}: Alpha Vantage provided ${avBars.length} bars (${latency}ms)`);
+          return avBars;
+        }
       }
     }
     
@@ -1016,7 +1027,8 @@ class PolygonService {
       const data = await this.makeRateLimitedRequest<any>(url, {
         timeout: 10000,
         cacheTTL: 300000,
-        maxRetries: 3
+        maxRetries: 3,
+        unlimited: unlimited
       });
 
       if (data?.results && Array.isArray(data.results)) {
@@ -1027,9 +1039,10 @@ class PolygonService {
       }
     } catch (error: any) {
       console.warn(`⚠️ ${symbol}: Polygon failed (${error.message}), trying Alpha Vantage fallback...`);
+      // Note: Intentionally NOT returning - fall through to Alpha Vantage fallback below
     }
     
-    // Fallback to Alpha Vantage on Polygon failure
+    // Fallback to Alpha Vantage on Polygon failure (preserves resiliency in both unlimited and rate-limited modes)
     if (alphaVantageService.isConfigured()) {
       const avBars = await alphaVantageService.getHistoricalBars(
         symbol,
