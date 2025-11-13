@@ -32,6 +32,17 @@ const SP500_TOP100 = [
   "GD", "CSX", "SHW", "WM", "HCA", "EMR", "PNC", "MSI", "APH", "FDX"
 ];
 
+// Reduced test universe for closed-market testing (20 most liquid)
+const TEST_SYMBOLS = [
+  "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "JPM", "V", "MA",
+  "UNH", "HD", "BAC", "COST", "DIS", "NFLX", "AMD", "ADBE", "QCOM", "INTU"
+];
+
+// Use test symbols when market is closed for faster scans
+function getSymbolUniverse(isLive: boolean): string[] {
+  return isLive ? SP500_TOP100 : TEST_SYMBOLS;
+}
+
 export interface EliteScanResult {
   symbol: string;
   optionType: 'call' | 'put';
@@ -102,12 +113,28 @@ export class EliteScanner {
     await this.strategyEngine.loadParametersFromDatabase();
     const config = this.strategyEngine.getConfig();
     
+    // Diagnostic counters
+    let totalScanned = 0;
+    let passedRSI = 0;
+    let passedEMA = 0;
+    let passedATR = 0;
+    let hadOptionsData = 0;
+    let passedIV = 0;
+    let passedGamma = 0;
+    let passedVolume = 0;
+    let passedDelta = 0;
+    
+    // Select symbol universe based on market status
+    const symbols = getSymbolUniverse(marketContext.isLive);
+    console.log(`📋 Scanning ${symbols.length} symbols (${marketContext.isLive ? 'LIVE' : 'TEST'} mode)`);
+    
     // Scan all tickers in parallel (batched for performance)
-    const batchSize = 10; // Process 10 at a time to avoid rate limits
+    const batchSize = 3; // Process 3 at a time to avoid rate limits (reduced from 10)
     const allResults: EliteScanResult[] = [];
     
-    for (let i = 0; i < SP500_TOP100.length; i += batchSize) {
-      const batch = SP500_TOP100.slice(i, i + batchSize);
+    for (let i = 0; i < symbols.length; i += batchSize) {
+      const batch = symbols.slice(i, i + batchSize);
+      totalScanned += batch.length;
       
       const batchPromises = batch.map(symbol => this.scanTicker(symbol, config, marketContext.isLive));
       const batchResults = await Promise.all(batchPromises);
@@ -125,11 +152,12 @@ export class EliteScanner {
     const scanDuration = Date.now() - startTime;
     
     console.log(`✅ Elite Scanner complete: ${topResults.length} signals found in ${(scanDuration/1000).toFixed(2)}s`);
+    console.log(`📊 Filter funnel: ${totalScanned} scanned → ${allResults.length} passed all filters`);
     
     return {
       results: topResults,
       marketStatus: marketContext.marketStatus as 'open' | 'closed',
-      scannedSymbols: SP500_TOP100.length,
+      scannedSymbols: symbols.length,
       isLive: marketContext.isLive,
       scanDuration
     };
@@ -198,22 +226,22 @@ export class EliteScanner {
         return null; // No options data available
       }
       
-      // Enhanced filters (NEW!) - ENFORCED THRESHOLDS
+      // Enhanced filters (NEW!) - RELAXED THRESHOLDS for 3-5 daily plays
       
-      // Filter 1: IV Percentile > 50% (high volatility) - REQUIRED
-      if (optionsData.ivPercentile < 50) {
+      // Filter 1: IV Percentile > 30% (elevated volatility) - REQUIRED
+      if (optionsData.ivPercentile < 30) {
         return null;
       }
       passedFilters.push(`IV Rank ${optionsData.ivPercentile.toFixed(0)}%`);
       
-      // Filter 2: Gamma squeeze (>0.15) - REQUIRED
-      if (optionsData.gamma <= 0.15) {
+      // Filter 2: Gamma > 0.05 (moderate gamma exposure) - REQUIRED
+      if (optionsData.gamma <= 0.05) {
         return null;
       }
       passedFilters.push(`⚡ Gamma ${optionsData.gamma.toFixed(3)}`);
       
-      // Filter 3: Unusual volume (>3x) - REQUIRED
-      if (optionsData.volumeRatio <= 3) {
+      // Filter 3: Volume > 1.5x average (moderate volume increase) - REQUIRED
+      if (optionsData.volumeRatio <= 1.5) {
         return null;
       }
       passedFilters.push(`🔥 Volume ${optionsData.volumeRatio.toFixed(1)}x`);
@@ -261,7 +289,7 @@ export class EliteScanner {
         
         // Volume metrics
         volumeRatio: optionsData.volumeRatio,
-        isUnusualVolume: optionsData.volumeRatio > 3,
+        isUnusualVolume: optionsData.volumeRatio > 1.5,
         
         // Signal quality
         signalQuality,
