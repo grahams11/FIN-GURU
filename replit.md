@@ -34,13 +34,11 @@ Preferred communication style: Simple, everyday language.
 ## Core Business Logic
 
 ### Market Scanning
-- **BatchDataService**: Fetches and caches ~11,600 stocks from Polygon Bulk Snapshot, shared across all scanners for efficiency.
-- **Dual Scanner Architecture**:
-    - **Ghost Sweep Detector (Real-Time UOA)**: Real-time institutional sweep detection using Polygon Options WebSocket. Monitors 20 high-volume tickers (NVDA, TSLA, SPY, QQQ, AMD, META, AAPL, AMZN, GOOGL, MSFT, SMCI, COIN, MARA, HOOD, RIVN, IWM, PLTR, SOFI, NKLA, NIO) for $2M+ premium sweeps with trade conditions 10-13. Event-driven architecture triggers instant Phase 4 scoring (Max Pain, IV Skew, RSI, Ghost Intelligence) when sweeps are detected. **Instant alerts** vs. 20-minute sequential scanning.
-    - **Elite Scanner**: Institutional-grade scanner with strict filtering criteria.
-- **Shared WebSocket Architecture**: PolygonService provides single shared WebSocket connection for both stock quotes and option trades via callback-based routing. Eliminates duplicate connections and respects Polygon connection limits. Includes health monitoring and exponential backoff reconnection.
+- **BatchDataService**: Fetches and caches ~11,600 stocks from Polygon Bulk Snapshot for efficient market scanning.
+- **Elite Scanner**: Institutional-grade scanner with strict filtering criteria for high-quality trade recommendations.
+- **Shared WebSocket Architecture**: PolygonService provides single shared WebSocket connection for stock quotes and option quote streaming. Includes health monitoring and exponential backoff reconnection.
 - **Market Data Pipeline**: Efficiently fetches and filters market data, eliminating redundant API calls.
-- **API Rate Limits**: Advanced Options Plan provides unlimited API calls for real-time option trade streaming and historical data fetching.
+- **API Rate Limits**: Advanced Options Plan provides unlimited API calls for real-time data streaming and historical data fetching.
 - **ExpirationService**: Queries live option chains for accurate expiration dates.
 
 ### Trading Systems

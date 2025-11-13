@@ -1,6 +1,5 @@
 import { polygonService, type PolygonOptionTradeMessage } from './polygonService';
 import { Phase4Scoring, type Phase4ScoreResult, type Phase4InputData } from './phase4Scoring';
-import type { InsertUoaTrade } from '@shared/schema';
 import { EventEmitter } from 'events';
 
 /**

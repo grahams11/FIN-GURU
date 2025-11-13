@@ -183,6 +183,7 @@ class PolygonService {
   private quoteCache: Map<string, QuoteData> = new Map();
   private isConnected = false;
   private subscribedSymbols: Set<string> = new Set();
+  private subscribedOptionPatterns: string[] = []; // Track option trade subscriptions for reconnection
   private reconnectAttempts = 0;
   private reconnectDelay = 5000; // Initial delay: 5 seconds
   private apiKey: string;
@@ -209,7 +210,7 @@ class PolygonService {
   // NOTE: No bulk snapshot caching - we need fresh data for real-time opportunities
   // Caching would give stale movers; users want to see NEW opportunities as they emerge
   
-  // Option trade callback registry for routing option trades to registered handlers
+  // Option trade callback registry for Ghost Sweep Detector
   private optionTradeHandlers: Map<string, (trade: PolygonOptionTradeMessage) => void> = new Map();
 
   constructor() {
@@ -520,6 +521,9 @@ class PolygonService {
     if (message.status === 'auth_success') {
       console.log('✅ Polygon authentication successful');
       this.connectionStatus = ConnectionStatus.AUTHENTICATED;
+      
+      // Re-subscribe after authentication (on reconnect)
+      this.restoreSubscriptionsAfterAuth();
     } else if (message.status === 'success') {
       console.log(`✅ Polygon: ${message.message}`);
     } else if (message.status === 'error') {
@@ -527,6 +531,26 @@ class PolygonService {
       this.connectionStatus = ConnectionStatus.ERROR;
     } else {
       console.log(`📨 Polygon status: ${message.status} - ${message.message}`);
+    }
+  }
+
+  /**
+   * Restore subscriptions after authentication (called on reconnect)
+   */
+  private restoreSubscriptionsAfterAuth(): void {
+    // Re-subscribe to previous stock symbols
+    if (this.subscribedSymbols.size > 0) {
+      const symbols = Array.from(this.subscribedSymbols);
+      this.subscribedSymbols.clear(); // Clear to allow re-subscription
+      this.subscribeToSymbols(symbols);
+    }
+    
+    // Re-subscribe to option trade patterns (Ghost Sweep Detector)
+    // Use immutable snapshot to prevent mutations during reconnect
+    const patternsSnapshot = [...this.subscribedOptionPatterns];
+    if (patternsSnapshot.length > 0) {
+      console.log(`🔄 Re-establishing ${patternsSnapshot.length} option trade subscriptions after reconnect`);
+      this.subscribeToOptionTrades(patternsSnapshot);
     }
   }
 
@@ -634,8 +658,32 @@ class PolygonService {
     console.log(`📊 Polygon Option Quote: ${symbol} → ${canonicalSymbol} | Bid $${bidPrice.toFixed(2)} Ask $${askPrice.toFixed(2)} Premium $${premium.toFixed(2)}`);
   }
 
+
   /**
-   * Handle option trade messages - dispatch to registered callbacks
+   * Subscribe to option trades for specific patterns
+   * @param patterns Array of patterns like ['T.O:NVDA.*', 'T.O:TSLA.*', ...]
+   */
+  async subscribeToOptionTrades(patterns: string[]): Promise<void> {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      console.warn('⚠️ Cannot subscribe to option trades: WebSocket not connected');
+      return;
+    }
+
+    console.log(`📡 Subscribing to ${patterns.length} option trade patterns...`);
+
+    // Persist patterns for reconnection (defensive copy to prevent external mutations)
+    this.subscribedOptionPatterns = [...patterns];
+
+    const subscribeMessage = {
+      action: 'subscribe',
+      params: patterns.join(',')
+    };
+
+    this.ws.send(JSON.stringify(subscribeMessage));
+  }
+
+  /**
+   * Handle option trade messages - dispatch to registered callbacks (Ghost Sweep Detector)
    */
   private handleOptionTradeMessage(trade: PolygonOptionTradeMessage): void {
     // Dispatch to all registered option trade handlers
@@ -651,7 +699,7 @@ class PolygonService {
   }
 
   /**
-   * Register a callback handler for option trade messages
+   * Register a callback handler for option trade messages (used by Ghost Sweep Detector)
    */
   registerOptionTradeHandler(id: string, callback: (trade: PolygonOptionTradeMessage) => void): void {
     this.optionTradeHandlers.set(id, callback);
@@ -665,26 +713,6 @@ class PolygonService {
     if (this.optionTradeHandlers.delete(id)) {
       console.log(`✅ Unregistered option trade handler: ${id}`);
     }
-  }
-
-  /**
-   * Subscribe to option trades for specific patterns
-   * @param patterns Array of patterns like ['T.O:NVDA.*', 'T.O:TSLA.*', ...]
-   */
-  async subscribeToOptionTrades(patterns: string[]): Promise<void> {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      console.warn('⚠️ Cannot subscribe to option trades: WebSocket not connected');
-      return;
-    }
-
-    console.log(`📡 Subscribing to ${patterns.length} option trade patterns...`);
-
-    const subscribeMessage = {
-      action: 'subscribe',
-      params: patterns.join(',')
-    };
-
-    this.ws.send(JSON.stringify(subscribeMessage));
   }
 
   /**
@@ -866,18 +894,7 @@ class PolygonService {
         if (success) {
           // Reset reconnect attempts on successful connection
           this.reconnectAttempts = 0;
-          
-          // Re-subscribe to previous stock symbols
-          if (this.subscribedSymbols.size > 0) {
-            const symbols = Array.from(this.subscribedSymbols);
-            this.subscribedSymbols.clear(); // Clear to allow re-subscription
-            this.subscribeToSymbols(symbols);
-          }
-          
-          // Re-register option trade handlers (they need to re-subscribe)
-          if (this.optionTradeHandlers.size > 0) {
-            console.log(`🔄 Re-establishing ${this.optionTradeHandlers.size} option trade handlers after reconnect`);
-          }
+          // Note: Subscriptions are restored in handleStatusMessage after auth_success
         }
       });
     }, delay);
@@ -1007,7 +1024,16 @@ class PolygonService {
       const cached = this.optionsQuoteCache.get(cacheKey);
       if (cached && Date.now() - cached.timestamp < this.optionsCacheTTL) {
         console.log(`💾 Using cached option quote: ${optionTicker}`);
-        return cached.data;
+        // Cache contains premium/bid/ask/timestamp, need to extract full data
+        const { premium, bid, ask, timestamp, ...rest } = cached as any;
+        return {
+          premium,
+          bid,
+          ask,
+          greeks: (rest as any).greeks || { delta: 0, gamma: 0, theta: 0, vega: 0 },
+          impliedVolatility: (rest as any).impliedVolatility || 0,
+          openInterest: (rest as any).openInterest || 0
+        };
       }
       
       console.log(`📊 Fetching Polygon option quote: ${optionTicker}`);
@@ -1052,10 +1078,13 @@ class PolygonService {
               openInterest: result.open_interest || 0
             };
             
-            // Cache the successful result
+            // Cache the successful result (store all data fields directly)
             this.optionsQuoteCache.set(cacheKey, {
-              data: optionData,
-              timestamp: Date.now()
+              premium,
+              bid: quote.bid,
+              ask: quote.ask,
+              timestamp: Date.now(),
+              ...(optionData as any) // Store greeks, IV, OI for caching
             });
             
             console.log(`✅ ${optionTicker}: Premium $${premium.toFixed(2)}, Delta ${greeks.delta?.toFixed(4)}, IV ${(result.implied_volatility * 100).toFixed(1)}%`);
