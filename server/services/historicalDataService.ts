@@ -67,7 +67,12 @@ export class HistoricalDataService {
 
       try {
         const response = await fetch(
-          `https://api.polygon.io/v2/aggs/ticker/${symbol}/range/1/day/${startDate}/${endDate}?adjusted=true&sort=asc&limit=50000&apiKey=${process.env.POLYGON_API_KEY}`
+          `https://api.polygon.io/v2/aggs/ticker/${symbol}/range/1/day/${startDate}/${endDate}?adjusted=true&sort=asc&limit=50000`,
+          {
+            headers: {
+              'Authorization': `Bearer ${process.env.POLYGON_API_KEY}`
+            }
+          }
         );
 
         if (response.status === 429) {
@@ -161,7 +166,12 @@ export class HistoricalDataService {
 
     try {
       const response = await fetch(
-        `https://api.polygon.io/v2/aggs/ticker/I:VIX/range/1/day/${startDate}/${endDate}?adjusted=true&sort=asc&limit=50000&apiKey=${process.env.POLYGON_API_KEY}`
+        `https://api.polygon.io/v2/aggs/ticker/I:VIX/range/1/day/${startDate}/${endDate}?adjusted=true&sort=asc&limit=50000`,
+        {
+          headers: {
+            'Authorization': `Bearer ${process.env.POLYGON_API_KEY}`
+          }
+        }
       );
 
       if (!response.ok) {
@@ -207,7 +217,12 @@ export class HistoricalDataService {
 
     try {
       const response = await fetch(
-        `https://api.polygon.io/v2/aggs/ticker/I:SPX/range/1/day/${startDate}/${endDate}?adjusted=true&sort=asc&limit=50000&apiKey=${process.env.POLYGON_API_KEY}`
+        `https://api.polygon.io/v2/aggs/ticker/I:SPX/range/1/day/${startDate}/${endDate}?adjusted=true&sort=asc&limit=50000`,
+        {
+          headers: {
+            'Authorization': `Bearer ${process.env.POLYGON_API_KEY}`
+          }
+        }
       );
 
       if (!response.ok) {

@@ -1184,7 +1184,12 @@ export class Ghost1DTEService {
       // For now, we'll use a simplified approach - get all option contracts
       // In production, you would filter by expiry date in the API call
       const response = await fetch(
-        `https://api.polygon.io/v3/snapshot/options/${symbol}?limit=250&apiKey=${process.env.POLYGON_API_KEY}`
+        `https://api.polygon.io/v3/snapshot/options/${symbol}?limit=250`,
+        {
+          headers: {
+            'Authorization': `Bearer ${process.env.POLYGON_API_KEY}`
+          }
+        }
       );
       
       if (!response.ok) {

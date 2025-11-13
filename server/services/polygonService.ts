@@ -224,7 +224,8 @@ class PolygonService {
 
   /**
    * Shared rate-limited request wrapper for all Polygon REST API calls
-   * - Enforces 5 calls/minute rate limit globally (can be bypassed with unlimited flag)
+   * - Uses Authorization Bearer header for proper authentication
+   * - Enforces 25 calls/minute rate limit globally (can be bypassed with unlimited flag)
    * - Retries with exponential backoff on 429/5xx errors
    * - Optional caching for idempotent GETs
    */
@@ -263,8 +264,13 @@ class PolygonService {
           await this.rateLimiter.acquire();
         }
 
-        // Make the API call
-        const response = await axios.get(url, { timeout });
+        // Make the API call with proper Authorization header
+        const response = await axios.get(url, { 
+          timeout,
+          headers: {
+            'Authorization': `Bearer ${this.apiKey}`
+          }
+        });
 
         // Cache successful response if enabled
         if (method === 'GET' && cacheTTL > 0 && response.data) {
@@ -1226,7 +1232,7 @@ class PolygonService {
     
     // Try Polygon first
     try {
-      const url = `https://api.polygon.io/v2/aggs/ticker/${symbol}/range/${multiplier}/${timespan}/${from}/${to}?adjusted=true&sort=asc&apiKey=${this.apiKey}`;
+      const url = `https://api.polygon.io/v2/aggs/ticker/${symbol}/range/${multiplier}/${timespan}/${from}/${to}?adjusted=true&sort=asc`;
       
       const data = await this.makeRateLimitedRequest<any>(url, {
         timeout: 10000,
@@ -1291,7 +1297,7 @@ class PolygonService {
       ];
       
       for (const testSymbol of symbols) {
-        const url = `https://api.polygon.io/v2/aggs/ticker/${testSymbol}/range/1/day/${prevStr}/${todayStr}?adjusted=true&limit=5&sort=desc&apiKey=${this.apiKey}`;
+        const url = `https://api.polygon.io/v2/aggs/ticker/${testSymbol}/range/1/day/${prevStr}/${todayStr}?adjusted=true&limit=5&sort=desc`;
         
         const data = await this.makeRateLimitedRequest<any>(url, {
           timeout: 5000,
@@ -1340,7 +1346,7 @@ class PolygonService {
       // Fetch fresh data (no cache - need real-time movers!)
       // OPTIMIZED: Fetch top 5 pages for best balance of coverage vs. API usage
       let allSnapshots: Array<any> = [];
-      let nextUrl: string | null = `https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers?limit=1000&apiKey=${this.apiKey}`;
+      let nextUrl: string | null = `https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers?limit=1000`;
       let pageCount = 0;
       const maxPages = 5; // Top 5,000 stocks (5 pages × 1,000 = 5,000) in ~20-30s
       
@@ -1348,7 +1354,10 @@ class PolygonService {
       
       while (nextUrl && pageCount < maxPages) {
         const response: any = await axios.get(nextUrl, {
-          timeout: 30000 // 30 seconds per page
+          timeout: 30000, // 30 seconds per page
+          headers: {
+            'Authorization': `Bearer ${this.apiKey}`
+          }
         });
 
         if (response.data?.tickers && Array.isArray(response.data.tickers)) {
@@ -1466,12 +1475,15 @@ class PolygonService {
       }
       
       try {
-        const url = `https://api.polygon.io/v2/aggs/grouped/locale/us/market/stocks/${dateStr}?adjusted=true&apiKey=${this.apiKey}`;
+        const url = `https://api.polygon.io/v2/aggs/grouped/locale/us/market/stocks/${dateStr}?adjusted=true`;
         
         console.log(`📊 Trying grouped daily bars for ${dateStr} (${daysBack} days back)...`);
         
         const response = await axios.get(url, {
-          timeout: 15000
+          timeout: 15000,
+          headers: {
+            'Authorization': `Bearer ${this.apiKey}`
+          }
         });
 
         if (response.data?.results && Array.isArray(response.data.results) && response.data.results.length > 0) {
@@ -1522,10 +1534,15 @@ class PolygonService {
 
     await this.rateLimiter.acquire();
     
-    const url = `https://api.polygon.io/v3/reference/tickers?market=${params.market}&type=${params.type}&limit=${params.limit}&sort=${params.sort}&order=${params.order}&apiKey=${apiKey}`;
+    const url = `https://api.polygon.io/v3/reference/tickers?market=${params.market}&type=${params.type}&limit=${params.limit}&sort=${params.sort}&order=${params.order}`;
     
     try {
-      const response = await axios.get(url, { timeout: 10000 });
+      const response = await axios.get(url, { 
+        timeout: 10000,
+        headers: {
+          'Authorization': `Bearer ${apiKey}`
+        }
+      });
       return response.data.results || [];
     } catch (error: any) {
       console.error('Error fetching top tickers from Polygon:', error.response?.data || error.message);
@@ -1546,9 +1563,14 @@ class PolygonService {
 
       await this.rateLimiter.acquire();
       
-      const url = `https://api.polygon.io/v3/snapshot/options/${ticker}?apiKey=${apiKey}`;
+      const url = `https://api.polygon.io/v3/snapshot/options/${ticker}`;
       
-      const response = await axios.get(url, { timeout: 10000 });
+      const response = await axios.get(url, { 
+        timeout: 10000,
+        headers: {
+          'Authorization': `Bearer ${apiKey}`
+        }
+      });
       
       return response.data;
     } catch (error: any) {
@@ -1587,9 +1609,14 @@ class PolygonService {
       
       // Get options snapshot for the underlying symbol
       const today = new Date().toISOString().split('T')[0];
-      const url = `https://api.polygon.io/v3/snapshot/options/${symbol}?expiration_date.gte=${today}&contract_type=${optionType}&order=volume&sort=desc&limit=5&apiKey=${apiKey}`;
+      const url = `https://api.polygon.io/v3/snapshot/options/${symbol}?expiration_date.gte=${today}&contract_type=${optionType}&order=volume&sort=desc&limit=5`;
       
-      const response = await axios.get(url, { timeout: 10000 });
+      const response = await axios.get(url, { 
+        timeout: 10000,
+        headers: {
+          'Authorization': `Bearer ${apiKey}`
+        }
+      });
       
       const topOption = response.data.results?.[0];
       
@@ -1641,9 +1668,14 @@ class PolygonService {
       
       // Get current options snapshot
       const today = new Date().toISOString().split('T')[0];
-      const url = `https://api.polygon.io/v3/snapshot/options/${symbol}?expiration_date.gte=${today}&contract_type=${optionType}&order=volume&sort=desc&limit=1&apiKey=${apiKey}`;
+      const url = `https://api.polygon.io/v3/snapshot/options/${symbol}?expiration_date.gte=${today}&contract_type=${optionType}&order=volume&sort=desc&limit=1`;
       
-      const response = await axios.get(url, { timeout: 10000 });
+      const response = await axios.get(url, { 
+        timeout: 10000,
+        headers: {
+          'Authorization': `Bearer ${apiKey}`
+        }
+      });
       const topOption = response.data.results?.[0];
       
       if (!topOption || !topOption.day) {
@@ -1702,9 +1734,14 @@ class PolygonService {
       
       // Fetch historical aggregate data to estimate IV range
       // Note: Direct historical IV data is limited - using aggregate price volatility as proxy
-      const url = `https://api.polygon.io/v2/aggs/ticker/${symbol}/range/1/day/${startDateStr}/${endDate}?adjusted=true&sort=asc&limit=365&apiKey=${apiKey}`;
+      const url = `https://api.polygon.io/v2/aggs/ticker/${symbol}/range/1/day/${startDateStr}/${endDate}?adjusted=true&sort=asc&limit=365`;
       
-      const response = await axios.get(url, { timeout: 10000 });
+      const response = await axios.get(url, { 
+        timeout: 10000,
+        headers: {
+          'Authorization': `Bearer ${apiKey}`
+        }
+      });
       const bars = response.data.results || [];
       
       if (bars.length < 30) {
