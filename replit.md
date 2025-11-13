@@ -35,10 +35,12 @@ Preferred communication style: Simple, everyday language.
 
 ### Market Scanning
 - **BatchDataService**: Fetches and caches ~11,600 stocks from Polygon Bulk Snapshot for efficient market scanning.
-- **Elite Scanner**: Institutional-grade scanner with strict filtering criteria for high-quality trade recommendations.
+- **Elite Scanner**: Institutional-grade scanner with strict filtering criteria for high-quality trade recommendations. Completes in <1 second during market hours (live WebSocket data) and ~0.5 seconds during closed market (historical data with unlimited mode).
 - **Shared WebSocket Architecture**: PolygonService provides single shared WebSocket connection for stock quotes and option quote streaming. Includes health monitoring and exponential backoff reconnection.
 - **Market Data Pipeline**: Efficiently fetches and filters market data, eliminating redundant API calls.
-- **API Rate Limits**: Advanced Options Plan provides unlimited API calls for real-time data streaming and historical data fetching.
+- **API Authentication**: Uses proper `Authorization: Bearer` header method per Polygon/Massive.com specification (NOT query string `?apiKey=`). This ensures Advanced Options Plan unlimited access is properly recognized.
+- **Unlimited Mode**: Elite Scanner and performance-critical paths use `unlimited: true` flag to bypass rate limiting, enabling fast scans with the Advanced Options Plan.
+- **Centralized Auth**: All REST API calls delegate to PolygonService.makeRateLimitedRequest() for consistent authentication, retry logic, and rate limit management.
 - **ExpirationService**: Queries live option chains for accurate expiration dates.
 
 ### Trading Systems
