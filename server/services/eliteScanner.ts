@@ -17,31 +17,7 @@ import { liveDataAdapter } from './liveDataAdapter';
 import { EliteStrategyEngine } from './eliteStrategyEngine';
 import { marketStatusService } from './marketStatusService';
 import { polygonService } from './polygonService';
-
-// S&P 500 symbols (top 100 most liquid for speed)
-const SP500_TOP100 = [
-  "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "BRK.B", "JPM", "V",
-  "UNH", "MA", "PG", "JNJ", "HD", "MRK", "ABBV", "BAC", "PFE", "AVGO",
-  "KO", "PEP", "COST", "TMO", "DIS", "ABT", "WMT", "CSCO", "ADBE", "NFLX",
-  "LLY", "TMUS", "CRM", "ACN", "TXN", "QCOM", "NEE", "LIN", "DHR", "AMD",
-  "HON", "INTU", "IBM", "AMGN", "GE", "SPGI", "NOW", "RTX", "UNP", "CAT",
-  "BKNG", "ISRG", "PGR", "GS", "LOW", "BLK", "SYK", "MDT", "LMT", "ELV",
-  "ADP", "VRTX", "REGN", "CB", "PLD", "ADI", "ETN", "BSX", "PANW", "KLAC",
-  "MMC", "ANET", "BX", "SNPS", "CDNS", "FI", "SCHW", "ICE", "CME", "SO",
-  "MO", "DUK", "CL", "APD", "TT", "MCO", "ITW", "EOG", "TGT", "BDX",
-  "GD", "CSX", "SHW", "WM", "HCA", "EMR", "PNC", "MSI", "APH", "FDX"
-];
-
-// Reduced test universe for closed-market testing (20 most liquid)
-const TEST_SYMBOLS = [
-  "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "JPM", "V", "MA",
-  "UNH", "HD", "BAC", "COST", "DIS", "NFLX", "AMD", "ADBE", "QCOM", "INTU"
-];
-
-// Use test symbols when market is closed for faster scans
-function getSymbolUniverse(isLive: boolean): string[] {
-  return isLive ? SP500_TOP100 : TEST_SYMBOLS;
-}
+import { BatchDataService } from './batchDataService';
 
 export interface EliteScanResult {
   symbol: string;
@@ -81,9 +57,11 @@ export interface EliteScanResult {
 export class EliteScanner {
   private static instance: EliteScanner | null = null;
   private strategyEngine: EliteStrategyEngine;
+  private batchDataService: BatchDataService;
   
   private constructor() {
     this.strategyEngine = EliteStrategyEngine.getInstance();
+    this.batchDataService = BatchDataService.getInstance();
   }
   
   static getInstance(): EliteScanner {
@@ -94,8 +72,11 @@ export class EliteScanner {
   }
   
   /**
-   * Scan all tickers for elite trade setups
-   * Returns top 15 ranked by signal quality
+   * Scan market for elite trade setups using batch approach
+   * 1. ONE bulk API call fetches all stocks
+   * 2. Filter in memory (price, volume, momentum)
+   * 3. Analyze top candidates with options data
+   * 4. Return top 3-5 plays
    */
   async scan(): Promise<{
     results: EliteScanResult[];
@@ -113,60 +94,60 @@ export class EliteScanner {
     await this.strategyEngine.loadParametersFromDatabase();
     const config = this.strategyEngine.getConfig();
     
-    // Diagnostic counters
-    let totalScanned = 0;
-    let passedRSI = 0;
-    let passedEMA = 0;
-    let passedATR = 0;
-    let hadOptionsData = 0;
-    let passedIV = 0;
-    let passedGamma = 0;
-    let passedVolume = 0;
-    let passedDelta = 0;
+    // STEP 1: Fetch ALL stocks in ONE bulk API call
+    console.log('📦 Fetching bulk market snapshot...');
+    const allStocks = await this.batchDataService.getStockUniverse();
+    console.log(`📊 Received ${allStocks.length} stocks from bulk snapshot`);
     
-    // Select symbol universe based on market status
-    const symbols = getSymbolUniverse(marketContext.isLive);
-    console.log(`📋 Scanning ${symbols.length} symbols (${marketContext.isLive ? 'LIVE' : 'TEST'} mode)`);
-    
-    // Scan all tickers in parallel (batched for performance)
-    const batchSize = 3; // Process 3 at a time to avoid rate limits (reduced from 10)
-    const allResults: EliteScanResult[] = [];
-    
-    for (let i = 0; i < symbols.length; i += batchSize) {
-      const batch = symbols.slice(i, i + batchSize);
-      totalScanned += batch.length;
+    // STEP 2: Filter in memory for basic criteria
+    const basicFiltered = allStocks.filter(stock => {
+      // Price range: $10-$500 (options-friendly)
+      if (stock.price < 10 || stock.price > 500) return false;
       
-      const batchPromises = batch.map(symbol => this.scanTicker(symbol, config, marketContext.isLive));
-      const batchResults = await Promise.all(batchPromises);
+      // Volume: Must have significant volume (liquid options)
+      if (!stock.volume || stock.volume < 100000) return false;
       
-      // Filter out null results
-      const validResults = batchResults.filter((r): r is EliteScanResult => r !== null);
-      allResults.push(...validResults);
-    }
+      // Price movement: Looking for momentum (>1% move)
+      if (!stock.changePercent || Math.abs(stock.changePercent) < 1) return false;
+      
+      return true;
+    });
     
-    // Sort by signal quality (descending)
-    const topResults = allResults
+    console.log(`🔎 Basic filters: ${allStocks.length} → ${basicFiltered.length} stocks`);
+    
+    // STEP 3: Analyze top candidates with full technical + options data
+    console.log(`🧮 Analyzing top ${Math.min(basicFiltered.length, 50)} candidates...`);
+    const candidates = basicFiltered.slice(0, 50); // Top 50 by volume/momentum
+    
+    const analysisPromises = candidates.map(stock => 
+      this.analyzeTicker(stock.ticker, config, marketContext.isLive)
+    );
+    const analysisResults = await Promise.all(analysisPromises);
+    
+    // Filter out nulls and sort by signal quality
+    const validResults = analysisResults.filter((r): r is EliteScanResult => r !== null);
+    const topResults = validResults
       .sort((a, b) => b.signalQuality - a.signalQuality)
-      .slice(0, 15); // Top 15
+      .slice(0, 5); // Return top 5 plays
     
     const scanDuration = Date.now() - startTime;
     
-    console.log(`✅ Elite Scanner complete: ${topResults.length} signals found in ${(scanDuration/1000).toFixed(2)}s`);
-    console.log(`📊 Filter funnel: ${totalScanned} scanned → ${allResults.length} passed all filters`);
+    console.log(`✅ Elite Scanner complete: ${topResults.length} plays found in ${(scanDuration/1000).toFixed(2)}s`);
+    console.log(`📊 Funnel: ${allStocks.length} → ${basicFiltered.length} → ${validResults.length} → ${topResults.length}`);
     
     return {
       results: topResults,
       marketStatus: marketContext.marketStatus as 'open' | 'closed',
-      scannedSymbols: symbols.length,
+      scannedSymbols: allStocks.length,
       isLive: marketContext.isLive,
       scanDuration
     };
   }
   
   /**
-   * Scan a single ticker for trade setup
+   * Analyze a pre-filtered ticker candidate with full technical + options data
    */
-  private async scanTicker(
+  private async analyzeTicker(
     symbol: string,
     config: any,
     isLive: boolean
