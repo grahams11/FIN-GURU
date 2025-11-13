@@ -506,56 +506,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // UOA Top Trades endpoint - Real-time sweep alerts (<10ms)
-  app.get('/api/uoa-top-trades', async (req, res) => {
-    try {
-      const { SweepCache } = await import('./services/sweepCache');
-      const { sweeps, lastUpdated } = SweepCache.get();
-      
-      // Convert sweeps to trade format for frontend
-      const trades = sweeps.map(sweep => ({
-        ticker: sweep.ticker,
-        optionSymbol: sweep.optionSymbol,
-        optionType: sweep.side.toLowerCase(),
-        strike: sweep.strike,
-        expiry: sweep.expiry,
-        premium: sweep.premium,
-        sweepPrice: sweep.sweepPrice,
-        sweepSize: sweep.sweepSize,
-        timestamp: sweep.timestamp,
-        phase4Score: sweep.phase4Score?.totalScore || 0,
-        phase4Breakdown: sweep.phase4Score?.breakdown,
-        phase4Layers: {
-          layer1: sweep.phase4Score?.layer1 || 0,
-          layer2: sweep.phase4Score?.layer2 || 0,
-          layer3: sweep.phase4Score?.layer3 || 0,
-          layer4: sweep.phase4Score?.layer4 || 0,
-        },
-        activeLayers: sweep.phase4Score?.activeLayers || 0,
-        tradeConditions: sweep.tradeConditions,
-      }));
-      
-      res.json({
-        success: true,
-        trades,
-        lastUpdated,
-        isStale: false, // Real-time system is always fresh
-        count: trades.length,
-      });
-    } catch (error) {
-      console.error('Error fetching sweep alerts:', error);
-      res.status(500).json({ 
-        success: false,
-        trades: [],
-        lastUpdated: null,
-        isStale: true,
-        count: 0,
-      });
-    }
-  });
-
   // Top Trades endpoint - Returns existing trades from database (instant, non-blocking)
-  // Background workers (UOA + Elite) populate trades when market conditions are met
+  // Elite Scanner populates trades when market conditions are met
   app.get('/api/top-trades', async (req, res) => {
     try {
       // Instantly return whatever trades exist (empty array if none)
