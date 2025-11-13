@@ -180,7 +180,7 @@ export class LiveDataAdapter {
     const endDate = new Date().toISOString().split('T')[0];
     const startDate = this.getDateDaysAgo(5); // Last 5 days
     
-    const bars = await historicalDataService.getDailyBars(symbol, startDate, endDate);
+    const bars = await historicalDataService.getDailyBars(symbol, startDate, endDate, true, true);
     
     if (bars.length > 0) {
       const lastBar = bars[bars.length - 1];
@@ -221,7 +221,7 @@ export class LiveDataAdapter {
       const endDate = new Date().toISOString().split('T')[0];
       const startDate = this.getDateDaysAgo(daysNeeded);
       
-      const bars = await historicalDataService.getDailyBars(symbol, startDate, endDate);
+      const bars = await historicalDataService.getDailyBars(symbol, startDate, endDate, true, true);
       
       if (bars.length < period) {
         console.warn(`⚠️ Insufficient bars for ${symbol}: ${bars.length} < ${period}`);

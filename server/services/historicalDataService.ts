@@ -53,7 +53,8 @@ export class HistoricalDataService {
     symbol: string,
     startDate: string,
     endDate: string,
-    useCache: boolean = true
+    useCache: boolean = true,
+    unlimited: boolean = false
   ): Promise<HistoricalBar[]> {
     if (useCache) {
       const cached = await historicalDataCache.get(symbol, 'daily_bars', startDate, endDate);
@@ -63,7 +64,10 @@ export class HistoricalDataService {
     // Retry with exponential backoff
     const maxRetries = 3;
     for (let attempt = 0; attempt < maxRetries; attempt++) {
-      await this.waitForRateLimit();
+      // Skip rate limiter if unlimited mode (Advanced Options Plan)
+      if (!unlimited) {
+        await this.waitForRateLimit();
+      }
 
       try {
         const response = await fetch(
