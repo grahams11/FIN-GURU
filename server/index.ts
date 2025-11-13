@@ -67,11 +67,6 @@ app.use((req, res, next) => {
   // Start Ghost 1DTE Scheduler (auto-triggers in 3:00-4:00pm EST window)
   GhostScheduler.start();
   
-  // Start UOA Background Worker (refreshes cache every 30s)
-  const { UoaWorker } = await import('./services/uoaWorker');
-  UoaWorker.start();
-  console.log('✅ UOA Worker started - dashboard will load fast (<100ms)');
-  
   // Start Recommendation Auto-Refresh Service (15min interval during market hours)
   const { RecommendationRefreshService } = await import('./services/recommendationRefreshService');
   RecommendationRefreshService.start();
