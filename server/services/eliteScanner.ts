@@ -17,7 +17,7 @@ import { liveDataAdapter } from './liveDataAdapter';
 import { EliteStrategyEngine } from './eliteStrategyEngine';
 import { marketStatusService } from './marketStatusService';
 import { polygonService } from './polygonService';
-import { BatchDataService } from './batchDataService';
+import { batchDataService } from './batchDataService';
 
 export interface EliteScanResult {
   symbol: string;
@@ -57,11 +57,9 @@ export interface EliteScanResult {
 export class EliteScanner {
   private static instance: EliteScanner | null = null;
   private strategyEngine: EliteStrategyEngine;
-  private batchDataService: BatchDataService;
   
   private constructor() {
     this.strategyEngine = EliteStrategyEngine.getInstance();
-    this.batchDataService = BatchDataService.getInstance();
   }
   
   static getInstance(): EliteScanner {
@@ -96,7 +94,7 @@ export class EliteScanner {
     
     // STEP 1: Fetch ALL stocks in ONE bulk API call
     console.log('📦 Fetching bulk market snapshot...');
-    const allStocks = await this.batchDataService.getStockUniverse();
+    const allStocks = await batchDataService.getStockUniverse();
     console.log(`📊 Received ${allStocks.length} stocks from bulk snapshot`);
     
     // STEP 2: Filter in memory for basic criteria
