@@ -1,10 +1,14 @@
 import { Ghost1DTEService } from './ghost1DTE';
+import { timeService } from './timeService';
 
 /**
  * Ghost 1DTE Market Timing Scheduler
  * Auto-triggers scan in 2:00-3:00pm CST window for overnight setups
  * Tracks 8:32am CST exit window next day
  * Skips weekends and US market holidays
+ * 
+ * Uses NTP-synchronized time via timeService to ensure accurate scan timing
+ * regardless of system clock issues.
  */
 
 export class GhostScheduler {
@@ -164,21 +168,27 @@ export class GhostScheduler {
   
   /**
    * Check if we're in the scan window and trigger if needed
+   * Uses NTP-synchronized time to ensure accurate scan window detection
    */
   private static async checkMarketTiming(): Promise<void> {
     try {
-      const now = new Date();
+      // Get accurate NTP-synchronized time (not system clock)
+      const now = await timeService.getCurrentTime();
+      const cstTime = await timeService.getCurrentCST();
       
-      // Get CST hour/minute/day properly using Intl API
-      const cstHour = parseInt(now.toLocaleString('en-US', { 
-        timeZone: 'America/Chicago', 
-        hour: 'numeric', 
-        hour12: false 
-      }));
-      const cstMinute = parseInt(now.toLocaleString('en-US', { 
-        timeZone: 'America/Chicago', 
-        minute: 'numeric' 
-      }));
+      // Diagnostic logging: Show system time vs NTP time
+      const systemTime = new Date();
+      const timeDiff = Math.abs(now.getTime() - systemTime.getTime());
+      if (timeDiff > 60000) { // Log if difference > 1 minute
+        console.log(`⏰ Time Sync Status:`);
+        console.log(`   System Clock: ${systemTime.toISOString()}`);
+        console.log(`   NTP Time:     ${now.toISOString()}`);
+        console.log(`   Offset:       ${(timeDiff / 1000 / 60).toFixed(1)} minutes`);
+      }
+      
+      // Get CST hour/minute using NTP-synchronized time
+      const cstHour = await timeService.getCSTHour();
+      const cstMinute = await timeService.getCSTMinute();
       
       // Get day of week in CST timezone
       const cstDateStr = now.toLocaleDateString('en-US', { 
@@ -207,23 +217,13 @@ export class GhostScheduler {
       // Only trigger scan once when entering window
       if (inScanWindow && !this.isMarketHours) {
         this.isMarketHours = true;
-        const timeStr = now.toLocaleString('en-US', { 
-          timeZone: 'America/Chicago',
-          hour: 'numeric',
-          minute: '2-digit',
-          hour12: true
-        });
-        console.log(`\n🔔 Ghost scan window OPEN (${timeStr} CST)`);
+        console.log(`\n🔔 Ghost scan window OPEN (${cstTime})`);
+        console.log(`   📍 Current CST time: ${cstTime}`);
+        console.log(`   ⏰ NTP synchronized time used for accuracy`);
         await this.runAutomatedScan();
       } else if (!inScanWindow && this.isMarketHours) {
         this.isMarketHours = false;
-        const timeStr = now.toLocaleString('en-US', { 
-          timeZone: 'America/Chicago',
-          hour: 'numeric',
-          minute: '2-digit',
-          hour12: true
-        });
-        console.log(`\n🔕 Ghost scan window CLOSED (${timeStr} CST)`);
+        console.log(`\n🔕 Ghost scan window CLOSED (${cstTime})`);
       }
       
     } catch (error) {

@@ -10,6 +10,7 @@ import { BlackScholesCalculator } from "./services/financialCalculations";
 import { exitAnalysisService } from "./services/exitAnalysis";
 import { portfolioAnalysisEngine } from "./services/portfolioAnalysisEngine";
 import { Ghost1DTEService } from "./services/ghost1DTE";
+import { timeService } from "./services/timeService";
 import { insertMarketDataSchema, insertOptionsTradeSchema, insertAiInsightsSchema, insertPortfolioPositionSchema, type OptionsTrade } from "@shared/schema";
 import { formatOptionSymbol, toPolygonSubscriptionTopic, toTastytradeOptionSymbol } from "./utils/optionSymbols";
 
@@ -449,6 +450,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error generating AI insights:', error);
       res.status(500).json({ message: 'Failed to generate AI insights' });
+    }
+  });
+
+  // Time synchronization status endpoint
+  app.get('/api/time/status', async (req, res) => {
+    try {
+      const status = await timeService.getTimeStatus();
+      res.json(status);
+    } catch (error) {
+      console.error('Error fetching time status:', error);
+      res.status(500).json({ message: 'Failed to fetch time status' });
+    }
+  });
+
+  // Manual time offset endpoint (for environments with blocked external time sources)
+  // SECURITY: Only enabled in development mode to prevent production time manipulation
+  app.post('/api/time-offset', async (req, res) => {
+    // Block in production mode
+    if (process.env.NODE_ENV === 'production') {
+      console.error('❌ SECURITY: Manual time offset blocked in production mode');
+      return res.status(403).json({ 
+        message: 'Manual time offset is disabled in production mode',
+        hint: 'Use external time sync or contact system administrator'
+      });
+    }
+
+    try {
+      const { referenceTimestampUtc, source } = req.body;
+      
+      if (!referenceTimestampUtc || typeof referenceTimestampUtc !== 'number') {
+        return res.status(400).json({ 
+          message: 'Invalid request. Provide { referenceTimestampUtc: number, source?: string }' 
+        });
+      }
+      
+      // Audit log for security monitoring
+      console.log(`⚠️ SECURITY AUDIT: Manual time offset requested`);
+      console.log(`   Source: ${source || 'manual'}`);
+      console.log(`   Reference time: ${new Date(referenceTimestampUtc).toISOString()}`);
+      console.log(`   Client IP: ${req.ip || req.connection.remoteAddress}`);
+      console.log(`   Environment: ${process.env.NODE_ENV || 'development'}`);
+      
+      timeService.setManualOffset(referenceTimestampUtc, source || 'manual');
+      const status = await timeService.getTimeStatus();
+      
+      res.json({ 
+        success: true,
+        message: 'Manual time offset set successfully (development mode)',
+        status
+      });
+    } catch (error) {
+      console.error('Error setting time offset:', error);
+      res.status(500).json({ message: 'Failed to set time offset' });
     }
   });
 

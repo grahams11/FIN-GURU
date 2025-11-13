@@ -72,6 +72,17 @@ Preferred communication style: Simple, everyday language.
 - **Goal Tracking**: Monitors progress towards a $1M target.
 - **Real-Time P&L & Greeks Monitoring**: Live tracking with SSE-powered updates.
 
+### Time Synchronization System
+- **Purpose**: Ensures accurate CST time detection for Ghost 1DTE scanner's 2-3 PM entry window.
+- **Primary Sync**: WorldTimeAPI (HTTP-based) - works in restricted network environments.
+- **Fallback**: NTP servers (time.google.com, pool.ntp.org, time.cloudflare.com) - may be blocked in some environments.
+- **Manual Override**: Admin endpoints allow manual time correction when external sources fail.
+- **Safety**: Manual offset clears automatically when external sync succeeds to prevent double-offset bugs.
+- **Admin Endpoints**:
+  - `GET /api/time/status` - View current time sync status and offsets
+  - `POST /api/time-offset` - Set manual time offset (development/admin only, includes audit logging)
+- **Security Note**: Manual offset endpoint is unauthenticated for development ease but should be restricted in production using authentication middleware.
+
 # External Dependencies
 
 ## Database Services
