@@ -1,7 +1,6 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { MarketOverview } from "@/components/MarketOverview";
-import { UoaPhase4Panel } from "@/components/UoaPhase4Panel";
 import { OptionsTraderAI } from "@/components/OptionsTraderAI";
 import { Navigation } from "@/components/Navigation";
 import { Card, CardContent } from "@/components/ui/card";
@@ -67,11 +66,6 @@ export default function Dashboard() {
           <>
             {/* Market Overview */}
             <MarketOverview data={marketData} isLoading={marketLoading} />
-
-            {/* UOA Scanner - Phase 4 Intelligence */}
-            <div className="mb-6">
-              <UoaPhase4Panel />
-            </div>
 
             {/* Options Trader AI */}
             <OptionsTraderAI 
