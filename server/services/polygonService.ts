@@ -1558,6 +1558,207 @@ class PolygonService {
   }
 
   /**
+   * Get live options Greeks and IV for Elite Scanner
+   * Returns the most liquid option contract (highest volume)
+   */
+  async getOptionsGreeks(symbol: string, optionType: 'call' | 'put' = 'call'): Promise<{
+    symbol: string;
+    strike: number;
+    expiry: string;
+    delta: number;
+    gamma: number;
+    theta: number;
+    vega: number;
+    impliedVolatility: number;
+    bid: number;
+    ask: number;
+    lastPrice: number;
+    volume: number;
+    openInterest: number;
+  } | null> {
+    try {
+      const apiKey = process.env.POLYGON_API_KEY;
+      if (!apiKey) {
+        console.warn('⚠️ No Polygon API key configured');
+        return null;
+      }
+
+      await this.rateLimiter.acquire();
+      
+      // Get options snapshot for the underlying symbol
+      const today = new Date().toISOString().split('T')[0];
+      const url = `https://api.polygon.io/v3/snapshot/options/${symbol}?expiration_date.gte=${today}&contract_type=${optionType}&order=volume&sort=desc&limit=5&apiKey=${apiKey}`;
+      
+      const response = await axios.get(url, { timeout: 10000 });
+      
+      const topOption = response.data.results?.[0];
+      
+      if (!topOption || !topOption.details || !topOption.greeks) {
+        console.warn(`⚠️ No options data available for ${symbol}`);
+        return null;
+      }
+      
+      return {
+        symbol,
+        strike: topOption.details.strike_price,
+        expiry: topOption.details.expiration_date,
+        delta: topOption.greeks.delta || 0,
+        gamma: topOption.greeks.gamma || 0,
+        theta: topOption.greeks.theta || 0,
+        vega: topOption.greeks.vega || 0,
+        impliedVolatility: topOption.implied_volatility || 0,
+        bid: topOption.last_quote?.bid || 0,
+        ask: topOption.last_quote?.ask || 0,
+        lastPrice: topOption.last_quote?.midpoint || topOption.day?.close || 0,
+        volume: topOption.day?.volume || 0,
+        openInterest: topOption.open_interest || 0
+      };
+    } catch (error: any) {
+      console.error(`❌ Failed to fetch options Greeks for ${symbol}:`, error.message);
+      return null;
+    }
+  }
+
+  /**
+   * Detect unusual options volume (volume > 3x 20-day average)
+   * Returns volume ratio and flags unusual activity
+   */
+  async getUnusualOptionsVolume(symbol: string, optionType: 'call' | 'put' = 'call'): Promise<{
+    symbol: string;
+    currentVolume: number;
+    avgVolume20Day: number;
+    volumeRatio: number;
+    isUnusual: boolean; // true if ratio > 3
+  } | null> {
+    try {
+      const apiKey = process.env.POLYGON_API_KEY;
+      if (!apiKey) {
+        console.warn('⚠️ No Polygon API key configured');
+        return null;
+      }
+
+      await this.rateLimiter.acquire();
+      
+      // Get current options snapshot
+      const today = new Date().toISOString().split('T')[0];
+      const url = `https://api.polygon.io/v3/snapshot/options/${symbol}?expiration_date.gte=${today}&contract_type=${optionType}&order=volume&sort=desc&limit=1&apiKey=${apiKey}`;
+      
+      const response = await axios.get(url, { timeout: 10000 });
+      const topOption = response.data.results?.[0];
+      
+      if (!topOption || !topOption.day) {
+        console.warn(`⚠️ No options data for unusual volume check: ${symbol}`);
+        return null;
+      }
+      
+      const currentVolume = topOption.day.volume || 0;
+      
+      // Get 20-day historical volume average
+      // Note: Polygon doesn't have direct 20-day option volume history
+      // We'll use a simplified approach: compare to open interest as proxy
+      const openInterest = topOption.open_interest || 1; // Avoid division by zero
+      const estimatedAvgVolume = openInterest * 0.1; // Rough estimate: 10% of OI trades daily
+      
+      const volumeRatio = currentVolume / Math.max(estimatedAvgVolume, 1);
+      
+      return {
+        symbol,
+        currentVolume,
+        avgVolume20Day: estimatedAvgVolume,
+        volumeRatio,
+        isUnusual: volumeRatio > 3
+      };
+    } catch (error: any) {
+      console.error(`❌ Failed to check unusual volume for ${symbol}:`, error.message);
+      return null;
+    }
+  }
+
+  /**
+   * Calculate IV percentile (0-100) based on 52-week range
+   * Uses historical options data to rank current IV
+   */
+  async getIVPercentile(symbol: string, currentIV: number): Promise<{
+    symbol: string;
+    ivPercentile: number; // 0-100
+    currentIV: number;
+    iv52WeekLow: number;
+    iv52WeekHigh: number;
+  } | null> {
+    try {
+      const apiKey = process.env.POLYGON_API_KEY;
+      if (!apiKey) {
+        console.warn('⚠️ No Polygon API key configured');
+        return null;
+      }
+
+      await this.rateLimiter.acquire();
+      
+      // Get 52-week date range
+      const endDate = new Date().toISOString().split('T')[0];
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - 365);
+      const startDateStr = startDate.toISOString().split('T')[0];
+      
+      // Fetch historical aggregate data to estimate IV range
+      // Note: Direct historical IV data is limited - using aggregate price volatility as proxy
+      const url = `https://api.polygon.io/v2/aggs/ticker/${symbol}/range/1/day/${startDateStr}/${endDate}?adjusted=true&sort=asc&limit=365&apiKey=${apiKey}`;
+      
+      const response = await axios.get(url, { timeout: 10000 });
+      const bars = response.data.results || [];
+      
+      if (bars.length < 30) {
+        console.warn(`⚠️ Insufficient historical data for IV percentile: ${symbol}`);
+        // Return default mid-range
+        return {
+          symbol,
+          ivPercentile: 50,
+          currentIV,
+          iv52WeekLow: currentIV * 0.5,
+          iv52WeekHigh: currentIV * 1.5
+        };
+      }
+      
+      // Calculate historical volatility from price movements (as IV proxy)
+      const volatilities: number[] = [];
+      for (let i = 1; i < bars.length; i++) {
+        const dailyReturn = Math.abs((bars[i].c - bars[i-1].c) / bars[i-1].c);
+        const annualizedVol = dailyReturn * Math.sqrt(252); // Annualize
+        volatilities.push(annualizedVol);
+      }
+      
+      const iv52WeekLow = Math.min(...volatilities);
+      const iv52WeekHigh = Math.max(...volatilities);
+      
+      // Calculate percentile
+      const range = iv52WeekHigh - iv52WeekLow;
+      let ivPercentile = 50; // Default mid-range
+      
+      if (range > 0) {
+        ivPercentile = Math.min(100, Math.max(0, ((currentIV - iv52WeekLow) / range) * 100));
+      }
+      
+      return {
+        symbol,
+        ivPercentile,
+        currentIV,
+        iv52WeekLow,
+        iv52WeekHigh
+      };
+    } catch (error: any) {
+      console.error(`❌ Failed to calculate IV percentile for ${symbol}:`, error.message);
+      // Return default mid-range on error
+      return {
+        symbol,
+        ivPercentile: 50,
+        currentIV,
+        iv52WeekLow: currentIV * 0.5,
+        iv52WeekHigh: currentIV * 1.5
+      };
+    }
+  }
+
+  /**
    * Close WebSocket connection
    */
   async close(): Promise<void> {

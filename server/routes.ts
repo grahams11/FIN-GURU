@@ -775,6 +775,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Elite Scanner - Live market scanner endpoint
+  app.get('/api/elite-scan', async (req, res) => {
+    try {
+      const { eliteScanner } = await import('./services/eliteScanner');
+      const scanResults = await eliteScanner.scan();
+      res.json(scanResults);
+    } catch (error: any) {
+      console.error('Error running Elite Scanner:', error);
+      res.status(500).json({ 
+        message: 'Failed to run Elite Scanner',
+        error: error.message
+      });
+    }
+  });
+
   // Sector performance endpoint
   app.get('/api/sector-performance', async (req, res) => {
     try {
