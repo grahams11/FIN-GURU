@@ -405,25 +405,7 @@ export class EliteScanner {
         return null;
       }
       
-      // Determine signal type based on RSI (STRICT: extremes only to reduce API calls)
-      let optionType: 'call' | 'put' | null = null;
       const passedFilters: string[] = [];
-      
-      // RSI GATE: Balanced thresholds (40/60) + adaptive stop (12 plays) = 8-12 plays/day, zero 429 errors
-      // RSI <= 40 for CALL, RSI >= 60 for PUT
-      if (indicators.rsi <= config.rsiOversold) {
-        optionType = 'call';
-        passedFilters.push(`RSI Oversold ${indicators.rsi.toFixed(1)}`);
-      } else if (indicators.rsi >= config.rsiOverbought) {
-        optionType = 'put';
-        passedFilters.push(`RSI Overbought ${indicators.rsi.toFixed(1)}`);
-      }
-      
-      // No signal if RSI is neutral - EARLY EXIT to prevent expensive options API calls
-      if (!optionType) {
-        console.log(`❌ ${symbol}: Neutral RSI ${indicators.rsi.toFixed(1)} (need <=${config.rsiOversold} or >=${config.rsiOverbought})`);
-        return null;
-      }
       
       // Calculate pivot level: (H + L + C) / 3 from last bar
       const lastBar = indicators.bars[indicators.bars.length - 1];
@@ -438,6 +420,21 @@ export class EliteScanner {
         return null;
       }
       passedFilters.push(`💨 Momentum ${intradayMomentum >= 0 ? '+' : ''}${intradayMomentum.toFixed(1)}%`);
+      
+      // Nov 12 FIX: Determine signal type from PRICE ACTION, not RSI!
+      // RIGL/TBPH both had RSI=50 but worked because they had bullish momentum/EMA
+      let optionType: 'call' | 'put';
+      if (intradayMomentum > 0) {
+        optionType = 'call';  // Bullish momentum
+      } else if (intradayMomentum < 0) {
+        optionType = 'put';   // Bearish momentum
+      } else {
+        // Edge case: exactly 0% momentum - use EMA tie-breaker
+        optionType = indicators.currentPrice >= indicators.ema20 ? 'call' : 'put';
+      }
+      
+      // RSI is for SCORING only, not filtering
+      passedFilters.push(`RSI ${indicators.rsi.toFixed(1)}`);
       
       // SCORING ONLY: Pivot filter contributesto quality score, doesn't reject
       // Check directional alignment (for scoring bonus)
