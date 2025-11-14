@@ -30,6 +30,8 @@ export interface EliteScanResult {
   ema20: number;
   atrShort: number;
   atrLong: number;
+  pivotLevel: number; // (H + L + C) / 3
+  abovePivot: number; // Percentage above pivot
   
   // Options analytics
   strike: number;
@@ -181,6 +183,21 @@ export class EliteScanner {
         return null;
       }
       
+      // Calculate pivot level: (H + L + C) / 3 from last bar
+      const lastBar = indicators.bars[indicators.bars.length - 1];
+      const pivotLevel = (lastBar.high + lastBar.low + lastBar.close) / 3;
+      const abovePivot = ((indicators.currentPrice - pivotLevel) / pivotLevel) * 100;
+      
+      // Grok's Pivot Breakout Filter: Must be above pivot for calls, below for puts
+      const pivotAligned = optionType === 'call'
+        ? indicators.currentPrice > pivotLevel * 1.01  // 1% above pivot for calls
+        : indicators.currentPrice < pivotLevel * 0.99; // 1% below pivot for puts
+      
+      if (!pivotAligned) {
+        return null; // Skip if not breaking pivot level
+      }
+      passedFilters.push(`Pivot ${abovePivot >= 0 ? '+' : ''}${abovePivot.toFixed(1)}%`);
+      
       // Check trend alignment
       const trendAligned = optionType === 'call'
         ? indicators.currentPrice > indicators.ema20
@@ -219,8 +236,8 @@ export class EliteScanner {
       }
       passedFilters.push(`⚡ Gamma ${optionsData.gamma.toFixed(3)}`);
       
-      // Filter 3: Volume > 1.5x average (moderate volume increase) - REQUIRED
-      if (optionsData.volumeRatio <= 1.5) {
+      // Filter 3: Volume > 1.8x average (Grok's volume spike threshold) - REQUIRED
+      if (optionsData.volumeRatio <= 1.8) {
         return null;
       }
       passedFilters.push(`🔥 Volume ${optionsData.volumeRatio.toFixed(1)}x`);
@@ -255,6 +272,8 @@ export class EliteScanner {
         ema20: indicators.ema20,
         atrShort: indicators.atrShort,
         atrLong: indicators.atrLong,
+        pivotLevel,
+        abovePivot,
         
         // Options analytics
         strike: optionsData.strike,
