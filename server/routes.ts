@@ -15,6 +15,7 @@ import { Ghost1DTEService } from "./services/ghost1DTE";
 import { timeService } from "./services/timeService";
 import { marketStatusService } from "./services/marketStatusService";
 import { dailyIndexCache } from "./cache/DailyIndexCache";
+import { eodCacheService } from "./services/eodCache";
 import { insertMarketDataSchema, insertOptionsTradeSchema, insertAiInsightsSchema, insertPortfolioPositionSchema, type OptionsTrade, appConfig } from "@shared/schema";
 import { formatOptionSymbol, toPolygonSubscriptionTopic, toTastytradeOptionSymbol } from "./utils/optionSymbols";
 import { eq } from "drizzle-orm";
@@ -1221,6 +1222,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error('Error updating P/L baseline:', error);
       res.status(500).json({ message: 'Failed to update baseline adjustment' });
+    }
+  });
+
+  // Admin endpoint: Manually trigger EOD cache
+  app.post('/api/admin/cache-eod', async (req, res) => {
+    try {
+      console.log('🔧 Manual EOD cache triggered via API');
+      await eodCacheService.manualCache();
+      
+      const stats = eodCacheService.getCacheStats();
+      res.json({ 
+        success: true, 
+        cached: stats.size,
+        date: stats.date,
+        isValid: stats.isValid,
+        message: `EOD cache populated with ${stats.size} stocks` 
+      });
+    } catch (error: any) {
+      console.error('Error caching EOD data:', error);
+      res.status(500).json({ message: 'Failed to cache EOD data' });
     }
   });
 
