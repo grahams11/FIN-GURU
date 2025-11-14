@@ -5,7 +5,6 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import Dashboard from "@/pages/dashboard";
 import Portfolio from "@/pages/portfolio";
-import Backtest from "@/pages/backtest";
 import Strategy from "@/pages/strategy";
 import Ghost from "@/pages/ghost";
 import NotFound from "@/pages/not-found";
@@ -15,7 +14,6 @@ function Router() {
     <Switch>
       <Route path="/" component={Dashboard} />
       <Route path="/portfolio" component={Portfolio} />
-      <Route path="/backtest" component={Backtest} />
       <Route path="/strategy" component={Strategy} />
       <Route path="/ghost" component={Ghost} />
       <Route component={NotFound} />
