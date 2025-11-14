@@ -2,6 +2,16 @@
 
 This project is an AI-powered options trading dashboard providing institutional-grade tools for market analysis, trade recommendations, and portfolio management. It features multiple trading systems, including a high-win-rate Ghost 1DTE overnight scanner, and leverages real-time data, AI analysis, and advanced quantitative strategies to deliver insights and support investment decisions.
 
+# Recent Changes
+
+## November 14, 2025 - Market Data Routing & UI Enhancements
+- **Market Overview Data Sources**: Refactored to use Tastytrade WebSocket for live SPX data (when market is open) with Google Finance web scraping as fallback for all indices
+- **Eliminated 401 Errors**: Removed Polygon API calls for market indices (S&P 500, NASDAQ, VIX), eliminating authentication errors
+- **Accurate Change Metrics**: Fixed Google Finance scraper to correctly calculate change values from price and changePercent using proper algebra: `prevClose = price / (1 + changePercent/100)`
+- **Shared Time Hook**: Created reusable `useCstTime` hook for consistent CST time display across dashboard and Ghost page
+- **UI Cleanup**: Removed timestamp display from OptionsTraderAI refresh button for cleaner interface
+- **Live CST Clock**: Replaced static CST time on Ghost 1DTE page with real-time updating clock component
+
 # User Preferences
 
 Preferred communication style: Simple, everyday language.
@@ -63,7 +73,10 @@ Preferred communication style: Simple, everyday language.
 - **Financial Calculations**: Black-Scholes for options Greeks and pricing.
 - **Trade Budget**: $1000 maximum per trade with smart contract allocation.
 - **Fibonacci Retracement Validation**: Validates entry points using Fibonacci levels with fractal swing detection.
-- **Dashboard Market Overview**: Displays real-time S&P 500, NASDAQ, and VIX metrics.
+- **Dashboard Market Overview**: Displays real-time S&P 500, NASDAQ, and VIX metrics using hierarchical data sources
+  - **SPX**: Tastytrade WebSocket (when market open) → Google Finance scraping (fallback)
+  - **NASDAQ/VIX**: Google Finance scraping only (Tastytrade doesn't support these indices)
+  - **Change Calculation**: All change metrics accurately derived using formula: `prevClose = price / (1 + changePercent/100)`, then `change = price - prevClose`
 - **Recommendation Validation System**: Automatically filters stale and invalid recommendations using two criteria:
     - **Staleness Filter**: Removes recommendations >120min old to ensure fresh market data
     - **Price Movement Filter**: Removes recommendations with >2% adverse price movement from entry thesis
@@ -96,13 +109,16 @@ Preferred communication style: Simple, everyday language.
 - **Security Note**: Manual offset endpoint is unauthenticated for development ease but should be restricted in production using authentication middleware.
 
 ### UI Features
-- **CST Clock Component**: Real-time clock display on dashboard showing accurate CST time with market status indicator
-  - **Update Frequency**: 1-second polling via TanStack Query
+- **CST Clock Component**: Real-time clock display on dashboard and Ghost page showing accurate CST time with market status indicator
+  - **Shared Hook**: `useCstTime` custom hook provides consistent time polling across all components
+  - **Update Frequency**: 1-second polling via TanStack Query (`GET /api/time`)
   - **Market Status**: Green "LIVE" badge during market hours (9:30 AM - 4:00 PM CST), red "CLOSED" badge otherwise
   - **Time Format**: 12-hour format with AM/PM (e.g., "2:45:30 PM")
   - **Performance**: No performance regressions with 1-second polling interval
+  - **Locations**: Dashboard header, Ghost 1DTE status grid (inline clock)
 - **Manual Scan Triggers**: Ghost 1DTE scanner includes "Run Scan" button for on-demand analysis
 - **Real-Time Dashboard**: Market overview with live S&P 500, NASDAQ, and VIX metrics via SSE streaming
+- **Clean UI**: OptionsTraderAI refresh button displays icon/text only (no timestamp)
 
 # External Dependencies
 
@@ -111,9 +127,9 @@ Preferred communication style: Simple, everyday language.
 - **Drizzle ORM**: Type-safe database toolkit.
 
 ## Financial Data Sources
-- **Polygon/Massive.com**: Primary real-time market data (WebSocket and REST API) for US stocks and options.
-- **Tastytrade API**: Primary real-time options data (DXLink WebSocket) for SPX index options.
-- **Google Finance**: Fallback web scraping for stock prices and indices.
+- **Polygon/Massive.com**: Primary real-time market data (WebSocket and REST API) for US stocks and options (NOT used for market indices).
+- **Tastytrade API**: Primary real-time data (DXLink WebSocket) for SPX index when market is open.
+- **Google Finance**: Primary web scraping for all market indices (S&P 500, NASDAQ, VIX), fallback for SPX.
 - **MarketWatch**: Secondary web scraping fallback.
 
 ## Development Tools
