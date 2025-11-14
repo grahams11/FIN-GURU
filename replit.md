@@ -47,12 +47,11 @@ Preferred communication style: Simple, everyday language.
 - **ExpirationService**: Queries live option chains for accurate expiration dates.
 
 ### Trading Systems
-- **Ghost 1DTE Overnight Scanner**: High-win-rate strategy scanning the full S&P 500 (503 tickers) using a 4-layer AI scoring system for entry signals.
+- **Ghost 1DTE Overnight Scanner**: CURRENTLY DISABLED to prevent API rate limit exhaustion (500+ S&P requests were blocking Elite Scanner from completing its analysis).
   - **Universe**: S&P 500 with parallel batch processing (50 symbols/batch).
   - **Performance**: Completes 503-ticker scan in under 3 seconds with 30-second timeout protection.
-  - **Error Handling**: Graceful initialization fallback using default HV values (20%) when Polygon historical data unavailable.
-  - **Data Sources**: Polygon unlimited mode with fail-fast logic (no Alpha Vantage fallback to prevent rate-limiting delays).
-  - **Grok AI Enhancements (Phase 4)**: Includes strict Theta (< -0.08) and Gamma (> 0.12) filtering, specific IV ranges, and a defined entry window (2:00-3:00 PM CST) and exit time (8:32 AM CST next day).
+  - **Status**: Temporarily disabled in server/index.ts (GhostScheduler.start() commented out) to prioritize Elite Scanner operation.
+  - **Future**: Will be re-enabled once API quota management is optimized to prevent interference with Elite Scanner.
 - **Day Trading System (SPX Only)**: Utilizes VIX + RSI for BUY/SELL signals on SPX weekly expirations.
 - **Elite Dual-Strategy Scanner (Stocks)**: RSI-based momentum scanner for CALL/PUT strategies on 100+ stocks and ETFs, targeting 3-5 high-quality plays per day.
   - **24/7 Operation**: Operates continuously using dual-mode analysis (live data during market hours, EOD + overnight aggregates when closed).
@@ -73,20 +72,21 @@ Preferred communication style: Simple, everyday language.
 - **VIX Squeeze Kill Switch**: Real-time alert system for high-confidence 0DTE PUT opportunities when VIX >= 20 with >5% change.
   - **Alert UI**: Red pulsing banner with "BUY SPY 0DTE PUT", confidence rating, VIX metrics, and entry/exit windows.
   - **Auto-Refresh**: Component polls every 5 seconds for live alert status.
-- **24/7 Auto-Scan System**: Runs both Elite and Ghost scanners every 5 minutes continuously.
+- **24/7 Auto-Scan System**: Runs Elite Scanner only, every 5 minutes continuously (Ghost disabled Nov 14, 2025).
   - **Run-State Guard**: Prevents overlapping scans if previous scan exceeds 5-minute interval.
-  - **Error Handling**: Each scanner failure logged separately with detailed error diagnostics.
+  - **Error Handling**: Scanner failures logged with detailed error diagnostics.
   - **Duration Tracking**: Logs scan execution time to identify performance issues.
-  - **Status Reporting**: Distinguishes between full success and partial failure (one scanner failing).
+  - **Rationale**: Ghost Scanner (500+ S&P API requests) was causing 429 rate limits that blocked Elite Scanner from analyzing its top 50 candidates, resulting in zero plays despite 85% historical accuracy.
 - **Dashboard Market Overview**: Displays real-time S&P 500, NASDAQ, and VIX metrics using hierarchical data sources (Tastytrade WebSocket, Google Finance scraping).
   - **Change Calculation**: Real-time changePercent using `(currentPrice - openPrice) / openPrice * 100`.
 - **Recommendation Validation System**: Automatically filters stale (>120min old) and invalid (>2% adverse price movement) recommendations.
   - **Auto-Refresh**: Background job refreshes recommendations every 15 minutes during market hours.
 - **TradeExitMonitor**: Tracks historical trade recommendations and evaluates strategy win percentage.
-  - **Scheduling**: Runs once daily at 4:15 PM ET (21:15 UTC) using Luxon timezone-aware scheduling.
-  - **Purpose**: Checks 145 historical recommendations for profit targets (65%) and stop losses (30%) once daily after market close.
+  - **Scheduling**: Runs once daily at 4:15 PM ET (3:15 PM CST) using Luxon timezone-aware scheduling.
+  - **Purpose**: Checks historical recommendations for profit targets (65%) and stop losses (30%) once daily after market close.
   - **API Efficiency**: Reduced from 60-second polling (~2,100 req/min) to once-daily execution (~145 req/day), eliminating API quota exhaustion.
   - **Impact**: Restored Elite Scanner functionality (now receives 11,624 stocks vs. 0 stocks before fix).
+  - **Logging**: Displays CST time for user-friendly scheduling confirmation.
 
 ### Self-Learning System (AI Education Engine)
 - **Architecture**: Five core services orchestrate autonomous learning using Grok AI reasoning.
