@@ -25,6 +25,12 @@ Preferred communication style: Simple, everyday language.
 - **API**: RESTful endpoints for market data, AI insights, and trade management.
 - **Data Processing**: Real-time market data scraping and financial calculations.
 - **Financial Calculations**: Custom Black-Scholes options pricing model.
+- **Polygon API Throttling**: Dual Bottleneck system prevents rate limits while respecting unlimited plan fair-use policies:
+  - **Standard Limiter**: 200ms minTime, 5 maxConcurrent, 100/min reservoir (rate-limited requests)
+  - **Lightweight Limiter**: 300ms minTime, 2 maxConcurrent, no reservoir (unlimited-mode scanners)
+  - **Auth Fallback**: Bearer token → query param on 401 errors
+  - **Smart Retries**: Exponential backoff for 429/5xx, short-circuit for 401/403 to prevent retry storms
+  - **Result Caps**: limit=50000 (historical), limit=5000 (minute), limit=250 (options snapshots)
 
 ## Data Storage
 - **Database**: PostgreSQL with Drizzle ORM.
@@ -96,9 +102,10 @@ Preferred communication style: Simple, everyday language.
 - **Drizzle ORM**: Type-safe database toolkit.
 
 ## Financial Data Sources
-- **Polygon/Massive.com**: Primary real-time market data (WebSocket and REST API) for US stocks and options.
+- **Polygon/Massive.com**: Primary real-time market data (WebSocket and REST API) for US stocks and options. Advanced Options Plan provides unlimited API access with fair-use throttling.
+  - **Limitation**: Index symbols (I:SPX, I:COMP, I:VIX) return 403 errors - not included in Advanced Options Plan. System automatically falls back to Google Finance scraping.
 - **Tastytrade API**: Primary real-time data (DXLink WebSocket) for SPX index when market is open.
-- **Google Finance**: Primary web scraping for all market indices (S&P 500, NASDAQ, VIX), and fallback for SPX.
+- **Google Finance**: Primary web scraping for all market indices (S&P 500, NASDAQ, VIX), and fallback for SPX and Polygon index queries.
 - **MarketWatch**: Secondary web scraping fallback.
 - **WorldTimeAPI**: Primary source for time synchronization.
 - **NTP Servers**: (time.google.com, pool.ntp.org, time.cloudflare.com) for time synchronization fallback.
