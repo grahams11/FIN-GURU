@@ -53,9 +53,14 @@ Preferred communication style: Simple, everyday language.
   - **Status**: Temporarily disabled in server/index.ts (GhostScheduler.start() commented out) to prioritize Elite Scanner operation.
   - **Future**: Will be re-enabled once API quota management is optimized to prevent interference with Elite Scanner.
 - **Day Trading System (SPX Only)**: Utilizes VIX + RSI for BUY/SELL signals on SPX weekly expirations.
-- **Elite Dual-Strategy Scanner (Stocks)**: RSI-based momentum scanner for CALL/PUT strategies on 100+ stocks and ETFs, targeting 3-5 high-quality plays per day.
+- **Elite Dual-Strategy Scanner (Stocks)**: Momentum-based scanner for CALL/PUT strategies on 100+ stocks and ETFs, targeting 3-5 high-quality plays per day.
+  - **Nov 14, 2025 FIX**: Restored Nov 12 behavior where neutral-RSI plays (RSI=50) like RIGL/TBPH were accepted. Changed signal type determination from RSI thresholds to PRICE ACTION (momentum direction):
+    - **Call Signal**: Positive intraday momentum (price moving up from yesterday's close)
+    - **Put Signal**: Negative intraday momentum (price moving down from yesterday's close)
+    - **RSI Role**: Now used for SCORING quality only, not filtering - accepts all RSI values
+    - **Impact**: Allows high-quality plays with neutral RSI that have strong directional momentum/EMA alignment
   - **24/7 Operation**: Operates continuously using dual-mode analysis (live data during market hours, EOD + overnight aggregates when closed).
-  - **Live Mode (8:30 AM - 3:00 PM CST)**: RSI oversold < 40, volume spike > 1.5x, intraday momentum > 1.5%, premium > $0.30, pivot breakout required.
+  - **Live Mode (8:30 AM - 3:00 PM CST)**: Momentum direction determines signal type, volume spike > 1.8x, intraday momentum > 0.8%, premium > $0.30, pivot breakout required.
   - **Overnight Mode (8:00 PM - 8:30 AM CST)**: Uses real indicator calculations (RSI, EMA20, ATR) from EOD snapshot + overnight bars (4-8 PM CST aggregates).
     - **Indicator Calculations**: `server/utils/indicators.ts` provides real RSI (14-period gains/losses), EMA (exponential smoothing), and ATR (true range averaging).
     - **Liquidity-Aware Filters**: Asymmetric RSI thresholds (45/55 to avoid neutral zone), relaxed volume/ATR requirements (1.2x vs live 1.5x), minimum 0.8% price movement.
