@@ -15,8 +15,8 @@ import { historicalDataService } from './historicalDataService';
 
 interface EliteStrategyConfig {
   // Dynamic parameters (adjusted by adaptive tuner)
-  rsiOversold: number; // Default: 30 (Nov 12 strict filter)
-  rsiOverbought: number; // Default: 70 (Nov 12 strict filter)
+  rsiOversold: number; // Default: 35 (Balanced: catches RIGL/COIN/TBPH setups)
+  rsiOverbought: number; // Default: 65 (Balanced: catches RIGL/COIN/TBPH setups)
   vixMinCall: number; // Default: 15 (raised from 10)
   vixMinPut: number; // Default: 20 (raised from 10)
   
@@ -79,8 +79,8 @@ export class EliteStrategyEngine {
   private constructor(config?: Partial<EliteStrategyConfig>) {
     // Default elite parameters
     this.config = {
-      rsiOversold: 30,
-      rsiOverbought: 70,
+      rsiOversold: 35,
+      rsiOverbought: 65,
       vixMinCall: 15,
       vixMinPut: 20,
       stopLoss: 0.30,

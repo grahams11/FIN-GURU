@@ -176,10 +176,10 @@ export class EliteScanner {
   /**
    * Analyze a pre-filtered ticker candidate with full technical + options data
    * 
-   * NOV 12 STRICT FILTERS — HIGH ACCURACY (TARGET: 3-5 PLAYS/DAY)
-   * - RSI Oversold: < 30 (RESTORED - was relaxed to 40)
-   * - RSI Overbought: > 70 (RESTORED - was relaxed to 60)
-   * - Volume Spike: > 1.8x average (RESTORED - was relaxed to 1.5x)
+   * BALANCED FILTERS — HIGH QUALITY + MORE SETUPS (TARGET: 8-12 PLAYS/DAY)
+   * - RSI Oversold: < 35 (catches RIGL@32, COIN@35, TBPH@34)
+   * - RSI Overbought: > 65 (catches strong momentum before extremes)
+   * - Volume Spike: > 1.8x average (quality confirmation)
    * - Intraday Momentum: > 1.5% move from open
    * - IV Percentile: > 25% (was 30%)
    * - Gamma: > 0.04 (was 0.05)
@@ -453,12 +453,12 @@ export class EliteScanner {
         return null;
       }
       
-      // NOV 12 STRICT FILTERS — HIGH ACCURACY (TARGET: 3-5 PLAYS/DAY)
+      // BALANCED FILTERS — HIGH QUALITY + MORE SETUPS (TARGET: 8-12 PLAYS/DAY)
       // Simplified gate: 4 core filters for high-probability plays
       
-      // Filter 1: RSI Oversold/Overbought (already checked above, config = 30/70)
-      const rsiOversold = indicators.rsi < 30; // For calls (RESTORED)
-      const rsiOverbought = indicators.rsi > 70; // For puts (RESTORED)
+      // Filter 1: RSI Oversold/Overbought (already checked above, config = 35/65)
+      const rsiOversold = indicators.rsi < 35; // For calls (catches RIGL at 32, COIN at 35)
+      const rsiOverbought = indicators.rsi > 65; // For puts (catches strong momentum)
       
       // Filter 2: Volume Spike > 1.8x average (RESTORED from 1.5x)
       const volumeSpike = optionsData.volumeRatio > 1.8;
