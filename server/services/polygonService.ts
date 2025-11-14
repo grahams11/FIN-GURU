@@ -1320,12 +1320,19 @@ class PolygonService {
         return data.results;
       }
     } catch (error: any) {
+      // In unlimited mode, fail fast instead of falling back to slow Alpha Vantage
+      if (unlimited) {
+        console.warn(`⚠️ ${symbol}: Polygon failed in unlimited mode (${error.message}) - skipping Alpha Vantage fallback for speed`);
+        return null;
+      }
+      
       console.warn(`⚠️ ${symbol}: Polygon failed (${error.message}), trying Alpha Vantage fallback...`);
       // Note: Intentionally NOT returning - fall through to Alpha Vantage fallback below
     }
     
-    // Fallback to Alpha Vantage on Polygon failure (preserves resiliency in both unlimited and rate-limited modes)
-    if (alphaVantageService.isConfigured()) {
+    // Fallback to Alpha Vantage on Polygon failure (preserves resiliency in rate-limited mode only)
+    // Skip this fallback in unlimited mode to prevent 503 stocks hitting slow Alpha Vantage API
+    if (!unlimited && alphaVantageService.isConfigured()) {
       const avBars = await alphaVantageService.getHistoricalBars(
         symbol,
         from,

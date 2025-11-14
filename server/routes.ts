@@ -1801,8 +1801,8 @@ Historical win rate same setup: ${play.historicalWinRate.toFixed(1)}%`
       res.json({
         success: true,
         scanTime: scanTime,
-        targetTime: '<0.7 seconds',
-        meetsTarget: scanTime < 700,
+        targetTime: '<3 seconds',
+        meetsTarget: scanTime < 3000,
         apiCalls: result.apiCalls,
         
         // API usage information for unlimited mode
@@ -1826,7 +1826,7 @@ Historical win rate same setup: ${play.historicalWinRate.toFixed(1)}%`
           scanTimeMs: scanTime,
           scanTimeSec: (scanTime / 1000).toFixed(2),
           apiCallsUsed: result.apiCalls,
-          speedStatus: scanTime < 700 ? '✅ Under 0.7s target' : '⚠️ Exceeds target',
+          speedStatus: scanTime < 3000 ? '✅ Under 3s target' : '⚠️ Exceeds target',
           apiStatus: '✅ Unlimited (Advanced Options Plan)'
         }
       });

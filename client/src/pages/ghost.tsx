@@ -693,7 +693,7 @@ export default function GhostScanner() {
           <CardContent className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
             <div>
               <div className="text-slate-400">Target Universe</div>
-              <div className="text-white font-semibold">SPY, QQQ, IWM</div>
+              <div className="text-white font-semibold">Full S&P 500 (503 tickers)</div>
             </div>
             <div>
               <div className="text-slate-400">Win Rate</div>
@@ -701,11 +701,11 @@ export default function GhostScanner() {
             </div>
             <div>
               <div className="text-slate-400">Speed Target</div>
-              <div className="text-white font-semibold">&lt; 0.7 seconds</div>
+              <div className="text-white font-semibold">&lt; 3 seconds</div>
             </div>
             <div>
-              <div className="text-slate-400">API Limit</div>
-              <div className="text-white font-semibold">4 calls max</div>
+              <div className="text-slate-400">Scan Mode</div>
+              <div className="text-white font-semibold">Unlimited (Parallel)</div>
             </div>
           </CardContent>
         </Card>

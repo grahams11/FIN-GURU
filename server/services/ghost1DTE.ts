@@ -320,28 +320,37 @@ export class Ghost1DTEService {
   }
   
   /**
-   * Load 30-day historical volatility for SPY, QQQ, IWM
+   * Load 30-day historical volatility for S&P 500
    * Used for VRP (Volatility Risk Premium) calculation
-   * Now uses bulk historical fetch for efficiency
+   * Now uses bulk historical fetch for efficiency with graceful fallback
    */
   private static async loadHistoricalVolatility(): Promise<void> {
-    console.log('📊 Loading 30-day historical volatility...');
+    console.log(`📊 Loading 30-day historical volatility for ${this.SYMBOLS.length} symbols...`);
     
-    // Bulk fetch historical data for all symbols
-    const endDate = new Date();
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - 380); // 380 calendar days to ensure 252 trading days
+    let bulkBars = new Map<string, any[]>();
     
-    const bulkBars = await polygonService.getBulkHistoricalBars(
-      this.SYMBOLS,
-      startDate.toISOString().split('T')[0],
-      endDate.toISOString().split('T')[0],
-      true // Unlimited API (Advanced Options Plan)
-    );
+    try {
+      // Bulk fetch historical data for all symbols
+      const endDate = new Date();
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - 380); // 380 calendar days to ensure 252 trading days
+      
+      bulkBars = await polygonService.getBulkHistoricalBars(
+        this.SYMBOLS,
+        startDate.toISOString().split('T')[0],
+        endDate.toISOString().split('T')[0],
+        true // Unlimited API (Advanced Options Plan)
+      );
+      
+      console.log(`✅ Loaded historical data for ${bulkBars.size}/${this.SYMBOLS.length} symbols`);
+    } catch (error: any) {
+      console.warn(`⚠️ Bulk historical load failed (${error.message}) - using default HV values`);
+      // Continue with empty map - will use defaults below
+    }
     
     for (const symbol of this.SYMBOLS) {
       try {
-        // Calculate HV from cached bars
+        // Calculate HV from cached bars (if available)
         const bars = bulkBars.get(symbol.toUpperCase());
         const hv = this.calculate30DayHVFromBars(bars);
         this.hvCache.set(symbol, hv);
@@ -355,12 +364,16 @@ export class Ghost1DTEService {
           });
         }
         
-        console.log(`${symbol} 30d HV: ${(hv * 100).toFixed(2)}%, 252d Distribution: ${hvDistribution.length} points`);
+        if (bars && bars.length > 0) {
+          console.log(`${symbol} 30d HV: ${(hv * 100).toFixed(2)}%, 252d Distribution: ${hvDistribution.length} points`);
+        }
       } catch (error) {
         console.error(`Error loading HV for ${symbol}:`, error);
         this.hvCache.set(symbol, 0.20); // Default 20% if unavailable
       }
     }
+    
+    console.log(`✅ HV cache populated for ${this.hvCache.size} symbols`);
   }
   
   /**
@@ -449,15 +462,15 @@ export class Ghost1DTEService {
   }
   
   /**
-   * Main Ghost 1DTE Scan (Grok Phase 4 Enhanced)
+   * Main Ghost 1DTE Scan (Grok Phase 4 + S&P 500)
    * Triggered in 2:00-3:00pm CST window daily
    * Returns top 3 overnight plays with 94.1%+ win rate
    * 
    * API Usage: Unlimited (Advanced Options Plan)
-   * - 3 option chain snapshots (SPY, QQQ, IWM)
-   * - 3 historical bars for RSI (parallel fetch)
-   * - 3 historical bars for HV/VRP (parallel fetch)
-   * Total: ~6-9 concurrent API calls with no limits
+   * - 503 option chain snapshots (Full S&P 500)
+   * - 503 historical bars for RSI (parallel fetch in batches of 50)
+   * - 503 historical bars for HV/VRP (parallel fetch in batches of 50)
+   * Total: ~1,006-1,509 concurrent API calls with no limits
    * 
    * Phase 4 Scoring Layers (85-point threshold):
    * 1. Max Pain + Gamma Trap (30 points)
@@ -465,11 +478,55 @@ export class Ghost1DTEService {
    * 3. Ghost Sweep Detection (20 points)
    * 4. RSI Extreme (15 points)
    * 
-   * Speed Target: <1 second (parallel fetching)
+   * Speed Target: <3 seconds (parallel batching)
+   * Timeout Protection: 30 seconds max to prevent hanging
    */
   static async scan(): Promise<GhostScanResult> {
     const scanStartTime = Date.now();
+    const SCAN_TIMEOUT_MS = 30000; // 30 second timeout
     let apiCalls = 0;
+    
+    // Create timeout that can be cleared
+    let timeoutId: NodeJS.Timeout | null = null;
+    const timeoutPromise = new Promise<GhostScanResult>((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error('Scan timeout after 30s')), SCAN_TIMEOUT_MS);
+    });
+    
+    try {
+      // Wrap entire scan in timeout protection
+      const result = await Promise.race([
+        this._doScan(scanStartTime, apiCalls),
+        timeoutPromise
+      ]);
+      
+      // Clear timeout if scan completed successfully
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      
+      return result;
+    } catch (error: any) {
+      // Clear timeout on error
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      
+      console.error(`❌ Ghost scan failed: ${error.message}`);
+      return {
+        topPlays: [],
+        scanTime: Date.now() - scanStartTime,
+        apiCalls: apiCalls,
+        contractsAnalyzed: 0,
+        contractsFiltered: 0,
+        timestamp: new Date().toISOString()
+      };
+    }
+  }
+  
+  /**
+   * Internal scan implementation (called by scan() with timeout wrapper)
+   */
+  private static async _doScan(scanStartTime: number, apiCalls: number): Promise<GhostScanResult> {
     
     // Determine DTE mode based on current time
     const dteTarget = this.determineTargetDTE();
