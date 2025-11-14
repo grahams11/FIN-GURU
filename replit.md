@@ -73,6 +73,11 @@ Preferred communication style: Simple, everyday language.
 - **VIX Squeeze Kill Switch**: Real-time alert system for high-confidence 0DTE PUT opportunities when VIX >= 20 with >5% change.
   - **Alert UI**: Red pulsing banner with "BUY SPY 0DTE PUT", confidence rating, VIX metrics, and entry/exit windows.
   - **Auto-Refresh**: Component polls every 5 seconds for live alert status.
+- **24/7 Auto-Scan System**: Runs both Elite and Ghost scanners every 5 minutes continuously.
+  - **Run-State Guard**: Prevents overlapping scans if previous scan exceeds 5-minute interval.
+  - **Error Handling**: Each scanner failure logged separately with detailed error diagnostics.
+  - **Duration Tracking**: Logs scan execution time to identify performance issues.
+  - **Status Reporting**: Distinguishes between full success and partial failure (one scanner failing).
 - **Dashboard Market Overview**: Displays real-time S&P 500, NASDAQ, and VIX metrics using hierarchical data sources (Tastytrade WebSocket, Google Finance scraping).
   - **Change Calculation**: Real-time changePercent using `(currentPrice - openPrice) / openPrice * 100`.
 - **Recommendation Validation System**: Automatically filters stale (>120min old) and invalid (>2% adverse price movement) recommendations.
