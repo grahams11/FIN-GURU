@@ -377,37 +377,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Clear stale cache entries for previous trading days
       dailyIndexCache.clearOldData(tradingDate);
       
-      // Index symbols to process
-      const indices = [
-        { symbol: '^GSPC', name: 'S&P 500' },
-        { symbol: '^IXIC', name: 'NASDAQ' },
-        { symbol: '^VIX', name: 'VIX' }
-      ];
-      
-      // Hydrate cache with Google Finance snapshots if missing open prices
-      for (const {symbol} of indices) {
-        const cached = dailyIndexCache.get(symbol);
-        if (!cached || cached.tradingDate !== tradingDate) {
-          console.log(`📊 ${symbol}: Fetching Google Finance snapshot to populate cache...`);
-          const snapshot = await WebScraperService.getGoogleIndexSnapshot(symbol);
-          
-          // Set open price (required for changePercent calculation)
-          if (snapshot.open !== null) {
-            dailyIndexCache.setOpenPrice(symbol, snapshot.open, tradingDate);
-          } else if (snapshot.previousClose !== null) {
-            // Fallback: use previous close as open if open not available yet
-            console.log(`⚠️ ${symbol}: Using previous close as open (market may not have opened yet)`);
-            dailyIndexCache.setOpenPrice(symbol, snapshot.previousClose, tradingDate);
-          }
-          
-          // Set close price if market is closed and we have close data
-          if (!isMarketOpen && snapshot.close !== null) {
-            dailyIndexCache.setClosePrice(symbol, snapshot.close, tradingDate);
-          }
-        }
-      }
-      
-      // Get current prices and calculate changePercent using cache
+      // Get current prices from data sources
       // S&P 500: Try Tastytrade (live) → Google Finance (fallback)
       let sp500Price: number;
       try {
@@ -416,29 +386,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
           if (spxQuote && spxQuote.price > 0) {
             sp500Price = spxQuote.price;
             console.log(`✅ SPX from Tastytrade (live): $${sp500Price.toFixed(2)}`);
+            
+            // Store opening price on first data of the day
+            const cached = dailyIndexCache.get('^GSPC');
+            if (!cached || cached.tradingDate !== tradingDate) {
+              dailyIndexCache.setOpenPrice('^GSPC', sp500Price, tradingDate);
+              console.log(`📊 ^GSPC: Captured opening price $${sp500Price.toFixed(2)} for ${tradingDate}`);
+            }
           } else {
-            const snapshot = await WebScraperService.getGoogleIndexSnapshot('^GSPC');
-            sp500Price = snapshot.last || 0;
-            console.log(`✅ SPX from Google Finance: $${sp500Price.toFixed(2)}`);
+            const scrapedData = await WebScraperService.scrapeMarketIndices();
+            sp500Price = scrapedData.sp500.price;
           }
         } else {
-          const snapshot = await WebScraperService.getGoogleIndexSnapshot('^GSPC');
-          sp500Price = snapshot.last || 0;
+          const scrapedData = await WebScraperService.scrapeMarketIndices();
+          sp500Price = scrapedData.sp500.price;
         }
       } catch (error) {
         console.log('⚠️ SPX fetch error, using fallback');
-        const snapshot = await WebScraperService.getGoogleIndexSnapshot('^GSPC');
-        sp500Price = snapshot.last || 0;
+        const scrapedData = await WebScraperService.scrapeMarketIndices();
+        sp500Price = scrapedData.sp500.price;
       }
       
-      // NASDAQ & VIX: Google Finance only
-      const nasdaqSnapshot = await WebScraperService.getGoogleIndexSnapshot('^IXIC');
-      const vixSnapshot = await WebScraperService.getGoogleIndexSnapshot('^VIX');
+      // NASDAQ & VIX: Google Finance scraping
+      const scrapedData = await WebScraperService.scrapeMarketIndices();
+      const nasdaqPrice = scrapedData.nasdaq.price;
+      const vixPrice = scrapedData.vix.price;
       
-      const nasdaqPrice = nasdaqSnapshot.last || 0;
-      const vixPrice = vixSnapshot.last || 0;
+      // Store opening prices when market opens
+      if (isMarketOpen) {
+        const nasdaqCached = dailyIndexCache.get('^IXIC');
+        if (!nasdaqCached || nasdaqCached.tradingDate !== tradingDate) {
+          dailyIndexCache.setOpenPrice('^IXIC', nasdaqPrice, tradingDate);
+          console.log(`📊 ^IXIC: Captured opening price $${nasdaqPrice.toFixed(2)} for ${tradingDate}`);
+        }
+        
+        const vixCached = dailyIndexCache.get('^VIX');
+        if (!vixCached || vixCached.tradingDate !== tradingDate) {
+          dailyIndexCache.setOpenPrice('^VIX', vixPrice, tradingDate);
+          console.log(`📊 ^VIX: Captured opening price $${vixPrice.toFixed(2)} for ${tradingDate}`);
+        }
+      }
       
-      // Calculate changePercent using cached open prices
+      // Calculate changePercent using cached open prices (or 0 if market is closed)
       const sp500ChangePercent = dailyIndexCache.calculateChangePercent('^GSPC', sp500Price, isMarketOpen) || 0;
       const nasdaqChangePercent = dailyIndexCache.calculateChangePercent('^IXIC', nasdaqPrice, isMarketOpen) || 0;
       const vixChangePercent = dailyIndexCache.calculateChangePercent('^VIX', vixPrice, isMarketOpen) || 0;
@@ -448,9 +437,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const nasdaqCached = dailyIndexCache.get('^IXIC');
       const vixCached = dailyIndexCache.get('^VIX');
       
-      const sp500Change = sp500Cached ? sp500Price - sp500Cached.openPrice : 0;
-      const nasdaqChange = nasdaqCached ? nasdaqPrice - nasdaqCached.openPrice : 0;
-      const vixChange = vixCached ? vixPrice - vixCached.openPrice : 0;
+      const sp500Change = sp500Cached && isMarketOpen ? sp500Price - sp500Cached.openPrice : 0;
+      const nasdaqChange = nasdaqCached && isMarketOpen ? nasdaqPrice - nasdaqCached.openPrice : 0;
+      const vixChange = vixCached && isMarketOpen ? vixPrice - vixCached.openPrice : 0;
       
       // Build final market data
       const marketData = {
