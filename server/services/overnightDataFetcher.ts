@@ -143,8 +143,70 @@ export class OvernightDataFetcher {
         timestamp: Date.now()
       };
     } catch (error: any) {
-      console.error(`Failed to fetch overnight data for ${symbol}:`, error.message);
-      return null;
+      console.error(`Failed to fetch overnight bars for ${symbol}:`, error.message);
+      
+      // Fallback to historical daily bars for indicator calculation
+      const eodSnapshot = eodCacheService.getEODSnapshot(symbol);
+      if (!eodSnapshot) {
+        console.warn(`⚠️ No EOD snapshot for ${symbol} - cannot provide fallback`);
+        return null;
+      }
+      
+      try {
+        console.log(`📊 ${symbol}: Fetching historical daily bars as fallback...`);
+        
+        // Fetch last 30 days of daily bars for indicator calculation
+        const endDate = new Date(eodSnapshot.date);
+        const startDate = new Date(endDate);
+        startDate.setDate(startDate.getDate() - 30);
+        
+        const historicalBars = await polygonService.getDailyAggregates(
+          symbol,
+          startDate.toISOString().split('T')[0],
+          endDate.toISOString().split('T')[0],
+          true // unlimited mode
+        );
+        
+        if (historicalBars && historicalBars.length >= 20) {
+          console.log(`✅ ${symbol}: Using ${historicalBars.length} historical daily bars for indicators`);
+          
+          // Convert daily bars to overnight bar format for compatibility
+          const convertedBars = historicalBars.map((b: any) => ({
+            timestamp: b.t,
+            open: b.o,
+            high: b.h,
+            low: b.l,
+            close: b.c,
+            volume: b.v
+          }));
+          
+          return {
+            symbol,
+            eodSnapshot,
+            overnightBars: convertedBars, // Use historical daily bars as proxy
+            overnightHigh: eodSnapshot.high,
+            overnightLow: eodSnapshot.low,
+            overnightVolume: eodSnapshot.volume,
+            breakoutDetected: false,
+            timestamp: Date.now()
+          };
+        }
+      } catch (histError: any) {
+        console.error(`Failed to fetch historical bars for ${symbol}:`, histError.message);
+      }
+      
+      // Final fallback: Return EOD-only (will be skipped by scanner)
+      console.log(`⚠️ ${symbol}: No historical data available - EOD-only mode`);
+      return {
+        symbol,
+        eodSnapshot,
+        overnightBars: [], // Empty array signals insufficient data
+        overnightHigh: eodSnapshot.close,
+        overnightLow: eodSnapshot.close,
+        overnightVolume: 0,
+        breakoutDetected: false,
+        timestamp: Date.now()
+      };
     }
   }
   

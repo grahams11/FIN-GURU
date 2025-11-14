@@ -242,28 +242,30 @@ export class EliteScanner {
         // Build combined bars: EOD + overnight (if available)
         const hasOvernightBars = bars && bars.length > 0;
         
-        // Filter out bars with zero volume (sparse overnight data) if we have overnight bars
-        const validBars = hasOvernightBars ? bars.filter(b => b.volume > 0) : [];
+        // During overnight mode, we REQUIRE overnight bars for indicator calculation
+        // EOD snapshot alone (1 data point) cannot calculate RSI/EMA/ATR meaningfully
+        if (!hasOvernightBars) {
+          console.log(`⚠️ ${symbol}: No overnight bars - cannot calculate indicators from EOD alone`);
+          return null; // Skip during overnight if no bars available
+        }
+        
+        // Filter out bars with zero volume (sparse overnight data)
+        const validBars = bars.filter(b => b.volume > 0);
         const totalBars = validBars.length + 1; // +1 for EOD
         
-        // If we have overnight bars but they're mostly zero-volume, skip
-        if (hasOvernightBars && validBars.length < bars.length * 0.5) {
+        // If overnight bars exist but are mostly zero-volume, skip
+        if (validBars.length < bars.length * 0.5) {
           console.log(`❌ ${symbol}: Too many zero-volume bars (${validBars.length}/${bars.length})`);
           return null;
         }
         
-        // Require minimum 20 bars if we have overnight bars, otherwise use EOD only
-        if (hasOvernightBars && totalBars < 20) {
+        // Require minimum 20 bars for accurate indicator calculation
+        if (totalBars < 20) {
           console.log(`❌ ${symbol}: Insufficient bars (${totalBars}/20)`);
           return null;
         }
         
-        // Log data source
-        if (!hasOvernightBars) {
-          console.log(`📊 ${symbol}: Using EOD data only (no overnight bars available)`);
-        } else {
-          console.log(`📊 ${symbol}: Analyzing with ${validBars.length} overnight bars + EOD (Price $${eod.close})`);
-        }
+        console.log(`📊 ${symbol}: Analyzing with ${validBars.length} overnight bars + EOD (Price $${eod.close})`);
         
         // Combine EOD close + overnight closes for indicator context
         // If no overnight bars, just use EOD close (will calculate from historical if needed)
