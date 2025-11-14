@@ -125,30 +125,28 @@ export class EliteScanner {
     console.log(`🧮 Analyzing top ${Math.min(basicFiltered.length, 50)} candidates...`);
     const candidates = basicFiltered.slice(0, 50); // Top 50 by volume/momentum
     
-    // BATCH PROCESSING: Analyze in groups of 10 to prevent API rate limit bursts
-    const BATCH_SIZE = 10;
-    const batches: typeof candidates[] = [];
-    for (let i = 0; i < candidates.length; i += BATCH_SIZE) {
-      batches.push(candidates.slice(i, i + BATCH_SIZE));
-    }
-    
-    console.log(`📦 Processing ${candidates.length} candidates in ${batches.length} batches of ${BATCH_SIZE}...`);
+    // SEQUENTIAL PROCESSING: Analyze one ticker at a time to prevent API rate limit bursts
+    // Rate limiter (300ms minTime, 2 maxConcurrent) handles all throttling
+    // Target: 50 tickers in ~25 seconds (6-7 calls/sec throughput)
+    console.log(`🔄 Processing ${candidates.length} candidates sequentially...`);
     
     const analysisResults: (EliteScanResult | null)[] = [];
-    for (let i = 0; i < batches.length; i++) {
-      const batch = batches[i];
-      const batchStartTime = Date.now();
+    let totalPlaysFound = 0;
+    
+    for (let i = 0; i < candidates.length; i++) {
+      const stock = candidates[i];
+      const result = await this.analyzeTicker(stock.ticker, config, marketContext.isLive, isOvernight);
+      analysisResults.push(result);
       
-      // Process batch in parallel
-      const batchPromises = batch.map(stock => 
-        this.analyzeTicker(stock.ticker, config, marketContext.isLive, isOvernight)
-      );
-      const batchResults = await Promise.all(batchPromises);
-      analysisResults.push(...batchResults);
-      
-      const batchDuration = ((Date.now() - batchStartTime) / 1000).toFixed(1);
-      const batchPlays = batchResults.filter(r => r !== null).length;
-      console.log(`✅ Batch ${i + 1}/${batches.length} complete (${batchDuration}s) — ${batchPlays} plays found`);
+      if (result !== null) {
+        totalPlaysFound++;
+        console.log(`✅ ${i + 1}/${candidates.length} — Found play: ${stock.ticker} (${totalPlaysFound} total)`);
+      } else {
+        // Log progress every 10 tickers
+        if ((i + 1) % 10 === 0) {
+          console.log(`⏳ Progress: ${i + 1}/${candidates.length} analyzed — ${totalPlaysFound} plays found`);
+        }
+      }
     }
     
     // Filter out nulls and sort by signal quality
