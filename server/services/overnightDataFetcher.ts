@@ -177,10 +177,11 @@ export class OvernightDataFetcher {
   /**
    * Get overnight setup data for Elite Scanner
    * Combines EOD baseline + overnight aggregates + options chain
+   * Returns partial data when overnight bars/chain unavailable (degrades gracefully)
    */
   async getOvernightSetup(symbol: string): Promise<{
     data: OvernightData;
-    chain: OvernightOptionsChain;
+    chain: OvernightOptionsChain | null;
   } | null> {
     try {
       const [data, chain] = await Promise.all([
@@ -188,7 +189,8 @@ export class OvernightDataFetcher {
         this.getOvernightOptionsChain(symbol)
       ]);
       
-      if (!data || !chain) {
+      // Only require EOD snapshot - overnight bars and chain are optional
+      if (!data) {
         return null;
       }
       

@@ -229,8 +229,8 @@ export class EliteScanner {
       if (isOvernight) {
         const overnightSetup = await overnightDataFetcher.getOvernightSetup(symbol);
         
-        // Validation: Need EOD snapshot, overnight bars, and option chain
-        if (!overnightSetup || !overnightSetup.data || !overnightSetup.chain) {
+        // Validation: Only require EOD snapshot (overnight bars and chain are optional)
+        if (!overnightSetup || !overnightSetup.data) {
           // EOD cache is populated daily at 3 PM CST - will be available after first market close
           return null;
         }
@@ -239,37 +239,56 @@ export class EliteScanner {
         const eod = overnightData.eodSnapshot;
         const bars = overnightData.overnightBars;
         
-        // Require minimum 20 bars for indicators (EOD + overnight)
-        if (bars.length < 20) {
-          console.log(`❌ ${symbol}: Insufficient bars (${bars.length}/20)`);
+        // Build combined bars: EOD + overnight (if available)
+        const hasOvernightBars = bars && bars.length > 0;
+        
+        // Filter out bars with zero volume (sparse overnight data) if we have overnight bars
+        const validBars = hasOvernightBars ? bars.filter(b => b.volume > 0) : [];
+        const totalBars = validBars.length + 1; // +1 for EOD
+        
+        // If we have overnight bars but they're mostly zero-volume, skip
+        if (hasOvernightBars && validBars.length < bars.length * 0.5) {
+          console.log(`❌ ${symbol}: Too many zero-volume bars (${validBars.length}/${bars.length})`);
           return null;
         }
         
-        // Filter out bars with zero volume (sparse overnight data)
-        const validBars = bars.filter(b => b.volume > 0);
-        if (validBars.length < bars.length * 0.5) {
-          console.log(`❌ ${symbol}: Too many zero-volume bars (${validBars.length}/${bars.length})`);
-          return null; // Skip if >50% bars are invalid
+        // Require minimum 20 bars if we have overnight bars, otherwise use EOD only
+        if (hasOvernightBars && totalBars < 20) {
+          console.log(`❌ ${symbol}: Insufficient bars (${totalBars}/20)`);
+          return null;
         }
         
-        console.log(`📊 ${symbol}: Analyzing (${validBars.length} bars, Price $${eod.close})`);
+        // Log data source
+        if (!hasOvernightBars) {
+          console.log(`📊 ${symbol}: Using EOD data only (no overnight bars available)`);
+        } else {
+          console.log(`📊 ${symbol}: Analyzing with ${validBars.length} overnight bars + EOD (Price $${eod.close})`);
+        }
         
         // Combine EOD close + overnight closes for indicator context
-        const closes = [eod.close, ...validBars.map(b => b.close)];
+        // If no overnight bars, just use EOD close (will calculate from historical if needed)
+        const closes = hasOvernightBars 
+          ? [eod.close, ...validBars.map(b => b.close)]
+          : [eod.close];
         
         // Normalize bars to {h, l, c} format for ATR calculation
-        const normalizedBars = [
-          { h: eod.high, l: eod.low, c: eod.close },
-          ...validBars.map(b => ({ h: b.high, l: b.low, c: b.close }))
-        ];
+        const normalizedBars = hasOvernightBars
+          ? [
+              { h: eod.high, l: eod.low, c: eod.close },
+              ...validBars.map(b => ({ h: b.high, l: b.low, c: b.close }))
+            ]
+          : [{ h: eod.high, l: eod.low, c: eod.close }];
         
-        // Calculate indicators from combined EOD + overnight bars
+        // Calculate indicators from combined EOD + overnight bars (or just EOD)
         const rsi = calculateRSI(closes);
         const ema20 = calculateEMA(closes, 20);
         const atr = calculateATR(normalizedBars);
         
+        // Current price is the most recent close (last overnight bar or EOD if no overnight)
         const currentPrice = closes[closes.length - 1];
-        const priceChange = ((currentPrice - eod.close) / eod.close) * 100;
+        const priceChange = hasOvernightBars 
+          ? ((currentPrice - eod.close) / eod.close) * 100
+          : 0; // No price change if only EOD data
         
         // OVERNIGHT FILTERS (Liquidity-aware, loosened for better play detection)
         const passedFilters: string[] = [];
@@ -298,76 +317,97 @@ export class EliteScanner {
         }
         passedFilters.push('EMA Aligned');
         
-        // Filter 3: Minimum Price Movement (0.8% vs EOD)
-        if (Math.abs(priceChange) < 0.8) {
+        // Filter 3: Minimum Price Movement (0.8% vs EOD) - Skip if EOD only
+        if (hasOvernightBars && Math.abs(priceChange) < 0.8) {
           console.log(`❌ ${symbol}: Insufficient movement ${priceChange.toFixed(2)}% (need 0.8%)`);
           return null;
         }
-        passedFilters.push(`Move ${priceChange >= 0 ? '+' : ''}${priceChange.toFixed(1)}%`);
+        if (hasOvernightBars) {
+          passedFilters.push(`Move ${priceChange >= 0 ? '+' : ''}${priceChange.toFixed(1)}%`);
+        } else {
+          passedFilters.push('EOD Only');
+        }
         
-        // Filter 4: Volume Spike (Relaxed: 1.2x vs live 1.5x)
+        // Filter 4: Volume Spike (Relaxed: 1.2x vs live 1.5x) - Skip if EOD only
         const overnightVolume = validBars.reduce((sum, b) => sum + b.volume, 0);
-        const volumeRatio = overnightVolume / eod.volume;
-        if (volumeRatio < 1.2) {
+        const volumeRatio = hasOvernightBars ? overnightVolume / eod.volume : 1.0;
+        if (hasOvernightBars && volumeRatio < 1.2) {
           console.log(`❌ ${symbol}: Low volume ${volumeRatio.toFixed(2)}x (need 1.2x)`);
           return null;
         }
-        passedFilters.push(`Vol ${volumeRatio.toFixed(1)}x`);
+        if (hasOvernightBars) {
+          passedFilters.push(`Vol ${volumeRatio.toFixed(1)}x`);
+        }
         
-        // Filter 5: ATR Breakout (Relaxed: 1.2x vs live 1.5x)
-        if (Math.abs(currentPrice - eod.close) < atr * 1.2) {
+        // Filter 5: ATR Breakout (Relaxed: 1.2x vs live 1.5x) - Skip if EOD only
+        if (hasOvernightBars && Math.abs(currentPrice - eod.close) < atr * 1.2) {
           console.log(`❌ ${symbol}: No ATR breakout (Move $${Math.abs(currentPrice - eod.close).toFixed(2)} vs ATR*1.2 $${(atr * 1.2).toFixed(2)})`);
           return null;
         }
-        passedFilters.push('ATR Breakout');
-        
-        // Select best option contract (ATM bias, DTE 3-7, premium ≥$0.30)
-        const contracts = optionType === 'call' ? chain.calls : chain.puts;
-        if (!contracts || contracts.length === 0) {
-          console.log(`❌ ${symbol}: No ${optionType} contracts available`);
-          return null;
+        if (hasOvernightBars) {
+          passedFilters.push('ATR Breakout');
         }
         
-        // Filter contracts: ATM ±5%, DTE 3-7, premium ≥$0.30, delta 0.3-0.6
-        const atmContracts = contracts.filter(c => {
-          const strikeDistance = Math.abs(c.strike - currentPrice) / currentPrice;
-          const inATMRange = strikeDistance <= 0.05; // Within 5% of current price
-          const validDTE = c.dte >= 3 && c.dte <= 7;
-          const validPremium = c.premium >= 0.30;
-          const validDelta = c.delta >= 0.3 && c.delta <= 0.6;
-          
-          return inATMRange && validDTE && validPremium && validDelta;
-        });
+        // Select best option contract (ATM bias, DTE 3-7, premium ≥$0.30)
+        // Options chain is optional - we can still generate plays based on technical indicators alone
+        let bestContract: any = null;
         
-        if (atmContracts.length === 0) {
-          console.log(`❌ ${symbol}: No contracts match filters (${contracts.length} total, need ATM ±5%, DTE 3-7, premium ≥$0.30, delta 0.3-0.6)`);
-          return null; // No suitable contracts
+        if (chain) {
+          const contracts = optionType === 'call' ? chain.calls : chain.puts;
+          if (!contracts || contracts.length === 0) {
+            console.log(`⚠️ ${symbol}: No ${optionType} contracts in chain - using defaults`);
+          } else {
+            // Filter contracts: ATM ±5%, DTE 3-7, premium ≥$0.30, delta 0.3-0.6
+            const atmContracts = contracts.filter(c => {
+              const strikeDistance = Math.abs(c.strike - currentPrice) / currentPrice;
+              const inATMRange = strikeDistance <= 0.05; // Within 5% of current price
+              const validDTE = c.dte >= 3 && c.dte <= 7;
+              const validPremium = c.premium >= 0.30;
+              const validDelta = c.delta >= 0.3 && c.delta <= 0.6;
+              
+              return inATMRange && validDTE && validPremium && validDelta;
+            });
+            
+            if (atmContracts.length === 0) {
+              console.log(`⚠️ ${symbol}: No contracts match filters (${contracts.length} total) - using defaults`);
+            } else {
+              // Rank by highest volume/OI combo
+              bestContract = atmContracts.sort((a, b) => {
+                const scoreA = (a.volume || 0) + (a.openInterest || 0);
+                const scoreB = (b.volume || 0) + (b.openInterest || 0);
+                return scoreB - scoreA;
+              })[0];
+            }
+          }
         }
         
         console.log(`✅ ${symbol}: PASSED ALL FILTERS → ${optionType.toUpperCase()} setup (${passedFilters.join(', ')})`);
 
         
-        // Rank by highest volume/OI combo
-        const bestContract = atmContracts.sort((a, b) => {
-          const scoreA = (a.volume || 0) + (a.openInterest || 0);
-          const scoreB = (b.volume || 0) + (b.openInterest || 0);
-          return scoreB - scoreA;
-        })[0];
-        
-        // Calculate pivot from overnight data
-        const pivotLevel = (overnightData.overnightHigh + overnightData.overnightLow + currentPrice) / 3;
+        // Calculate pivot from overnight data (or use EOD if no overnight)
+        const pivotHigh = hasOvernightBars ? overnightData.overnightHigh : eod.high;
+        const pivotLow = hasOvernightBars ? overnightData.overnightLow : eod.low;
+        const pivotLevel = (pivotHigh + pivotLow + currentPrice) / 3;
         const abovePivot = ((currentPrice - pivotLevel) / pivotLevel) * 100;
         
-        // Calculate signal quality (cap at 80 for overnight due to missing live Greeks)
-        const signalQuality = Math.min(80, 
+        // Calculate signal quality (cap at 60 for EOD-only, 80 for overnight with bars)
+        const baseQuality = Math.min(hasOvernightBars ? 80 : 60, 
           (rsi < 42 || rsi > 58 ? 30 : 0) + // RSI extreme
-          (volumeRatio > 1.5 ? 20 : 10) +   // Volume spike
+          (volumeRatio > 1.5 ? 20 : 10) +   // Volume spike (will be 1.0 for EOD-only)
           (Math.abs(priceChange) > 1.5 ? 20 : 10) + // Price movement
-          (bestContract.premium > 0.50 ? 10 : 5) +  // Premium size
-          (bestContract.openInterest > 100 ? 10 : 5) // Liquidity
+          (bestContract && bestContract.premium > 0.50 ? 10 : 5) +  // Premium size
+          (bestContract && bestContract.openInterest > 100 ? 10 : 5) // Liquidity
         );
         
-        passedFilters.push('Overnight Setup', `Quality ${signalQuality}`);
+        const signalQuality = baseQuality;
+        
+        passedFilters.push(hasOvernightBars ? 'Overnight Setup' : 'EOD Setup', `Quality ${signalQuality}`);
+        
+        // Calculate default strike if no contract available (ATM)
+        const defaultStrike = Math.round(currentPrice);
+        const today = new Date();
+        const defaultExpiry = new Date(today);
+        defaultExpiry.setDate(today.getDate() + 5); // 5 DTE default
         
         // Return full EliteScanResult for overnight analysis
         return {
@@ -381,13 +421,13 @@ export class EliteScanner {
           atrLong: atr, // Same for overnight
           pivotLevel,
           abovePivot,
-          strike: bestContract.strike,
-          expiry: bestContract.expiry,
-          delta: bestContract.delta,
-          gamma: bestContract.gamma || 0,
-          theta: bestContract.theta || 0,
-          vega: bestContract.vega || 0,
-          impliedVolatility: bestContract.iv,
+          strike: bestContract?.strike || defaultStrike,
+          expiry: bestContract?.expiry || defaultExpiry.toISOString().split('T')[0],
+          delta: bestContract?.delta || (optionType === 'call' ? 0.5 : -0.5),
+          gamma: bestContract?.gamma || 0,
+          theta: bestContract?.theta || 0,
+          vega: bestContract?.vega || 0,
+          impliedVolatility: bestContract?.iv || 0,
           ivPercentile: 0, // Not available for overnight
           volumeRatio,
           isUnusualVolume: volumeRatio > 3,
