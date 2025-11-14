@@ -118,6 +118,13 @@ export const priceAlerts = pgTable("price_alerts", {
   triggeredAt: timestamp("triggered_at"),
 });
 
+export const appConfig = pgTable("app_config", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+  description: text("description"),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 export const backtestRuns = pgTable("backtest_runs", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   symbolUniverse: text("symbol_universe").array(), // Optional list of symbols to test, null = all market

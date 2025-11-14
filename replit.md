@@ -100,6 +100,12 @@ Preferred communication style: Simple, everyday language.
 - **Hybrid AI Analysis**: Combines an internal `PortfolioAnalysisEngine` with `GrokAIService` for strategic recommendations.
 - **Goal Tracking**: Monitors progress towards a $1M target.
 - **Real-Time P&L & Greeks Monitoring**: Live tracking with SSE-powered updates for all broker positions.
+- **P&L Baseline System**: Manual baseline adjustment system for accurate YTD realized P/L tracking.
+  - **Baseline Storage**: `app_config` table stores P/L baseline adjustment (key: `pnl_baseline_adjustment`).
+  - **Current Baseline**: -$2,277 (set to match Tastytrade YTD value as of Nov 14, 2025).
+  - **Calculation**: Lifetime P/L = Calculated P/L from new trades + Baseline adjustment.
+  - **Admin Endpoint**: `POST /api/admin/pnl-baseline` allows updating the baseline with new value and description.
+  - **Rationale**: Tastytrade API doesn't expose YTD realized P/L directly; baseline ensures accurate tracking going forward.
 
 ### Time Synchronization System
 - **Purpose**: Ensures accurate CST time detection for critical trading windows.

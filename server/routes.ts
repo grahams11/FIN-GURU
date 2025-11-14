@@ -1,6 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
+import { db } from "./db";
 import { WebScraperService } from "./services/webScraper";
 import { AIAnalysisService } from "./services/aiAnalysis";
 import { PositionAnalysisService } from "./services/positionAnalysis";
@@ -14,8 +15,9 @@ import { Ghost1DTEService } from "./services/ghost1DTE";
 import { timeService } from "./services/timeService";
 import { marketStatusService } from "./services/marketStatusService";
 import { dailyIndexCache } from "./cache/DailyIndexCache";
-import { insertMarketDataSchema, insertOptionsTradeSchema, insertAiInsightsSchema, insertPortfolioPositionSchema, type OptionsTrade } from "@shared/schema";
+import { insertMarketDataSchema, insertOptionsTradeSchema, insertAiInsightsSchema, insertPortfolioPositionSchema, type OptionsTrade, appConfig } from "@shared/schema";
 import { formatOptionSymbol, toPolygonSubscriptionTopic, toTastytradeOptionSymbol } from "./utils/optionSymbols";
+import { eq } from "drizzle-orm";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Server-Sent Events endpoint for real-time quote streaming with live Greeks
@@ -1148,11 +1150,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Get lifetime realized P/L
+  // Get lifetime realized P/L (with baseline adjustment)
   app.get('/api/portfolio/pnl-lifetime', async (req, res) => {
     try {
       const lifetimePnL = await tastytradeService.fetchLifetimeRealizedPnL();
-      res.json({ lifetimeRealized: lifetimePnL });
+      
+      // Get baseline adjustment from config
+      const baselineConfig = await db.select()
+        .from(appConfig)
+        .where(eq(appConfig.key, 'pnl_baseline_adjustment'))
+        .limit(1);
+      
+      const baseline = baselineConfig.length > 0 ? parseFloat(baselineConfig[0].value) : 0;
+      const adjustedPnL = lifetimePnL + baseline;
+      
+      res.json({ 
+        lifetimeRealized: adjustedPnL,
+        calculatedPnL: lifetimePnL,
+        baselineAdjustment: baseline
+      });
     } catch (error: any) {
       console.error('Error fetching lifetime P/L:', error);
       res.status(500).json({ message: 'Failed to fetch lifetime P/L' });
@@ -1167,6 +1183,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error('Error fetching today P/L:', error);
       res.status(500).json({ message: 'Failed to fetch P/L' });
+    }
+  });
+
+  // Admin endpoint: Update P/L baseline adjustment
+  app.post('/api/admin/pnl-baseline', async (req, res) => {
+    try {
+      const { adjustment, description } = req.body;
+      
+      if (typeof adjustment !== 'number') {
+        return res.status(400).json({ message: 'Adjustment must be a number' });
+      }
+      
+      // Upsert the baseline adjustment
+      await db.insert(appConfig)
+        .values({
+          key: 'pnl_baseline_adjustment',
+          value: adjustment.toString(),
+          description: description || `Manual P/L baseline adjustment set to $${adjustment.toFixed(2)}`,
+          updatedAt: new Date()
+        })
+        .onConflictDoUpdate({
+          target: appConfig.key,
+          set: {
+            value: adjustment.toString(),
+            description: description || `Manual P/L baseline adjustment set to $${adjustment.toFixed(2)}`,
+            updatedAt: new Date()
+          }
+        });
+      
+      console.log(`📊 P/L baseline adjustment updated to $${adjustment.toFixed(2)}`);
+      res.json({ 
+        success: true, 
+        adjustment,
+        message: `Baseline adjustment set to $${adjustment.toFixed(2)}` 
+      });
+    } catch (error: any) {
+      console.error('Error updating P/L baseline:', error);
+      res.status(500).json({ message: 'Failed to update baseline adjustment' });
     }
   });
 
