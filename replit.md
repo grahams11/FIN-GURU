@@ -48,8 +48,11 @@ Preferred communication style: Simple, everyday language.
   - **Data Sources**: Polygon unlimited mode with fail-fast logic (no Alpha Vantage fallback to prevent rate-limiting delays).
   - **Grok AI Enhancements (Phase 4)**: Includes strict Theta (< -0.08) and Gamma (> 0.12) filtering, specific IV ranges, and a defined entry window (2:00-3:00 PM CST) and exit time (8:32 AM CST next day).
 - **Day Trading System (SPX Only)**: Utilizes VIX + RSI for BUY/SELL signals on SPX weekly expirations.
-- **Elite Dual-Strategy Scanner (Stocks)**: RSI-only momentum scanner for CALL/PUT strategies on 100+ stocks and ETFs.
-  - **Grok AI Enhancements**: Incorporates pivot level calculation, volume spike detection (1.5x average), intraday momentum (>1.5% from open), and breakout confirmation.
+- **Elite Dual-Strategy Scanner (Stocks)**: RSI-based momentum scanner for CALL/PUT strategies on 100+ stocks and ETFs, targeting 3-5 high-quality plays per day.
+  - **Relaxed Filters (High Edge)**: RSI oversold < 40 (was 30), volume spike > 1.5x (was 1.8x), intraday momentum > 1.5%, premium > $0.30 (was $0.50), pivot breakout required.
+  - **Optional Quality Scoring**: IV percentile (25%+), Gamma (0.04+), and Delta (0.3-0.7) contribute to signal quality score but don't block plays.
+  - **Core Requirements**: Trend alignment (EMA20), ATR momentum, and pivot breakout confirmation.
+  - **Grok AI Enhancements**: Incorporates pivot level calculation, volume spike detection, intraday momentum, and breakout confirmation.
 
 ### Shared Features
 - **Trade Budget**: $1000 maximum per trade with smart contract allocation.
