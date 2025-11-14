@@ -374,6 +374,7 @@ export class EliteScanner {
       
       // No signal if RSI is neutral (between 40-60)
       if (!optionType) {
+        console.log(`❌ ${symbol}: Neutral RSI ${indicators.rsi.toFixed(1)} (need <${config.rsiOversold} or >${config.rsiOverbought})`);
         return null;
       }
       
@@ -382,22 +383,27 @@ export class EliteScanner {
       const pivotLevel = (lastBar.high + lastBar.low + lastBar.close) / 3;
       const abovePivot = ((indicators.currentPrice - pivotLevel) / pivotLevel) * 100;
       
-      // Intraday momentum filter: Price must have moved >1.5% from open
-      const intradayMomentum = ((indicators.currentPrice - lastBar.open) / lastBar.open) * 100;
-      if (Math.abs(intradayMomentum) < 1.5) {
-        return null; // Skip if no significant intraday movement
+      // FIX: Calculate momentum from yesterday's CLOSE (not open) to avoid stale bar issue
+      // lastBar.open is from yesterday's bar, but we want today's momentum
+      const intradayMomentum = ((indicators.currentPrice - lastBar.close) / lastBar.close) * 100;
+      if (Math.abs(intradayMomentum) < 0.8) {  // RELAXED: 0.8% instead of 1.5%
+        console.log(`❌ ${symbol}: Low momentum ${intradayMomentum.toFixed(2)}% (need 0.8%)`);
+        return null;
       }
       passedFilters.push(`💨 Momentum ${intradayMomentum >= 0 ? '+' : ''}${intradayMomentum.toFixed(1)}%`);
       
-      // Grok's Pivot Breakout Filter: Must be above pivot for calls, below for puts
+      // SCORING ONLY: Pivot filter contributesto quality score, doesn't reject
+      // Check directional alignment (for scoring bonus)
       const pivotAligned = optionType === 'call'
-        ? indicators.currentPrice > pivotLevel * 1.01  // 1% above pivot for calls
-        : indicators.currentPrice < pivotLevel * 0.99; // 1% below pivot for puts
+        ? indicators.currentPrice > pivotLevel  // Above pivot for calls
+        : indicators.currentPrice < pivotLevel; // Below pivot for puts
       
-      if (!pivotAligned) {
-        return null; // Skip if not breaking pivot level
+      if (pivotAligned) {
+        passedFilters.push(`Pivot ${abovePivot >= 0 ? '+' : ''}${abovePivot.toFixed(1)}%`);
+      } else {
+        // Still passes, but logs it for visibility
+        console.log(`⚠️ ${symbol}: Pivot counter-directional (Price $${indicators.currentPrice.toFixed(2)} vs Pivot $${pivotLevel.toFixed(2)}, Type ${optionType}) - continuing anyway`);
       }
-      passedFilters.push(`Pivot ${abovePivot >= 0 ? '+' : ''}${abovePivot.toFixed(1)}%`);
       
       // Check trend alignment
       const trendAligned = optionType === 'call'
@@ -405,22 +411,26 @@ export class EliteScanner {
         : indicators.currentPrice < indicators.ema20;
       
       if (!trendAligned) {
-        return null; // Skip if trend doesn't align
+        console.log(`❌ ${symbol}: EMA misaligned (Price $${indicators.currentPrice.toFixed(2)} vs EMA $${indicators.ema20.toFixed(2)}, Type ${optionType})`);
+        return null;
       }
       passedFilters.push('EMA Trend Aligned');
       
-      // Check ATR momentum
+      // SCORING ONLY: ATR momentum contributes to quality score, doesn't reject
+      // This is redundant with momentum filter, so make it a bonus not a gate
       const hasATRMomentum = indicators.atrShort > (indicators.atrLong * config.atrMultiplier);
-      if (!hasATRMomentum) {
-        return null; // Skip if no momentum
+      if (hasATRMomentum) {
+        passedFilters.push('ATR Momentum');
+      } else {
+        console.log(`⚠️ ${symbol}: Low ATR momentum (Short ${indicators.atrShort.toFixed(2)} vs Long ${indicators.atrLong.toFixed(2)}) - continuing anyway`);
       }
-      passedFilters.push('ATR Momentum');
       
       // Get options analytics
       const optionsData = await liveDataAdapter.getOptionsAnalytics(symbol, optionType);
       
       if (!optionsData) {
-        return null; // No options data available
+        console.log(`❌ ${symbol}: No options data available`);
+        return null;
       }
       
       // RELAXED FILTERS — STILL HIGH EDGE (TARGET: 3-5 PLAYS/DAY)
@@ -433,17 +443,18 @@ export class EliteScanner {
       // Filter 2: Volume Spike > 1.5x average (was 1.8x)
       const volumeSpike = optionsData.volumeRatio > 1.5;
       if (!volumeSpike) {
+        console.log(`❌ ${symbol}: Low volume spike ${optionsData.volumeRatio.toFixed(2)}x (need 1.5x)`);
         return null;
       }
       passedFilters.push(`🔥 Volume ${optionsData.volumeRatio.toFixed(1)}x`);
       
-      // Filter 3: Intraday Momentum > 1.5% (already checked at line 193)
-      const momentumOk = Math.abs(intradayMomentum) >= 1.5;
-      passedFilters.push(`💨 Momentum ${intradayMomentum >= 0 ? '+' : ''}${intradayMomentum.toFixed(1)}%`);
+      // Filter 3: Intraday Momentum > 0.8% (already checked earlier)
+      const momentumOk = Math.abs(intradayMomentum) >= 0.8;
       
       // Filter 4: Premium > $0.30 (was $0.50)
       const premiumOk = optionsData.premium > 0.30;
       if (!premiumOk) {
+        console.log(`❌ ${symbol}: Low premium $${optionsData.premium.toFixed(2)} (need $0.30)`);
         return null;
       }
       passedFilters.push(`💰 Premium $${optionsData.premium.toFixed(2)}`);
