@@ -89,12 +89,17 @@ Preferred communication style: Simple, everyday language.
 - **Grok AI Integration**: Sends trade summaries to Grok for deep pattern analysis and structured recommendations.
 - **Strategy Evolution**: Tracks recommendations, analyzes outcomes, and dynamically adjusts strategy parameters.
 
-### Portfolio Management (Hybrid AI)
-- **Data Source**: Fetches positions from Tastytrade API.
-- **Risk Management**: Automated stop loss and aggressive partial profit-taking.
+### Portfolio Management (Hybrid AI + Multi-Broker)
+- **Data Sources**: Unified portfolio view aggregating positions from both Tastytrade and Robinhood brokers.
+  - **Tastytrade API**: Primary broker integration for options and stock positions.
+  - **Robinhood API**: Secondary broker integration using unofficial robinhood-nodejs library.
+  - **Circuit Breaker Pattern**: Robinhood authentication failures don't block Tastytrade data; 60-second cooldown prevents retry storms.
+  - **Graceful Degradation**: App displays Tastytrade-only positions if Robinhood is unavailable.
+- **UI Features**: Broker badges (blue for Tastytrade, green for Robinhood) identify position sources.
+- **Risk Management**: Automated stop loss and aggressive partial profit-taking across all brokers.
 - **Hybrid AI Analysis**: Combines an internal `PortfolioAnalysisEngine` with `GrokAIService` for strategic recommendations.
 - **Goal Tracking**: Monitors progress towards a $1M target.
-- **Real-Time P&L & Greeks Monitoring**: Live tracking with SSE-powered updates.
+- **Real-Time P&L & Greeks Monitoring**: Live tracking with SSE-powered updates for all broker positions.
 
 ### Time Synchronization System
 - **Purpose**: Ensures accurate CST time detection for critical trading windows.
