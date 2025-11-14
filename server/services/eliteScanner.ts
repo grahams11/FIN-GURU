@@ -176,9 +176,10 @@ export class EliteScanner {
   /**
    * Analyze a pre-filtered ticker candidate with full technical + options data
    * 
-   * RELAXED FILTERS — STILL HIGH EDGE (TARGET: 3-5 PLAYS/DAY)
-   * - RSI Oversold: < 40 (was 30)
-   * - Volume Spike: > 1.5x average (was 1.8x)
+   * NOV 12 STRICT FILTERS — HIGH ACCURACY (TARGET: 3-5 PLAYS/DAY)
+   * - RSI Oversold: < 30 (RESTORED - was relaxed to 40)
+   * - RSI Overbought: > 70 (RESTORED - was relaxed to 60)
+   * - Volume Spike: > 1.8x average (RESTORED - was relaxed to 1.5x)
    * - Intraday Momentum: > 1.5% move from open
    * - IV Percentile: > 25% (was 30%)
    * - Gamma: > 0.04 (was 0.05)
@@ -452,17 +453,17 @@ export class EliteScanner {
         return null;
       }
       
-      // RELAXED FILTERS — STILL HIGH EDGE (TARGET: 3-5 PLAYS/DAY)
+      // NOV 12 STRICT FILTERS — HIGH ACCURACY (TARGET: 3-5 PLAYS/DAY)
       // Simplified gate: 4 core filters for high-probability plays
       
-      // Filter 1: RSI Oversold/Overbought (already checked above, config = 40/60)
-      const rsiOversold = indicators.rsi < 40; // For calls
-      const rsiOverbought = indicators.rsi > 60; // For puts
+      // Filter 1: RSI Oversold/Overbought (already checked above, config = 30/70)
+      const rsiOversold = indicators.rsi < 30; // For calls (RESTORED)
+      const rsiOverbought = indicators.rsi > 70; // For puts (RESTORED)
       
-      // Filter 2: Volume Spike > 1.5x average (was 1.8x)
-      const volumeSpike = optionsData.volumeRatio > 1.5;
+      // Filter 2: Volume Spike > 1.8x average (RESTORED from 1.5x)
+      const volumeSpike = optionsData.volumeRatio > 1.8;
       if (!volumeSpike) {
-        console.log(`❌ ${symbol}: Low volume spike ${optionsData.volumeRatio.toFixed(2)}x (need 1.5x)`);
+        console.log(`❌ ${symbol}: Low volume spike ${optionsData.volumeRatio.toFixed(2)}x (need 1.8x)`);
         return null;
       }
       passedFilters.push(`🔥 Volume ${optionsData.volumeRatio.toFixed(1)}x`);
