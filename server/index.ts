@@ -148,9 +148,9 @@ app.use((req, res, next) => {
   setInterval(runAutoScan, 5 * 60 * 1000);
   console.log('✅ 24/7 auto-scan activated — running every 5 minutes');
   
-  // Start trade exit monitoring (check every 60 seconds)
+  // Start trade exit monitoring (runs daily at 4:15 PM ET to track recommendation outcomes)
   const { TradeExitMonitor } = await import('./services/tradeExitMonitor');
-  TradeExitMonitor.start(60000);
+  TradeExitMonitor.start();
   
   const server = await registerRoutes(app);
 

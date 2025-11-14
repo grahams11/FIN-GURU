@@ -3,53 +3,97 @@ import { recommendationTracking } from '@shared/schema';
 import { eq, sql } from 'drizzle-orm';
 import { RecommendationTracker } from './recommendationTracker';
 import { formatOptionSymbol, toPolygonSubscriptionTopic } from '../utils/optionSymbols';
+import { DateTime } from 'luxon';
 
 /**
- * TradeExitMonitor - Orchestrates automatic trade exits
+ * TradeExitMonitor - Tracks historical trade recommendations
  * 
- * Polls open trades, evaluates profit/stop thresholds,
- * and invokes RecommendationTracker.recordOutcome when targets are hit.
+ * Runs once daily at 4:15 PM ET (after market close) to evaluate
+ * which recommendations hit profit targets, stop losses, or expired.
+ * Used to calculate strategy win rate and performance metrics.
  */
 export class TradeExitMonitor {
   private static isRunning = false;
-  private static monitoringInterval: NodeJS.Timeout | null = null;
+  private static monitoringTimeout: NodeJS.Timeout | null = null;
 
   /**
-   * Start monitoring open trades for exit conditions
-   * @param intervalMs - How often to check (default: 60 seconds)
+   * Start monitoring - runs once daily at 4:15 PM ET
    */
-  static start(intervalMs: number = 60000) {
+  static start() {
     if (this.isRunning) {
       console.log('⚠️  TradeExitMonitor already running');
       return;
     }
 
-    console.log('🚀 TradeExitMonitor started (interval:', intervalMs, 'ms)');
     this.isRunning = true;
-
-    // Run immediately on start
-    this.checkExits().catch(err => {
-      console.error('❌ TradeExitMonitor error:', err);
-    });
-
-    // Then run on interval
-    this.monitoringInterval = setInterval(() => {
-      this.checkExits().catch(err => {
-        console.error('❌ TradeExitMonitor error:', err);
-      });
-    }, intervalMs);
+    this.scheduleNextRun();
   }
 
   /**
    * Stop the monitoring service
    */
   static stop() {
-    if (this.monitoringInterval) {
-      clearInterval(this.monitoringInterval);
-      this.monitoringInterval = null;
+    if (this.monitoringTimeout) {
+      clearTimeout(this.monitoringTimeout);
+      this.monitoringTimeout = null;
     }
     this.isRunning = false;
     console.log('🛑 TradeExitMonitor stopped');
+  }
+
+  /**
+   * Schedule the next daily run at 4:15 PM ET using Luxon for reliable timezone handling
+   */
+  private static scheduleNextRun() {
+    // Get current time in America/New_York timezone
+    const nowET = DateTime.now().setZone('America/New_York');
+    
+    // Set target time to 4:15 PM ET today
+    let targetET = nowET.set({ hour: 16, minute: 15, second: 0, millisecond: 0 });
+    
+    // If we're past 4:15 PM ET today, schedule for tomorrow
+    if (nowET >= targetET) {
+      targetET = targetET.plus({ days: 1 });
+    }
+    
+    // Calculate milliseconds until next run
+    const msUntilNextRun = targetET.toMillis() - nowET.toMillis();
+    
+    // Validate that delay is positive
+    if (msUntilNextRun <= 0) {
+      console.error('❌ TradeExitMonitor: Invalid delay calculated, defaulting to tomorrow');
+      targetET = nowET.plus({ days: 1 }).set({ hour: 16, minute: 15, second: 0, millisecond: 0 });
+    }
+    
+    const hoursUntil = Math.floor(msUntilNextRun / (1000 * 60 * 60));
+    const minutesUntil = Math.floor((msUntilNextRun % (1000 * 60 * 60)) / (1000 * 60));
+    
+    // Convert to JS Date for verification logs
+    const targetUTC = targetET.toJSDate();
+    
+    // Log scheduling with verification
+    console.log(`🚀 TradeExitMonitor: Next run scheduled for:`);
+    console.log(`   📅 ET time: ${targetET.toFormat('yyyy-MM-dd HH:mm:ss ZZZZ')}`);
+    console.log(`   🌍 UTC time: ${targetET.toUTC().toFormat('yyyy-MM-dd HH:mm:ss')}`);
+    console.log(`   ⏱️  In: ${hoursUntil}h ${minutesUntil}m (${msUntilNextRun}ms)`);
+
+    this.monitoringTimeout = setTimeout(() => {
+      this.runDailyCheck();
+    }, msUntilNextRun);
+  }
+
+  /**
+   * Run the daily check and reschedule for next day
+   */
+  private static async runDailyCheck() {
+    console.log('📊 Running daily recommendation tracking check at market close...');
+    
+    await this.checkExits().catch(err => {
+      console.error('❌ TradeExitMonitor error:', err);
+    });
+
+    // Schedule next run for tomorrow
+    this.scheduleNextRun();
   }
 
   /**
