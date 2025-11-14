@@ -6,6 +6,7 @@ import { polygonService } from "./services/polygonService";
 import { EliteStrategyEngine } from "./services/eliteStrategyEngine";
 import { RecommendationTracker } from "./services/recommendationTracker";
 import { GhostScheduler } from "./services/ghostScheduler";
+import { eodCacheService } from "./services/eodCache";
 
 const app = express();
 app.use(express.json());
@@ -71,6 +72,10 @@ app.use((req, res, next) => {
   const { RecommendationRefreshService } = await import('./services/recommendationRefreshService');
   RecommendationRefreshService.start();
   console.log('✅ Recommendation auto-refresh service started');
+  
+  // ACTIVATE EOD CACHE — DAILY 4:05 PM EST
+  eodCacheService.startScheduler();
+  console.log('✅ EOD Cache scheduler started - daily snapshot at 3:00 PM CST');
   
   const server = await registerRoutes(app);
 

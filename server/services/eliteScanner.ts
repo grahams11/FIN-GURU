@@ -19,6 +19,7 @@ import { marketStatusService } from './marketStatusService';
 import { polygonService } from './polygonService';
 import { batchDataService } from './batchDataService';
 import { TimeUtils } from './timeUtils';
+import { overnightDataFetcher } from './overnightDataFetcher';
 
 export interface EliteScanResult {
   symbol: string;
@@ -124,7 +125,7 @@ export class EliteScanner {
     const candidates = basicFiltered.slice(0, 50); // Top 50 by volume/momentum
     
     const analysisPromises = candidates.map(stock => 
-      this.analyzeTicker(stock.ticker, config, marketContext.isLive)
+      this.analyzeTicker(stock.ticker, config, marketContext.isLive, isOvernight)
     );
     const analysisResults = await Promise.all(analysisPromises);
     
@@ -168,10 +169,28 @@ export class EliteScanner {
   private async analyzeTicker(
     symbol: string,
     config: any,
-    isLive: boolean
+    isLive: boolean,
+    isOvernight: boolean = false
   ): Promise<EliteScanResult | null> {
     try {
-      // Get technical indicators
+      // OVERNIGHT MODE — USE EOD + OVERNIGHT AGGS
+      if (isOvernight) {
+        console.log(`🌙 ${symbol}: Overnight mode — using EOD + overnight aggs`);
+        const overnightSetup = await overnightDataFetcher.getOvernightSetup(symbol);
+        
+        if (!overnightSetup || !overnightSetup.data || !overnightSetup.chain) {
+          console.log(`⚠️ ${symbol}: No overnight data available, skipping`);
+          return null; // No data
+        }
+        
+        // Use overnight data instead of live data adapter
+        // TODO: Implement full overnight analysis using overnightSetup.data and overnightSetup.chain
+        // For now, skip to prevent errors - needs full implementation
+        console.log(`📊 ${symbol}: Overnight setup available - full analysis pending implementation`);
+        return null;
+      }
+      
+      // LIVE/HISTORICAL MODE — USE LIVE DATA ADAPTER
       const indicators = await liveDataAdapter.getIndicatorBundle(symbol, 14);
       
       if (!indicators || indicators.rsi === undefined) {

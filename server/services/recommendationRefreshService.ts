@@ -57,11 +57,8 @@ export class RecommendationRefreshService {
       return;
     }
     
-    // Check if market is open
-    if (!RecommendationValidator.isMarketHours()) {
-      console.log('⏸️ Market closed - skipping recommendation refresh');
-      return;
-    }
+    // 24/7 REFRESH — EOD + OVERNIGHT DATA
+    console.log('🔄 Refreshing recommendations — 24/7 mode active');
     
     try {
       this.isRefreshing = true;
