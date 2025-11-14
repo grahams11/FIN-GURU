@@ -59,10 +59,11 @@ Preferred communication style: Simple, everyday language.
   - **Live Mode (8:30 AM - 3:00 PM CST)**: RSI oversold < 40, volume spike > 1.5x, intraday momentum > 1.5%, premium > $0.30, pivot breakout required.
   - **Overnight Mode (8:00 PM - 8:30 AM CST)**: Uses real indicator calculations (RSI, EMA20, ATR) from EOD snapshot + overnight bars (4-8 PM CST aggregates).
     - **Indicator Calculations**: `server/utils/indicators.ts` provides real RSI (14-period gains/losses), EMA (exponential smoothing), and ATR (true range averaging).
-    - **Liquidity-Aware Filters**: Tighter RSI thresholds (42/58 vs live 40/60), relaxed volume/ATR requirements (1.2x vs live 1.5x), minimum 0.8% price movement.
+    - **Liquidity-Aware Filters**: Asymmetric RSI thresholds (45/55 to avoid neutral zone), relaxed volume/ATR requirements (1.2x vs live 1.5x), minimum 0.8% price movement.
     - **Data Validation**: Requires ≥20 bars (EOD + overnight), ≥50% bars with volume, filters zero-volume bars.
     - **Contract Selection**: ATM ±5%, DTE 3-7, premium ≥$0.30, delta 0.3-0.6, ranked by volume + OI.
     - **Signal Quality**: Capped at 80 (no live Greeks), based on RSI extremes, volume spike, price movement, premium size, and liquidity.
+    - **Detailed Logging**: Filter progression tracking at each step (RSI, EMA alignment, price movement, volume, ATR, contract filtering) for diagnostics.
   - **Core Requirements**: Trend alignment (EMA20), ATR momentum, and pivot breakout confirmation.
   - **Grok AI Enhancements**: Incorporates pivot level calculation, volume spike detection, intraday momentum, and breakout confirmation.
 
