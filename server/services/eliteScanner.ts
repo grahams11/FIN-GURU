@@ -143,7 +143,11 @@ export class EliteScanner {
       const symbolsToSubscribe = sortedCandidates.map(c => c.ticker);
       console.log(`📡 Subscribing ${symbolsToSubscribe.length} symbols to Polygon WebSocket for LIVE quotes...`);
       await liveDataAdapter.subscribeForLiveQuotes(symbolsToSubscribe);
-      console.log(`✅ WebSocket cache populated - ready for zero-REST-API analysis`);
+      
+      // 11/12 WORKING CONFIG: Wait for WebSocket quotes to actually arrive (adaptive, not fixed time)
+      // Polls cache until 10% of symbols have fresh quotes or 6-second timeout
+      const freshCount = await liveDataAdapter.waitForQuotes(symbolsToSubscribe, undefined, 6000);
+      console.log(`✅ Starting analysis with ${freshCount}/${symbolsToSubscribe.length} WebSocket quotes ready`);
     }
     
     console.log(`🔄 Processing candidates using WebSocket-cached LIVE data...`);
@@ -160,14 +164,7 @@ export class EliteScanner {
       }
       
       const stock = sortedCandidates[i];
-      // Pass bulk snapshot data for immediate analysis (no WebSocket wait needed)
-      const snapshotContext = {
-        price: stock.price,
-        changePercent: stock.changePercent,
-        volume: stock.volume,
-        timestamp: stock.timestamp
-      };
-      const result = await this.analyzeTicker(stock.ticker, config, marketContext.isLive, isOvernight, snapshotContext);
+      const result = await this.analyzeTicker(stock.ticker, config, marketContext.isLive, isOvernight);
       analysisResults.push(result);
       totalAnalyzed++;
       
@@ -225,8 +222,7 @@ export class EliteScanner {
     symbol: string,
     config: any,
     isLive: boolean,
-    isOvernight: boolean = false,
-    snapshot?: import('./batchDataService').SnapshotContext
+    isOvernight: boolean = false
   ): Promise<EliteScanResult | null> {
     try {
       // OVERNIGHT MODE — REAL ANALYSIS WITH EOD + OVERNIGHT AGGS
@@ -403,8 +399,7 @@ export class EliteScanner {
       }
       
       // LIVE/HISTORICAL MODE — USE LIVE DATA ADAPTER
-      // Pass snapshot context for immediate analysis with bulk snapshot data
-      const indicators = await liveDataAdapter.getIndicatorBundle(symbol, 14, snapshot);
+      const indicators = await liveDataAdapter.getIndicatorBundle(symbol, 14);
       
       if (!indicators || indicators.rsi === undefined) {
         return null;

@@ -25,17 +25,6 @@ interface StockSnapshot {
   timestamp: number;
 }
 
-/**
- * Lightweight snapshot context for passing bulk quote data through analysis chain
- * Allows Elite Scanner to use fresh bulk snapshot data without waiting for WebSocket
- */
-export interface SnapshotContext {
-  price: number;
-  changePercent: number;
-  volume: number;
-  timestamp: number;
-}
-
 interface CacheEntry {
   data: StockSnapshot[];
   timestamp: number;
