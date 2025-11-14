@@ -77,6 +77,34 @@ app.use((req, res, next) => {
   eodCacheService.startScheduler();
   console.log('✅ EOD Cache scheduler started - daily snapshot at 3:00 PM CST');
   
+  // 24/7 AUTO-SCAN — RUN BOTH SCANNERS EVERY 5 MINUTES
+  const { eliteScanner } = await import('./services/eliteScanner');
+  const { Ghost1DTEService } = await import('./services/ghost1DTE');
+  
+  const runAutoScan = async () => {
+    try {
+      console.log('🔄 24/7 AUTO-SCAN — Running Elite + Ghost scanners...');
+      const [eliteResults, ghostResults] = await Promise.allSettled([
+        eliteScanner.scan(),
+        Ghost1DTEService.scan()
+      ]);
+      
+      const elitePlays = eliteResults.status === 'fulfilled' ? eliteResults.value.plays?.length || 0 : 0;
+      const ghostPlays = ghostResults.status === 'fulfilled' ? ghostResults.value.topPlays?.length || 0 : 0;
+      
+      console.log(`✅ 24/7 AUTO-SCAN complete — Elite: ${elitePlays} plays, Ghost: ${ghostPlays} plays`);
+    } catch (error: any) {
+      console.error('❌ 24/7 AUTO-SCAN error:', error.message);
+    }
+  };
+  
+  // Run initial scan on startup (after 30s delay for services to initialize)
+  setTimeout(runAutoScan, 30000);
+  
+  // Run auto-scan every 5 minutes
+  setInterval(runAutoScan, 5 * 60 * 1000);
+  console.log('✅ 24/7 auto-scan activated — running every 5 minutes');
+  
   const server = await registerRoutes(app);
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
