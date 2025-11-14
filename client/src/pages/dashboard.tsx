@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { MarketOverview } from "@/components/MarketOverview";
 import { OptionsTraderAI } from "@/components/OptionsTraderAI";
+import { VixSqueezeAlert } from "@/components/VixSqueezeAlert";
 import { Navigation } from "@/components/Navigation";
 import { Card, CardContent } from "@/components/ui/card";
 import { 
@@ -66,6 +67,11 @@ export default function Dashboard() {
           <>
             {/* Market Overview */}
             <MarketOverview data={marketData} isLoading={marketLoading} />
+
+            {/* VIX Squeeze Kill Switch Alert */}
+            <div className="mb-6">
+              <VixSqueezeAlert />
+            </div>
 
             {/* Options Trader AI */}
             <OptionsTraderAI 
