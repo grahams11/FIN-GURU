@@ -499,6 +499,7 @@ export class WebScraperService {
       let price = 0;
       let changePercent = 0;
       let change = 0;
+      let priceContainer: any = null;
       
       const priceSelectors = [
         '[data-last-price]',
@@ -507,6 +508,7 @@ export class WebScraperService {
         '.kf1m0'
       ];
 
+      // Find the price and remember its container for scoped change percent lookup
       for (const selector of priceSelectors) {
         const priceElement = $(selector).first();
         let priceText = priceElement.attr('data-last-price') || priceElement.text();
@@ -514,6 +516,8 @@ export class WebScraperService {
         
         if (priceText && !isNaN(parseFloat(priceText))) {
           price = parseFloat(priceText);
+          // Store the container element to scope our changePercent search
+          priceContainer = priceElement.closest('div');
           console.log(`${symbol}: Google Finance found price ${price} using ${selector}`);
           break;
         }
@@ -527,15 +531,65 @@ export class WebScraperService {
         '.P2Luy.Ez2Ioe.ZYVHBb' // Alternative change percent class
       ];
 
-      for (const selector of changePercentSelectors) {
-        const changeElement = $(selector).first();
-        let changeText = changeElement.attr('data-last-change-perc') || changeElement.text();
-        changeText = changeText.replace(/[%,]/g, '').trim();
+      // STRATEGY 1: Try scoped search within the price container (more accurate)
+      if (priceContainer && priceContainer.length > 0) {
+        // Try immediate container first
+        for (const selector of changePercentSelectors) {
+          const changeElement = priceContainer.find(selector).first();
+          if (changeElement.length === 0) continue;
+          
+          let changeText = changeElement.attr('data-last-change-perc') || changeElement.text();
+          changeText = changeText.replace(/[%,]/g, '').trim();
+          
+          if (changeText && !isNaN(parseFloat(changeText))) {
+            changePercent = parseFloat(changeText);
+            console.log(`${symbol}: ✅ Found changePercent ${changePercent}% (scoped search in price container)`);
+            break;
+          }
+        }
         
-        if (changeText && !isNaN(parseFloat(changeText))) {
-          changePercent = parseFloat(changeText);
-          console.log(`${symbol}: Google Finance found changePercent ${changePercent}%`);
-          break;
+        // Try broader parent/sibling containers
+        if (changePercent === 0) {
+          const contexts = [
+            priceContainer.parent(),
+            priceContainer.parent().parent(),
+            priceContainer.siblings()
+          ];
+          
+          for (const context of contexts) {
+            if (!context || context.length === 0) continue;
+            
+            for (const selector of changePercentSelectors) {
+              const changeElement = context.find(selector).first();
+              if (changeElement.length === 0) continue;
+              
+              let changeText = changeElement.attr('data-last-change-perc') || changeElement.text();
+              changeText = changeText.replace(/[%,]/g, '').trim();
+              
+              if (changeText && !isNaN(parseFloat(changeText))) {
+                changePercent = parseFloat(changeText);
+                console.log(`${symbol}: ✅ Found changePercent ${changePercent}% (scoped search in broader context)`);
+                break;
+              }
+            }
+            if (changePercent !== 0) break;
+          }
+        }
+      }
+
+      // STRATEGY 2: Fallback to global search if scoped search failed
+      if (changePercent === 0) {
+        console.log(`${symbol}: ⚠️ Scoped search failed, trying global search`);
+        for (const selector of changePercentSelectors) {
+          const changeElement = $(selector).first();
+          let changeText = changeElement.attr('data-last-change-perc') || changeElement.text();
+          changeText = changeText.replace(/[%,]/g, '').trim();
+          
+          if (changeText && !isNaN(parseFloat(changeText))) {
+            changePercent = parseFloat(changeText);
+            console.log(`${symbol}: ⚠️ Found changePercent ${changePercent}% (GLOBAL - may be inaccurate)`);
+            break;
+          }
         }
       }
 
