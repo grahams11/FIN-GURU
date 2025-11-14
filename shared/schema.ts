@@ -70,7 +70,8 @@ export const portfolioPositions = pgTable("portfolio_positions", {
   openDate: timestamp("open_date").defaultNow(),
   closeDate: timestamp("close_date"),
   status: text("status").default("open"), // 'open' | 'closed'
-  metadata: jsonb("metadata"), // For options: strike, expiry, type, etc.
+  broker: text("broker").default("tastytrade"), // 'tastytrade' | 'robinhood'
+  metadata: jsonb("metadata"), // For options: strike, expiry, type, etc. + Robinhood specific fields
 });
 
 export const tradeHistory = pgTable("trade_history", {

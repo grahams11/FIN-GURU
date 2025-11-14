@@ -242,6 +242,12 @@ function UnifiedPositionCard({ position, analysis, currentPrice, liveQuote, onCl
           <div className="flex-1">
             <div className="flex items-center gap-3">
               <CardTitle className="text-2xl font-bold">{position.ticker}</CardTitle>
+              <Badge 
+                variant="outline" 
+                className={position.broker === 'robinhood' ? 'bg-green-500/10 border-green-500 text-green-500' : 'bg-blue-500/10 border-blue-500 text-blue-500'}
+              >
+                {position.broker === 'robinhood' ? 'Robinhood' : 'Tastytrade'}
+              </Badge>
               <Badge variant={position.positionType === 'options' ? 'default' : 'secondary'}>
                 {position.positionType.toUpperCase()}
               </Badge>

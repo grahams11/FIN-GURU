@@ -3,6 +3,7 @@ import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { tastytradeService } from "./services/tastytradeService";
 import { polygonService } from "./services/polygonService";
+import { robinhoodService } from "./services/robinhoodService";
 import { EliteStrategyEngine } from "./services/eliteStrategyEngine";
 import { RecommendationTracker } from "./services/recommendationTracker";
 import { GhostScheduler } from "./services/ghostScheduler";
@@ -57,6 +58,11 @@ app.use((req, res, next) => {
   // Initialize Tastytrade service on startup (fallback data source)
   tastytradeService.init().catch(err => {
     console.warn('⚠️ Tastytrade initialization failed, will use other fallback sources:', err.message);
+  });
+
+  // Initialize Robinhood service on startup (optional broker integration)
+  robinhoodService.initialize().catch(err => {
+    console.log('ℹ️ Robinhood service not initialized:', err.message);
   });
   
   // Initialize Elite Strategy Engine with parameters from database

@@ -6,6 +6,7 @@ import { AIAnalysisService } from "./services/aiAnalysis";
 import { PositionAnalysisService } from "./services/positionAnalysis";
 import { polygonService } from "./services/polygonService";
 import { tastytradeService } from "./services/tastytradeService";
+import { robinhoodService } from "./services/robinhoodService";
 import { BlackScholesCalculator } from "./services/financialCalculations";
 import { exitAnalysisService } from "./services/exitAnalysis";
 import { portfolioAnalysisEngine } from "./services/portfolioAnalysisEngine";
@@ -1033,14 +1034,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Get all open portfolio positions from Tastytrade account
+  // Get all open portfolio positions from Tastytrade and Robinhood accounts
   app.get('/api/portfolio/positions', async (req, res) => {
     try {
-      // Fetch real positions from Tastytrade API
-      const positions = await tastytradeService.fetchPositions();
+      // Fetch positions from both brokers in parallel
+      const [tastytradePositions, robinhoodPositions] = await Promise.all([
+        tastytradeService.fetchPositions().catch(err => {
+          console.error('Tastytrade positions error:', err.message);
+          return [];
+        }),
+        robinhoodService.getAllPositions().catch(err => {
+          console.error('Robinhood positions error:', err.message);
+          return [];
+        })
+      ]);
+
+      // Merge all positions
+      const allPositions = [...tastytradePositions, ...robinhoodPositions];
       
       // Update each position with live market prices
-      const updatedPositions = await Promise.all(positions.map(async (position) => {
+      const updatedPositions = await Promise.all(allPositions.map(async (position) => {
         let livePrice = position.currentPrice;
         
         // For options, try to get live options quote from Tastytrade
