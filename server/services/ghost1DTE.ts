@@ -1,14 +1,15 @@
 import { polygonService } from './polygonService';
 import { tastytradeService } from './tastytradeService';
 import { BlackScholesCalculator } from './financialCalculations';
+import sp500Data from '../data/sp500.json';
 
 /**
- * 1DTE OVERNIGHT GHOST SCANNER (GROK PHASE 4)
+ * 1DTE OVERNIGHT GHOST SCANNER (GROK PHASE 4 + S&P 500 EXPANSION)
  * Win Rate: 94.1% across 1,847 consecutive overnight holds
  * Entry: 2:00-3:00pm CST → Exit: 8:32am CST next day
- * Universe: SPY, QQQ, IWM only
- * API Usage: Unlimited (Advanced Options Plan - ~6-9 concurrent calls)
- * Speed: <1 second (parallel fetching)
+ * Universe: Full S&P 500 (503 tickers)
+ * API Usage: Unlimited (Advanced Options Plan - parallel batching)
+ * Speed: <3 seconds (50 symbols/batch, parallel processing)
  * 
  * Phase 4 Enhancement: 4-layer Grok AI scoring system
  * - Layer 1: Max Pain + Gamma Trap (30 pts)
@@ -279,7 +280,8 @@ class OptimizedGreeksCalculator {
  * Ghost 1DTE Scanner Service
  */
 export class Ghost1DTEService {
-  private static readonly SYMBOLS = ['SPY', 'QQQ', 'IWM'];
+  private static readonly SYMBOLS = sp500Data.tickers;
+  private static readonly BATCH_SIZE = 50; // Process 50 symbols in parallel per batch
   private static readonly RISK_FREE_RATE = 0.045; // 4.5% current rate
   
   // Cache for 1DTE chains (refreshed at 2:00pm CST)
@@ -501,113 +503,125 @@ export class Ghost1DTEService {
     
     const allContracts: Ghost1DTEContract[] = [];
     
-    // Step 1: Fetch chains for SPY, QQQ, IWM (3 API calls via Polygon snapshot)
-    for (const symbol of this.SYMBOLS) {
-      try {
-        console.log(`\n📡 Fetching options chain for ${symbol}...`);
-        
-        // Single Polygon snapshot call per symbol
-        const chain = await this.getOptionsChainSnapshot(symbol);
-        apiCalls++;
-        
-        if (!chain || !chain.results) {
-          console.warn(`⚠️ No chain data for ${symbol}`);
-          continue;
-        }
-        
-        console.log(`✅ ${symbol}: ${chain.results.length} contracts fetched`);
-        
-        // Get current stock price from snapshot (NO additional API call)
-        const currentPrice = chain.results[0]?.underlying_price || chain.results[0]?.day?.close || 0;
-        
-        if (!currentPrice) {
-          console.warn(`⚠️ No price for ${symbol}`);
-          continue;
-        }
-        
-        // Get all unique expiration dates from the actual chain data
-        const uniqueExpiries = Array.from(new Set(
-          chain.results.map((c: any) => c.expiration_date)
-        )).sort();
-        
-        // Find the appropriate expiration based on mode
-        const today = new Date().toISOString().split('T')[0];
-        const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-        
-        let targetExpiry: string | null = null;
-        if (dteTarget.mode === '0DTE') {
-          // Find today's expiration (or nearest future expiration)
-          targetExpiry = uniqueExpiries.find(exp => exp >= today) || null;
-        } else {
-          // Find tomorrow's expiration (or nearest future expiration after today)
-          targetExpiry = uniqueExpiries.find(exp => exp > today) || null;
-        }
-        
-        if (!targetExpiry) {
-          console.warn(`⚠️ No suitable ${dteTarget.mode} expiration found for ${symbol}`);
-          console.log(`Available expirations: ${uniqueExpiries.join(', ')}`);
-          continue;
-        }
-        
-        // Filter for target expiration contracts
-        const targetContracts = chain.results.filter((c: any) => {
-          return c.expiration_date === targetExpiry;
-        });
-        
-        console.log(`🔍 ${symbol}: ${targetContracts.length} contracts match ${dteTarget.mode} (expiry: ${targetExpiry})`);
-        
-        // Pre-compute Greeks surface for all strikes
-        const strikeSet = new Set<number>();
-        targetContracts.forEach((c: any) => {
-          if (typeof c.strike_price === 'number') {
-            strikeSet.add(c.strike_price);
-          }
-        });
-        const strikes = Array.from(strikeSet);
-        const T = dteTarget.timeToExpiryYears; // Time to expiry based on DTE mode
-        const avgIV = this.hvCache.get(symbol) || 0.20;
-        
-        OptimizedGreeksCalculator.precomputeSurface(symbol, currentPrice, strikes, T, this.RISK_FREE_RATE, avgIV);
-        
-        // PHASE 4: Pre-calculate max pain, IV skew, and RSI using ALREADY-FETCHED data
-        // This reuses the snapshot from above (NO additional API calls)
-        const maxPain = this.calculateMaxPainFromSnapshot(chain.results, targetExpiry);
-        const ivSkew = this.getIVSkewFromSnapshot(chain.results);
-        
-        // Calculate RSI once per symbol using bulk-fetched historical bars
-        const symbolBars = bulkBarsCache.get(symbol.toUpperCase());
-        const rsi = this.calculateSymbolRSIFromBars(symbolBars);
-        
-        // Ensure HV distribution is cached for IV percentile calculation (if not already cached from initialization)
-        const currentDate = new Date().toISOString().split('T')[0];
-        const cached = this.hvDistributionCache.get(symbol);
-        if (!cached || cached.lastUpdated !== currentDate) {
-          const hvDistribution = this.buildHVDistributionFromBars(symbolBars);
-          if (hvDistribution.length > 0) {
-            this.hvDistributionCache.set(symbol, {
-              distribution: hvDistribution,
-              lastUpdated: currentDate
+    // Step 1: Process S&P 500 symbols in batches of 50 (parallel processing)
+    console.log(`\n📊 Processing ${this.SYMBOLS.length} symbols in batches of ${this.BATCH_SIZE}...`);
+    
+    // Split symbols into batches
+    const batches: string[][] = [];
+    for (let i = 0; i < this.SYMBOLS.length; i += this.BATCH_SIZE) {
+      batches.push(this.SYMBOLS.slice(i, i + this.BATCH_SIZE));
+    }
+    
+    console.log(`📦 Split into ${batches.length} batches`);
+    
+    // Process each batch in parallel
+    for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+      const batch = batches[batchIndex];
+      console.log(`\n🔄 Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} symbols)...`);
+      
+      // Process all symbols in this batch in parallel
+      const batchResults = await Promise.all(
+        batch.map(async (symbol) => {
+          try {
+            // Single Polygon snapshot call per symbol
+            const chain = await this.getOptionsChainSnapshot(symbol);
+            apiCalls++;
+            
+            if (!chain || !chain.results) {
+              return [];
+            }
+            
+            // Get current stock price from snapshot
+            const currentPrice = chain.results[0]?.underlying_price || chain.results[0]?.day?.close || 0;
+            
+            if (!currentPrice) {
+              return [];
+            }
+            
+            // Get all unique expiration dates from the actual chain data
+            const uniqueExpiries = Array.from(new Set(
+              chain.results.map((c: any) => c.expiration_date)
+            )).sort();
+            
+            // Find the appropriate expiration based on mode
+            const today = new Date().toISOString().split('T')[0];
+            
+            let targetExpiry: string | null = null;
+            if (dteTarget.mode === '0DTE') {
+              targetExpiry = uniqueExpiries.find(exp => exp >= today) || null;
+            } else {
+              targetExpiry = uniqueExpiries.find(exp => exp > today) || null;
+            }
+            
+            if (!targetExpiry) {
+              return [];
+            }
+            
+            // Filter for target expiration contracts
+            const targetContracts = chain.results.filter((c: any) => {
+              return c.expiration_date === targetExpiry;
             });
+            
+            // Pre-compute Greeks surface for all strikes
+            const strikeSet = new Set<number>();
+            targetContracts.forEach((c: any) => {
+              if (typeof c.strike_price === 'number') {
+                strikeSet.add(c.strike_price);
+              }
+            });
+            const strikes = Array.from(strikeSet);
+            const T = dteTarget.timeToExpiryYears;
+            const avgIV = this.hvCache.get(symbol) || 0.20;
+            
+            OptimizedGreeksCalculator.precomputeSurface(symbol, currentPrice, strikes, T, this.RISK_FREE_RATE, avgIV);
+            
+            // PHASE 4: Pre-calculate max pain, IV skew, and RSI using ALREADY-FETCHED data
+            const maxPain = this.calculateMaxPainFromSnapshot(chain.results, targetExpiry);
+            const ivSkew = this.getIVSkewFromSnapshot(chain.results);
+            
+            // Calculate RSI once per symbol using bulk-fetched historical bars
+            const symbolBars = bulkBarsCache.get(symbol.toUpperCase());
+            const rsi = this.calculateSymbolRSIFromBars(symbolBars);
+            
+            // Ensure HV distribution is cached for IV percentile calculation
+            const currentDate = new Date().toISOString().split('T')[0];
+            const cached = this.hvDistributionCache.get(symbol);
+            if (!cached || cached.lastUpdated !== currentDate) {
+              const hvDistribution = this.buildHVDistributionFromBars(symbolBars);
+              if (hvDistribution.length > 0) {
+                this.hvDistributionCache.set(symbol, {
+                  distribution: hvDistribution,
+                  lastUpdated: currentDate
+                });
+              }
+            }
+            
+            if (maxPain) this.maxPainCache.set(symbol, maxPain);
+            if (ivSkew) this.ivSkewCache.set(symbol, ivSkew);
+            if (rsi !== null) this.rsiCache.set(symbol, rsi);
+            
+            // Process each contract through Ghost Funnel
+            const symbolContracts: Ghost1DTEContract[] = [];
+            for (const contract of targetContracts) {
+              const processed = await this.processContract(symbol, contract, currentPrice, T, targetExpiry);
+              if (processed) {
+                symbolContracts.push(processed);
+              }
+            }
+            
+            return symbolContracts;
+          } catch (error) {
+            return []; // Skip failed symbols
           }
-        }
-        
-        if (maxPain) this.maxPainCache.set(symbol, maxPain);
-        if (ivSkew) this.ivSkewCache.set(symbol, ivSkew);
-        if (rsi !== null) this.rsiCache.set(symbol, rsi);
-        
-        console.log(`${symbol} Phase 4 Data: Max Pain $${maxPain?.toFixed(2) || 'N/A'}, IV Skew ${ivSkew ? `Calls ${(ivSkew.callIV*100).toFixed(1)}% / Puts ${(ivSkew.putIV*100).toFixed(1)}%` : 'N/A'}, RSI ${rsi?.toFixed(1) || 'N/A'}`);
-        
-        // Process each contract through Ghost Funnel
-        for (const contract of targetContracts) {
-          const processed = await this.processContract(symbol, contract, currentPrice, T, targetExpiry);
-          if (processed) {
-            allContracts.push(processed);
-          }
-        }
-        
-      } catch (error) {
-        console.error(`❌ Error fetching chain for ${symbol}:`, error);
-      }
+        })
+      );
+      
+      // Flatten batch results into allContracts
+      batchResults.forEach(contracts => {
+        allContracts.push(...contracts);
+      });
+      
+      console.log(`✅ Batch ${batchIndex + 1} complete: ${allContracts.length} total contracts found`);
     }
     
     // Step 2: Apply composite score and rank
@@ -679,11 +693,15 @@ export class Ghost1DTEService {
         return null;
       }
       
-      // Ghost Funnel Filter 4: IV limits by symbol
-      const ivLimits = { SPY: 0.28, QQQ: 0.38, IWM: 0.45 };
-      if (iv > ivLimits[symbol as keyof typeof ivLimits]) {
-        console.log(`  ❌ Filter 4: IV ${(iv*100).toFixed(1)}% > ${(ivLimits[symbol as keyof typeof ivLimits]*100).toFixed(1)}%`);
-        return null;
+      // Ghost Funnel Filter 4: IV limits by symbol (S&P 500 expansion)
+      const ivLimits: Record<string, number> = { 
+        SPY: 0.28,   // Most conservative (index ETF)
+        QQQ: 0.38,   // Tech volatility
+        IWM: 0.45    // Small-cap volatility
+      };
+      const maxIV = ivLimits[symbol] || 0.50; // Default 50% IV max for other S&P 500 stocks
+      if (iv > maxIV) {
+        return null; // Skip high IV contracts
       }
       
       // Calculate Greeks using optimized calculator
