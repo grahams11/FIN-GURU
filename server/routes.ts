@@ -453,6 +453,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Simple CST time and market status endpoint
+  app.get('/api/time', async (req, res) => {
+    try {
+      const cstTime = timeService.getCurrentCSTTime();
+      const isOpen = marketStatusService.isMarketOpen();
+      
+      res.json({
+        cst: cstTime.toISOString(),
+        open: isOpen
+      });
+    } catch (error) {
+      console.error('Error fetching time:', error);
+      res.status(500).json({ message: 'Failed to fetch time' });
+    }
+  });
+
   // Time synchronization status endpoint
   app.get('/api/time/status', async (req, res) => {
     try {

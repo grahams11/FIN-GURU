@@ -1,6 +1,7 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { TrendingUp, Activity, Zap, Brain } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { CSTClock } from "@/components/CSTClock";
 import type { MarketOverviewData } from "@shared/schema";
 
 interface MarketOverviewProps {
@@ -31,7 +32,10 @@ export function MarketOverview({ data, isLoading }: MarketOverviewProps) {
   }
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+    <div className="grid grid-cols-1 md:grid-cols-5 gap-6 mb-8">
+      {/* CST Clock & Market Status */}
+      <CSTClock />
+      
       {/* S&P 500 */}
       <Card className="bg-card border-border">
         <CardContent className="p-6">
