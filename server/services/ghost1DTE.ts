@@ -81,6 +81,7 @@ interface Ghost1DTEContract {
   gamma: number;
   vega: number;
   bidAskSpread: number;
+  dailyBurnRate: number; // Theta * -100 * underlying price * 100 (Grok's formula)
   
   // Score components
   scores: ScoreComponents;
@@ -709,7 +710,20 @@ export class Ghost1DTEService {
         }
       }
       
-      console.log(`  ✅ Passed Filters 1-5, checking IV percentile...`);
+      // Grok's Theta/Gamma Filters: Strict thresholds for theta feast
+      // Filter 5a: Theta must be < -0.08 (strong decay for overnight profit)
+      if (greeks.theta >= -0.08) {
+        console.log(`  ❌ Grok Filter 5a: Theta ${greeks.theta.toFixed(3)} >= -0.08 (insufficient decay)`);
+        return null;
+      }
+      
+      // Filter 5b: Gamma must be > 0.12 (gamma squeeze potential)
+      if (greeks.gamma <= 0.12) {
+        console.log(`  ❌ Grok Filter 5b: Gamma ${greeks.gamma.toFixed(3)} <= 0.12 (insufficient gamma)`);
+        return null;
+      }
+      
+      console.log(`  ✅ Passed Filters 1-5 + Grok Theta/Gamma, checking IV percentile...`);
       
       // Ghost Funnel Filter 6: IV percentile < 18th (fear crush setup)
       const ivPercentile = await this.calculateIVPercentile(symbol, iv);
@@ -757,6 +771,11 @@ export class Ghost1DTEService {
       // Historical win rate (simulated - would come from backtest)
       const historicalWinRate = 94.1; // Placeholder
       
+      // Calculate daily burn rate: Grok's formula
+      // Theta represents $ decay per day per contract (already in $ terms)
+      // Formula: |theta| * underlying price * 100 contracts
+      const dailyBurnRate = Math.abs(greeks.theta) * currentPrice * 100;
+      
       return {
         symbol,
         strike,
@@ -774,6 +793,7 @@ export class Ghost1DTEService {
         gamma: greeks.gamma,
         vega: greeks.vega,
         bidAskSpread: spread,
+        dailyBurnRate,
         scores,
         targetPremium,
         stopPremium,
