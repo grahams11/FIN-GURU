@@ -84,6 +84,7 @@ export interface OptionsAnalytics {
   bid: number;
   ask: number;
   lastPrice: number;
+  premium: number; // Mid-price: (bid + ask) / 2, fallback to lastPrice
   
   // Metadata
   timestamp: number;
@@ -324,6 +325,9 @@ export class LiveDataAdapter {
         bid: greeks.bid,
         ask: greeks.ask,
         lastPrice: greeks.lastPrice,
+        premium: greeks.bid > 0 && greeks.ask > 0 
+          ? (greeks.bid + greeks.ask) / 2 
+          : greeks.lastPrice,
         
         // Metadata
         timestamp: Date.now(),

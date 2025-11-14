@@ -146,6 +146,16 @@ export class EliteScanner {
   
   /**
    * Analyze a pre-filtered ticker candidate with full technical + options data
+   * 
+   * RELAXED FILTERS — STILL HIGH EDGE (TARGET: 3-5 PLAYS/DAY)
+   * - RSI Oversold: < 40 (was 30)
+   * - Volume Spike: > 1.5x average (was 1.8x)
+   * - Intraday Momentum: > 1.5% move from open
+   * - IV Percentile: > 25% (was 30%)
+   * - Gamma: > 0.04 (was 0.05)
+   * - Pivot Breakout: 1% above/below pivot level
+   * - Trend Alignment: Price vs EMA20
+   * - ATR Momentum: Short ATR > Long ATR
    */
   private async analyzeTicker(
     symbol: string,
@@ -160,11 +170,11 @@ export class EliteScanner {
         return null;
       }
       
-      // Determine signal type based on RSI (more permissive)
+      // Determine signal type based on RSI (RELAXED: oversold < 40)
       let optionType: 'call' | 'put' | null = null;
       const passedFilters: string[] = [];
       
-      // CALL signal: RSI in oversold zone OR recently crossed up
+      // CALL signal: RSI < 40 (oversold) OR recently crossed up from oversold
       if (indicators.rsi <= config.rsiOversold || 
           (indicators.rsiPrevious <= config.rsiOversold && indicators.rsi > config.rsiOversold)) {
         optionType = 'call';
@@ -229,33 +239,52 @@ export class EliteScanner {
         return null; // No options data available
       }
       
-      // Enhanced filters (NEW!) - RELAXED THRESHOLDS for 3-5 daily plays
+      // RELAXED FILTERS — STILL HIGH EDGE (TARGET: 3-5 PLAYS/DAY)
+      // Simplified gate: 4 core filters for high-probability plays
       
-      // Filter 1: IV Percentile > 30% (elevated volatility) - REQUIRED
-      if (optionsData.ivPercentile < 30) {
-        return null;
-      }
-      passedFilters.push(`IV Rank ${optionsData.ivPercentile.toFixed(0)}%`);
+      // Filter 1: RSI Oversold/Overbought (already checked above, config = 40/60)
+      const rsiOversold = indicators.rsi < 40; // For calls
+      const rsiOverbought = indicators.rsi > 60; // For puts
       
-      // Filter 2: Gamma > 0.05 (moderate gamma exposure) - REQUIRED
-      if (optionsData.gamma <= 0.05) {
-        return null;
-      }
-      passedFilters.push(`⚡ Gamma ${optionsData.gamma.toFixed(3)}`);
-      
-      // Filter 3: Volume > 1.5x average (relaxed for more plays) - REQUIRED
-      if (optionsData.volumeRatio <= 1.5) {
+      // Filter 2: Volume Spike > 1.5x average (was 1.8x)
+      const volumeSpike = optionsData.volumeRatio > 1.5;
+      if (!volumeSpike) {
         return null;
       }
       passedFilters.push(`🔥 Volume ${optionsData.volumeRatio.toFixed(1)}x`);
-
       
-      // Filter 4: Delta range (0.3-0.7 for stock options)
-      const deltaInRange = Math.abs(optionsData.delta) >= 0.3 && Math.abs(optionsData.delta) <= 0.7;
-      if (!deltaInRange) {
+      // Filter 3: Intraday Momentum > 1.5% (already checked at line 193)
+      const momentumOk = Math.abs(intradayMomentum) >= 1.5;
+      passedFilters.push(`💨 Momentum ${intradayMomentum >= 0 ? '+' : ''}${intradayMomentum.toFixed(1)}%`);
+      
+      // Filter 4: Premium > $0.30 (was $0.50)
+      const premiumOk = optionsData.premium > 0.30;
+      if (!premiumOk) {
         return null;
       }
-      passedFilters.push(`Delta ${optionsData.delta.toFixed(2)}`);
+      passedFilters.push(`💰 Premium $${optionsData.premium.toFixed(2)}`);
+      
+      // Filter 5: Pivot Breakout (already checked at line 199-206)
+      const pivotBreakout = pivotAligned;
+      passedFilters.push(`Pivot ${abovePivot >= 0 ? '+' : ''}${abovePivot.toFixed(1)}%`);
+      
+      // CORE GATE: All 4 filters + pivot must pass
+      if (!pivotBreakout || !momentumOk || !volumeSpike || !premiumOk) {
+        return null;
+      }
+      
+      // OPTIONAL QUALITY FILTERS (for scoring, not hard rejects)
+      // IV, Gamma, Delta contribute to signal quality but don't block plays
+      if (optionsData.ivPercentile >= 25) {
+        passedFilters.push(`IV Rank ${optionsData.ivPercentile.toFixed(0)}%`);
+      }
+      if (optionsData.gamma > 0.04) {
+        passedFilters.push(`⚡ Gamma ${optionsData.gamma.toFixed(3)}`);
+      }
+      const deltaInRange = Math.abs(optionsData.delta) >= 0.3 && Math.abs(optionsData.delta) <= 0.7;
+      if (deltaInRange) {
+        passedFilters.push(`Delta ${optionsData.delta.toFixed(2)}`);
+      }
       
       // Calculate signal quality (0-100)
       const signalQuality = this.calculateSignalQuality({
