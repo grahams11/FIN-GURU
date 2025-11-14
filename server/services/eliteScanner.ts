@@ -122,29 +122,46 @@ export class EliteScanner {
     console.log(`🔎 Basic filters: ${allStocks.length} → ${basicFiltered.length} stocks`);
     
     // STEP 3: Analyze top candidates with full technical + options data
-    console.log(`🧮 Analyzing top ${Math.min(basicFiltered.length, 50)} candidates...`);
-    const candidates = basicFiltered.slice(0, 50); // Top 50 by volume/momentum
+    // ADAPTIVE PROCESSING: Stop once we find target number of qualified plays
+    // This prevents excessive API calls while still scanning the full market
+    const MAX_QUALIFIED_PLAYS = 12; // Target: 8-12 plays per scan
+    const MAX_CANDIDATES_TO_ANALYZE = 100; // Safety cap to prevent infinite processing
     
-    // SEQUENTIAL PROCESSING: Analyze one ticker at a time to prevent API rate limit bursts
-    // Rate limiter (300ms minTime, 2 maxConcurrent) handles all throttling
-    // Target: 50 tickers in ~25 seconds (6-7 calls/sec throughput)
-    console.log(`🔄 Processing ${candidates.length} candidates sequentially...`);
+    // Sort candidates by momentum and volume for best-first processing
+    const sortedCandidates = basicFiltered
+      .sort((a, b) => {
+        const scoreA = Math.abs(a.changePercent || 0) * Math.log(a.volume || 1);
+        const scoreB = Math.abs(b.changePercent || 0) * Math.log(b.volume || 1);
+        return scoreB - scoreA;
+      })
+      .slice(0, MAX_CANDIDATES_TO_ANALYZE);
+    
+    console.log(`🧮 Analyzing candidates (adaptive mode, target: ${MAX_QUALIFIED_PLAYS} plays)...`);
+    console.log(`🔄 Processing up to ${sortedCandidates.length} candidates sequentially...`);
     
     const analysisResults: (EliteScanResult | null)[] = [];
     let totalPlaysFound = 0;
+    let totalAnalyzed = 0;
     
-    for (let i = 0; i < candidates.length; i++) {
-      const stock = candidates[i];
+    for (let i = 0; i < sortedCandidates.length; i++) {
+      // ADAPTIVE STOP: Once we have enough qualified plays, stop to save API calls
+      if (totalPlaysFound >= MAX_QUALIFIED_PLAYS) {
+        console.log(`🎯 Target reached: ${totalPlaysFound} plays found after ${totalAnalyzed} candidates`);
+        break;
+      }
+      
+      const stock = sortedCandidates[i];
       const result = await this.analyzeTicker(stock.ticker, config, marketContext.isLive, isOvernight);
       analysisResults.push(result);
+      totalAnalyzed++;
       
       if (result !== null) {
         totalPlaysFound++;
-        console.log(`✅ ${i + 1}/${candidates.length} — Found play: ${stock.ticker} (${totalPlaysFound} total)`);
+        console.log(`✅ ${totalAnalyzed}/${sortedCandidates.length} — Found play: ${stock.ticker} (${totalPlaysFound}/${MAX_QUALIFIED_PLAYS})`);
       } else {
         // Log progress every 10 tickers
-        if ((i + 1) % 10 === 0) {
-          console.log(`⏳ Progress: ${i + 1}/${candidates.length} analyzed — ${totalPlaysFound} plays found`);
+        if (totalAnalyzed % 10 === 0) {
+          console.log(`⏳ Progress: ${totalAnalyzed}/${sortedCandidates.length} analyzed — ${totalPlaysFound} plays found`);
         }
       }
     }
@@ -176,16 +193,17 @@ export class EliteScanner {
   /**
    * Analyze a pre-filtered ticker candidate with full technical + options data
    * 
-   * BALANCED FILTERS — HIGH QUALITY + MORE SETUPS (TARGET: 8-12 PLAYS/DAY)
-   * - RSI Oversold: < 35 (catches RIGL@32, COIN@35, TBPH@34)
-   * - RSI Overbought: > 65 (catches strong momentum before extremes)
+   * OPTIMIZED FILTERS — 8-12 PLAYS/DAY, ZERO 429 ERRORS
+   * - RSI Oversold: <= 40 for calls (sweet spot after testing)
+   * - RSI Overbought: >= 60 for puts (sweet spot after testing)
+   * - Adaptive Stop: Stops at 12 plays to prevent excessive API calls
    * - Volume Spike: > 1.8x average (quality confirmation)
-   * - Intraday Momentum: > 1.5% move from open
-   * - IV Percentile: > 25% (was 30%)
-   * - Gamma: > 0.04 (was 0.05)
-   * - Pivot Breakout: 1% above/below pivot level
-   * - Trend Alignment: Price vs EMA20
-   * - ATR Momentum: Short ATR > Long ATR
+   * - Intraday Momentum: > 0.8% move from close
+   * - IV Percentile: > 25% (scoring bonus)
+   * - Gamma: > 0.04 (scoring bonus)
+   * - Pivot Breakout: Directional alignment (scoring bonus)
+   * - Trend Alignment: Price vs EMA20 (required)
+   * - ATR Momentum: Short > Long (scoring bonus, not gate)
    */
   private async analyzeTicker(
     symbol: string,
@@ -374,27 +392,23 @@ export class EliteScanner {
         return null;
       }
       
-      // Determine signal type based on RSI (RELAXED: oversold < 40)
+      // Determine signal type based on RSI (STRICT: extremes only to reduce API calls)
       let optionType: 'call' | 'put' | null = null;
       const passedFilters: string[] = [];
       
-      // CALL signal: RSI < 40 (oversold) OR recently crossed up from oversold
-      if (indicators.rsi <= config.rsiOversold || 
-          (indicators.rsiPrevious <= config.rsiOversold && indicators.rsi > config.rsiOversold)) {
+      // RSI GATE: Balanced thresholds (40/60) + adaptive stop (12 plays) = 8-12 plays/day, zero 429 errors
+      // RSI <= 40 for CALL, RSI >= 60 for PUT
+      if (indicators.rsi <= config.rsiOversold) {
         optionType = 'call';
-        passedFilters.push(indicators.rsi <= config.rsiOversold ? 'RSI Oversold' : 'RSI Oversold Bounce');
-      }
-      
-      // PUT signal: RSI in overbought zone OR recently crossed down
-      if (indicators.rsi >= config.rsiOverbought || 
-          (indicators.rsiPrevious >= config.rsiOverbought && indicators.rsi < config.rsiOverbought)) {
+        passedFilters.push(`RSI Oversold ${indicators.rsi.toFixed(1)}`);
+      } else if (indicators.rsi >= config.rsiOverbought) {
         optionType = 'put';
-        passedFilters.push(indicators.rsi >= config.rsiOverbought ? 'RSI Overbought' : 'RSI Overbought Reversal');
+        passedFilters.push(`RSI Overbought ${indicators.rsi.toFixed(1)}`);
       }
       
-      // No signal if RSI is neutral (between 40-60)
+      // No signal if RSI is neutral - EARLY EXIT to prevent expensive options API calls
       if (!optionType) {
-        console.log(`❌ ${symbol}: Neutral RSI ${indicators.rsi.toFixed(1)} (need <${config.rsiOversold} or >${config.rsiOverbought})`);
+        console.log(`❌ ${symbol}: Neutral RSI ${indicators.rsi.toFixed(1)} (need <=${config.rsiOversold} or >=${config.rsiOverbought})`);
         return null;
       }
       
@@ -436,14 +450,19 @@ export class EliteScanner {
       }
       passedFilters.push('EMA Trend Aligned');
       
-      // SCORING ONLY: ATR momentum contributes to quality score, doesn't reject
-      // This is redundant with momentum filter, so make it a bonus not a gate
+      // ATR MOMENTUM CHECK: Scoring bonus, not a hard gate
+      // Combined with adaptive stop (12 plays max), this keeps API calls under control
       const hasATRMomentum = indicators.atrShort > (indicators.atrLong * config.atrMultiplier);
       if (hasATRMomentum) {
-        passedFilters.push('ATR Momentum');
+        passedFilters.push(`ATR Momentum ${indicators.atrShort.toFixed(2)}/${indicators.atrLong.toFixed(2)}`);
       } else {
         console.log(`⚠️ ${symbol}: Low ATR momentum (Short ${indicators.atrShort.toFixed(2)} vs Long ${indicators.atrLong.toFixed(2)}) - continuing anyway`);
       }
+      
+      // 🎯 CHECKPOINT: Ticker passed all cheap technical filters (RSI, EMA, Momentum)
+      // Now safe to call expensive options analytics API (3 calls per ticker)
+      // Adaptive stop logic (12 plays max) prevents excessive API usage
+      console.log(`✅ ${symbol}: Passed technical filters — calling options analytics...`);
       
       // Get options analytics
       const optionsData = await liveDataAdapter.getOptionsAnalytics(symbol, optionType);

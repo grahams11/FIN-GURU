@@ -145,7 +145,7 @@ export class LiveDataAdapter {
     const isLive = marketStatusService.isMarketOpen();
     
     if (isLive) {
-      // Try WebSocket cache first
+      // Try WebSocket cache first (only works for subscribed symbols)
       const wsQuote = polygonService.getQuote(symbol);
       
       if (wsQuote && this.isQuoteFresh(wsQuote.timestamp)) {
@@ -161,7 +161,8 @@ export class LiveDataAdapter {
         };
       }
       
-      // Fallback to Polygon REST if WebSocket stale
+      // CRITICAL FIX: For unsubscribed symbols, get LIVE quote from Polygon REST API
+      // This prevents falling back to stale historical data (which causes 0.00% momentum)
       const restQuote = await polygonService.getCachedQuote(symbol);
       if (restQuote) {
         return {
@@ -174,6 +175,26 @@ export class LiveDataAdapter {
           source: 'fallback',
           isStale: false
         };
+      }
+      
+      // If REST also fails during market hours, try direct Polygon last trade API
+      // This ensures we always get LIVE data during market hours
+      try {
+        const liveQuote = await polygonService.getLastTrade(symbol);
+        if (liveQuote) {
+          return {
+            symbol,
+            price: liveQuote.price,
+            bidPrice: liveQuote.price,
+            askPrice: liveQuote.price,
+            volume: liveQuote.size || 0,
+            timestamp: Date.now(),
+            source: 'fallback',
+            isStale: false
+          };
+        }
+      } catch (error) {
+        console.warn(`⚠️ ${symbol}: Failed to get live quote, falling back to historical`);
       }
     }
     
