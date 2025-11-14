@@ -340,31 +340,37 @@ export class WebScraperService {
   }
 
   static async scrapeStockPrice(symbol: string): Promise<StockData> {
-    // Try Polygon WebSocket/REST FIRST (primary source)
+    // Try Polygon WebSocket/REST FIRST (but only if it provides valid changePercent)
+    // For indices, Polygon returns null (handled in getIndexSnapshot), so this is stocks only
     try {
       const polygonQuote = await polygonService.getStockQuote(symbol);
-      if (polygonQuote && polygonQuote.price > 0) {
+      // Only use Polygon if it provides valid, non-zero changePercent
+      // Number.isFinite excludes undefined, null, NaN, Infinity
+      if (polygonQuote && polygonQuote.price > 0 && Number.isFinite(polygonQuote.changePercent) && polygonQuote.changePercent !== 0) {
+        console.log(`${symbol}: Using Polygon data with changePercent ${polygonQuote.changePercent}%`);
+        const prevClose = polygonQuote.price / (1 + polygonQuote.changePercent / 100);
         return {
           symbol,
           price: polygonQuote.price,
-          change: 0,
-          changePercent: polygonQuote.changePercent || 0
+          change: polygonQuote.price - prevClose,
+          changePercent: polygonQuote.changePercent
         };
       }
     } catch (error) {
       console.log(`${symbol}: Polygon unavailable, trying Tastytrade`);
     }
 
-    // Try Tastytrade real-time data SECOND (fallback)
+    // Try Tastytrade real-time data SECOND (but only if it provides valid changePercent)
     try {
       const tastyQuote = await tastytradeService.getStockQuote(symbol);
-      if (tastyQuote && tastyQuote.price > 0) {
-        console.log(`${symbol}: Got Tastytrade real-time price ${tastyQuote.price}`);
+      if (tastyQuote && tastyQuote.price > 0 && Number.isFinite(tastyQuote.changePercent) && tastyQuote.changePercent !== 0) {
+        console.log(`${symbol}: Using Tastytrade data with changePercent ${tastyQuote.changePercent}%`);
+        const prevClose = tastyQuote.price / (1 + tastyQuote.changePercent / 100);
         return {
           symbol,
           price: tastyQuote.price,
-          change: 0,
-          changePercent: tastyQuote.changePercent || 0
+          change: tastyQuote.price - prevClose,
+          changePercent: tastyQuote.changePercent
         };
       }
     } catch (error) {
@@ -594,19 +600,69 @@ export class WebScraperService {
       }
 
       if (price > 0) {
-        // Always calculate change from price and changePercent using correct algebra
-        // Formula: changePercent = ((price - prevClose) / prevClose) * 100
-        // Therefore: prevClose = price / (1 + changePercent/100)
-        // Then: change = price - prevClose
-        // Note: Works even when changePercent=0 (prevClose=price, change=0)
-        const prevClose = price / (1 + changePercent / 100);
-        change = price - prevClose;
+        // Check if this is an index symbol
+        const isIndex = cleanSymbol.includes('^') || cleanSymbol.includes('%5E');
         
+        if (isIndex) {
+          // For indices: Web scraping changePercent is unreliable
+          // - Google Finance: changePercent loads dynamically, matches wrong DOM elements
+          // - MarketWatch: Returns 401 Unauthorized (bot detection)
+          // - Polygon API: 401/404 (plan doesn't include index data)
+          //
+          // Solution: Return price with 0% change until Polygon plan is upgraded
+          // This is honest (no data) rather than misleading (wrong 19.06% for all)
+          
+          console.log(`${symbol}: ✅ Got price $${price.toFixed(2)} (index changePercent unavailable - API plan limitation)`);
+          
+          return {
+            symbol: cleanSymbol,
+            price,
+            change: 0,
+            changePercent: 0
+          };
+        }
+        
+        // For stocks: Use scraped changePercent if available (and valid), otherwise try MarketWatch
+        // Number.isFinite excludes undefined, null, NaN, Infinity
+        if (Number.isFinite(changePercent) && changePercent !== 0) {
+          // Successfully scraped valid changePercent from Google Finance - use it directly
+          const prevClose = price / (1 + changePercent / 100);
+          const change = price - prevClose;
+          console.log(`${symbol}: Using scraped changePercent ${changePercent.toFixed(2)}%`);
+          
+          return {
+            symbol: cleanSymbol,
+            price,
+            change,
+            changePercent
+          };
+        }
+        
+        // changePercent scraping failed - try MarketWatch as fallback
+        try {
+          console.log(`${symbol}: Google Finance changePercent unavailable, trying MarketWatch for prevClose...`);
+          const marketWatchData = await this.scrapeMarketWatch(cleanSymbol);
+          if (marketWatchData.price > 0) {
+            // Use MarketWatch data entirely
+            console.log(`${symbol}: ✅ Using MarketWatch data - price:${marketWatchData.price}, change:${marketWatchData.changePercent}%`);
+            return {
+              symbol: cleanSymbol,
+              price: marketWatchData.price,
+              change: marketWatchData.change,
+              changePercent: marketWatchData.changePercent
+            };
+          }
+        } catch (error) {
+          console.log(`${symbol}: MarketWatch fallback failed:`, error instanceof Error ? error.message : 'Unknown');
+        }
+        
+        // Both scraping methods failed - return price with no change data
+        console.log(`${symbol}: No changePercent data available from any source`);
         return {
           symbol: cleanSymbol,
           price,
-          change: parseFloat(change.toFixed(2)),
-          changePercent
+          change: 0,
+          changePercent: 0
         };
       }
       
@@ -617,12 +673,26 @@ export class WebScraperService {
   }
 
   private static async scrapeMarketWatch(symbol: string): Promise<StockData> {
-    const url = `https://www.marketwatch.com/investing/stock/${symbol.toLowerCase()}`;
+    // Map index symbols to MarketWatch URLs
+    let url: string;
+    const cleanSymbol = symbol.toUpperCase();
+    
+    if (cleanSymbol === '^GSPC' || cleanSymbol === '%5EGSPC') {
+      url = 'https://www.marketwatch.com/investing/index/spx';
+    } else if (cleanSymbol === '^IXIC' || cleanSymbol === '%5EIXIC') {
+      url = 'https://www.marketwatch.com/investing/index/comp';
+    } else if (cleanSymbol === '^VIX' || cleanSymbol === '%5EVIX') {
+      url = 'https://www.marketwatch.com/investing/index/vix';
+    } else {
+      // For stocks, use the stock URL
+      url = `https://www.marketwatch.com/investing/stock/${symbol.toLowerCase()}`;
+    }
     
     try {
       const response = await axios.get(url, {
         headers: {
           ...this.HEADERS,
+          'Referer': 'https://www.marketwatch.com/',
           'Cache-Control': 'no-cache',
           'Pragma': 'no-cache'
         },
@@ -631,7 +701,7 @@ export class WebScraperService {
       
       const $ = cheerio.load(response.data);
       
-      // MarketWatch selectors
+      // MarketWatch selectors for current price
       let price = 0;
       const priceSelectors = [
         '.intraday__price .value',
@@ -652,12 +722,34 @@ export class WebScraperService {
         }
       }
 
+      // Extract previous close for change percent calculation
+      let prevClose = 0;
+      const prevCloseSelectors = [
+        '.table__cell:contains("Previous Close") + .table__cell',
+        '.kv__item:contains("Prev Close") .kv__value',
+        'td:contains("Previous Close") + td'
+      ];
+
+      for (const selector of prevCloseSelectors) {
+        const element = $(selector).first();
+        let text = element.text().replace(/[,$]/g, '').trim();
+        
+        if (text && !isNaN(parseFloat(text))) {
+          prevClose = parseFloat(text);
+          console.log(`${symbol}: MarketWatch found prevClose ${prevClose}`);
+          break;
+        }
+      }
+
       if (price > 0) {
+        // Calculate change and changePercent from price and prevClose
+        const { change, changePercent } = this.calculateChangeMetrics(price, prevClose);
+        
         return {
           symbol,
           price,
-          change: 0,
-          changePercent: 0
+          change,
+          changePercent
         };
       }
       
@@ -665,6 +757,24 @@ export class WebScraperService {
     } catch (error) {
       throw new Error(`MarketWatch scraping failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
+  }
+
+  /**
+   * Centralized helper to calculate change and changePercent from price and prevClose
+   */
+  private static calculateChangeMetrics(price: number, prevClose: number): { change: number; changePercent: number } {
+    if (!prevClose || prevClose <= 0) {
+      // No valid previous close - return zeros
+      return { change: 0, changePercent: 0 };
+    }
+    
+    const change = price - prevClose;
+    const changePercent = (change / prevClose) * 100;
+    
+    return {
+      change: parseFloat(change.toFixed(2)),
+      changePercent: parseFloat(changePercent.toFixed(2))
+    };
   }
 
   /**

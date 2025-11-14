@@ -814,9 +814,12 @@ class PolygonService {
    * Options Advanced plan provides stock data via WebSocket (not REST API)
    */
   async getStockQuote(symbol: string): Promise<{ price: number; changePercent: number } | null> {
-    // Skip market index symbols (^GSPC, ^VIX, etc.) - Polygon doesn't support these
+    // Handle market index symbols via Polygon's index snapshot API
     if (symbol.includes('^') || symbol.includes('%5E')) {
-      return null;
+      console.log(`🔍 ${symbol}: Detected as index symbol, calling getIndexSnapshot...`);
+      const result = await this.getIndexSnapshot(symbol);
+      console.log(`📊 ${symbol}: getIndexSnapshot returned:`, result);
+      return result;
     }
 
     // Get quote from WebSocket cache
@@ -831,6 +834,75 @@ class PolygonService {
 
     // No WebSocket data available - return null to let fallback sources handle it
     return null;
+  }
+
+  /**
+   * Get index snapshot from Polygon API
+   * Supports major market indices with proper ticker mapping
+   */
+  async getIndexSnapshot(symbol: string): Promise<{ price: number; changePercent: number } | null> {
+    // Map common index symbols to Polygon's index ticker format
+    const indexTickerMap: Record<string, string> = {
+      '^GSPC': 'I:SPX',      // S&P 500
+      '%5EGSPC': 'I:SPX',
+      '^IXIC': 'I:COMP',     // NASDAQ Composite
+      '%5EIXIC': 'I:COMP',
+      '^VIX': 'I:VIX',       // VIX Volatility Index
+      '%5EVIX': 'I:VIX'
+    };
+
+    const polygonTicker = indexTickerMap[symbol];
+    if (!polygonTicker) {
+      console.log(`⚠️ ${symbol}: No Polygon index mapping available`);
+      return null;
+    }
+
+    try {
+      await PolygonRateLimiter.getInstance().acquire();
+      
+      // Use aggregates (bars) endpoint to get previous close data
+      // Get yesterday's bar and today's bar (if available)
+      const to = new Date().toISOString().split('T')[0]; // Today YYYY-MM-DD
+      const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      const from = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]; // 5 days ago
+      
+      console.log(`📡 ${symbol}: Fetching Polygon aggregates for ${polygonTicker} (${from} to ${to})...`);
+      
+      // Use makeRateLimitedRequest to apply proper Authorization header (not query param)
+      // makeRateLimitedRequest returns the parsed data directly (not wrapped in .data)
+      const url = `https://api.polygon.io/v2/aggs/ticker/${polygonTicker}/range/1/day/${from}/${to}?adjusted=true&sort=desc&limit=5`;
+      const response = await this.makeRateLimitedRequest(url);
+
+      if (response?.status === 'OK' && response?.results?.length > 0) {
+        const bars = response.results;
+        const latestBar = bars[0]; // Most recent bar
+        const prevBar = bars.length > 1 ? bars[1] : null;
+        
+        const price = latestBar.c; // Close price
+        let changePercent = 0;
+        
+        if (prevBar) {
+          // Calculate change from previous bar's close
+          const prevClose = prevBar.c;
+          changePercent = ((price - prevClose) / prevClose) * 100;
+          console.log(`✅ ${symbol}: Polygon aggregates ${polygonTicker} - $${price.toFixed(2)}, ${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}% (from ${new Date(prevBar.t).toISOString().split('T')[0]})`);
+        } else {
+          console.log(`✅ ${symbol}: Polygon aggregates ${polygonTicker} - $${price.toFixed(2)} (no previous data for change%)`);
+        }
+        
+        return {
+          price,
+          changePercent
+        };
+      }
+
+      console.log(`⚠️ ${symbol}: Polygon aggregates returned no data`);
+      return null;
+    } catch (error) {
+      const errorMsg = axios.isAxiosError(error) ? `${error.response?.status} - ${error.response?.statusText}` : (error instanceof Error ? error.message : 'Unknown');
+      console.log(`❌ ${symbol}: Polygon aggregates failed: ${errorMsg}`);
+      return null;
+    }
   }
 
   /**
