@@ -1279,32 +1279,23 @@ export class Ghost1DTEService {
   
   /**
    * Get full options chain snapshot for 1DTE contracts
-   * Uses Polygon /v3/snapshot/options endpoint (Unlimited API with Advanced Plan)
+   * Uses Polygon /v3/snapshot/options endpoint via polygonService (rate-limited)
    */
   private static async getOptionsChainSnapshot(symbol: string): Promise<{ results: any[] } | null> {
     try {
       console.log(`📡 Fetching options chain snapshot for ${symbol}...`);
       
-      // For now, we'll use a simplified approach - get all option contracts
-      // In production, you would filter by expiry date in the API call
-      const response = await fetch(
-        `https://api.polygon.io/v3/snapshot/options/${symbol}?limit=250`,
-        {
-          headers: {
-            'Authorization': `Bearer ${process.env.POLYGON_API_KEY}`
-          }
-        }
-      );
+      // Use polygonService with unlimited=true for high-speed S&P 500 scanning (Advanced Options Plan)
+      const data = await polygonService.getOptionsSnapshot(symbol, true);
       
-      if (!response.ok) {
-        console.error(`❌ Failed to fetch chain for ${symbol}: ${response.statusText}`);
+      // Handle null response from polygonService (API failure, 429, 5xx, etc.)
+      if (!data) {
+        console.warn(`⚠️ polygonService.getOptionsSnapshot returned null for ${symbol} (API failure)`);
         return null;
       }
       
-      const data = await response.json();
-      
       if (!data.results || !Array.isArray(data.results)) {
-        console.warn(`⚠️ No results for ${symbol}`);
+        console.warn(`⚠️ No results in snapshot for ${symbol}`);
         return null;
       }
       

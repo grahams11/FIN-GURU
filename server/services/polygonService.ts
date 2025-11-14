@@ -1,99 +1,8 @@
 import WebSocket from 'ws';
 import axios from 'axios';
+import Bottleneck from 'bottleneck';
 import { alphaVantageService } from './alphaVantageService';
 import { normalizeOptionSymbol } from '../utils/optionSymbols';
-
-/**
- * Polygon API Rate Limiter
- * Enforces 25 REST API calls per minute globally across the application
- * Advanced Options Plan: Unlimited API calls (using conservative 25/min limit)
- * Thread-safe for concurrent calls using promise queue
- */
-class PolygonRateLimiter {
-  private static instance: PolygonRateLimiter | null = null;
-  private callTimestamps: number[] = [];
-  private readonly MAX_CALLS_PER_MINUTE = 25;
-  private readonly MINUTE_MS = 60000;
-  private queue: Array<() => void> = [];
-  private processing = false;
-
-  private constructor() {}
-
-  static getInstance(): PolygonRateLimiter {
-    if (!PolygonRateLimiter.instance) {
-      PolygonRateLimiter.instance = new PolygonRateLimiter();
-    }
-    return PolygonRateLimiter.instance;
-  }
-
-  /**
-   * Wait if necessary to respect rate limit, then allow the call
-   * Thread-safe - handles concurrent callers via promise queue
-   */
-  async acquire(): Promise<void> {
-    return new Promise<void>((resolve) => {
-      this.queue.push(resolve);
-      this.processQueue();
-    });
-  }
-
-  /**
-   * Process queued callers one at a time to prevent race conditions
-   */
-  private async processQueue(): Promise<void> {
-    if (this.processing || this.queue.length === 0) {
-      return;
-    }
-
-    this.processing = true;
-
-    while (this.queue.length > 0) {
-      const now = Date.now();
-      
-      // Remove timestamps older than 1 minute
-      this.callTimestamps = this.callTimestamps.filter(
-        timestamp => now - timestamp < this.MINUTE_MS
-      );
-
-      // If we've made MAX calls in the last minute, wait
-      if (this.callTimestamps.length >= this.MAX_CALLS_PER_MINUTE) {
-        const oldestCall = this.callTimestamps[0];
-        const waitTime = this.MINUTE_MS - (now - oldestCall) + 200; // +200ms buffer
-        
-        if (waitTime > 0) {
-          console.log(`⏳ Rate limit: Waiting ${(waitTime/1000).toFixed(1)}s (${this.callTimestamps.length}/${this.MAX_CALLS_PER_MINUTE} calls used, ${this.queue.length} queued)`);
-          await new Promise(resolve => setTimeout(resolve, waitTime));
-          continue; // Re-check after waiting
-        }
-      }
-
-      // Allow next caller
-      this.callTimestamps.push(Date.now());
-      const nextCaller = this.queue.shift();
-      if (nextCaller) {
-        nextCaller();
-      }
-    }
-
-    this.processing = false;
-  }
-
-  /**
-   * Get current rate limit status
-   */
-  getStatus(): { callsUsed: number; callsRemaining: number; queuedCalls: number } {
-    const now = Date.now();
-    this.callTimestamps = this.callTimestamps.filter(
-      timestamp => now - timestamp < this.MINUTE_MS
-    );
-    
-    return {
-      callsUsed: this.callTimestamps.length,
-      callsRemaining: this.MAX_CALLS_PER_MINUTE - this.callTimestamps.length,
-      queuedCalls: this.queue.length
-    };
-  }
-}
 
 interface QuoteData {
   symbol: string;
@@ -201,8 +110,13 @@ class PolygonService {
   // Options REST API cache (for REST endpoint responses)
   private optionsRestCache: Map<string, { data: any; timestamp: number }> = new Map();
 
-  // Rate limiter instance
-  private rateLimiter = PolygonRateLimiter.getInstance();
+  // STANDARD Bottleneck rate limiter for rate-limited requests
+  // Throttles burst requests to respect Polygon's fair use policies
+  private bottleneck: Bottleneck;
+  
+  // LIGHTWEIGHT Bottleneck limiter for unlimited-mode scanners
+  // Prevents unlimited scans from overwhelming API with 429s
+  private unlimitedBottleneck: Bottleneck;
   
   // REST API response cache (short-lived, idempotent GETs only)
   private restApiCache: Map<string, { data: any; timestamp: number }> = new Map();
@@ -214,20 +128,63 @@ class PolygonService {
   private optionTradeHandlers: Map<string, (trade: PolygonOptionTradeMessage) => void> = new Map();
 
   constructor() {
-    // Use the main Polygon API key for WebSocket authentication
-    this.apiKey = process.env.POLYGON_API_KEY || '';
+    // Trim API key to remove whitespace that causes 401 errors
+    this.apiKey = (process.env.POLYGON_API_KEY || '').trim();
     
     if (!this.apiKey) {
       console.error('❌ POLYGON_API_KEY not found in environment variables');
     }
+
+    // Initialize STANDARD Bottleneck limiter for rate-limited requests
+    // - 200ms between requests (prevents burst overwhelming)
+    // - Max 5 concurrent requests
+    // - 100 calls/min reservoir (refills every minute)
+    this.bottleneck = new Bottleneck({
+      minTime: 200,              // 200ms minimum delay between requests
+      maxConcurrent: 5,          // Max 5 parallel requests
+      reservoir: 100,            // 100 calls per reservoir interval
+      reservoirRefreshAmount: 100,
+      reservoirRefreshInterval: 60 * 1000  // Refill every minute
+    });
+
+    // Initialize LIGHTWEIGHT Bottleneck limiter for unlimited-mode scanners
+    // - 300ms between requests (slower to prevent API overwhelm)
+    // - Max 2 concurrent requests (conservative for high-speed scans)
+    // - No reservoir (continuous rate limiting)
+    this.unlimitedBottleneck = new Bottleneck({
+      minTime: 300,              // 300ms minimum delay
+      maxConcurrent: 2,          // Max 2 parallel requests
+    });
+
+    console.log('🚀 Polygon service initialized with dual Bottleneck throttling');
+    console.log('  Standard: 200ms delay, 5 concurrent, 100/min reservoir');
+    console.log('  Unlimited: 300ms delay, 2 concurrent, no reservoir');
+  }
+
+  /**
+   * Get current rate limiter status (for circuit breaker logic)
+   * Returns Bottleneck telemetry
+   */
+  private getRateLimitStatus(): { callsUsed: number; callsRemaining: number; queuedCalls: number } {
+    const counts = this.bottleneck.counts();
+    const done = counts.DONE || 0;
+    const executing = counts.EXECUTING || 0;
+    const queued = counts.QUEUED || 0;
+    
+    return {
+      callsUsed: executing + done,
+      callsRemaining: Math.max(0, 100 - (executing + done)),
+      queuedCalls: queued
+    };
   }
 
   /**
    * Shared rate-limited request wrapper for all Polygon REST API calls
-   * - Uses Authorization Bearer header for proper authentication
-   * - Enforces 25 calls/minute rate limit globally (can be bypassed with unlimited flag)
+   * - Uses Bottleneck for burst throttling (200ms delay, 5 concurrent, 100/min reservoir)
+   * - Auto fallback: Bearer token → query param on 401 errors
    * - Retries with exponential backoff on 429/5xx errors
    * - Optional caching for idempotent GETs
+   * - Unlimited mode: Skips Bottleneck for premium scanners (Advanced Options Plan)
    */
   private async makeRateLimitedRequest<T>(
     url: string,
@@ -236,7 +193,7 @@ class PolygonService {
       timeout?: number;
       cacheTTL?: number; // Cache time-to-live in ms (0 = no cache)
       maxRetries?: number;
-      unlimited?: boolean; // Bypass rate limiter (Advanced Options Plan)
+      unlimited?: boolean; // Skip Bottleneck for high-speed scanners (Advanced Options Plan)
     } = {}
   ): Promise<T | null> {
     const {
@@ -256,21 +213,34 @@ class PolygonService {
       }
     }
 
-    // Retry loop with exponential backoff
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        // Acquire rate limit slot (waits if necessary) - skip if unlimited mode
-        if (!unlimited) {
-          await this.rateLimiter.acquire();
-        }
+    // Track if we should use query param auth (fallback from Bearer)
+    let useQueryAuth = false;
 
-        // Make the API call with proper Authorization header
-        const response = await axios.get(url, { 
+    // Helper function to make the actual HTTP request
+    const makeRequest = async () => {
+      if (useQueryAuth) {
+        // Fallback: Query param authentication
+        const separator = url.includes('?') ? '&' : '?';
+        return axios.get(`${url}${separator}apiKey=${this.apiKey}`, { timeout });
+      } else {
+        // Primary: Bearer token authentication
+        return axios.get(url, { 
           timeout,
           headers: {
             'Authorization': `Bearer ${this.apiKey}`
           }
         });
+      }
+    };
+
+    // Retry loop with exponential backoff
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        // UNLIMITED MODE: Use LIGHTWEIGHT Bottleneck (300ms, 2 concurrent, no reservoir)
+        // RATE-LIMITED MODE: Use STANDARD Bottleneck (200ms, 5 concurrent, 100/min reservoir)
+        const response = unlimited
+          ? await this.unlimitedBottleneck.schedule(makeRequest)
+          : await this.bottleneck.schedule(makeRequest);
 
         // Cache successful response if enabled
         if (method === 'GET' && cacheTTL > 0 && response.data) {
@@ -285,6 +255,28 @@ class PolygonService {
 
       } catch (error: any) {
         const status = error.response?.status;
+        
+        // Handle 401 auth errors with fallback to query param (NON-RETRYABLE after fallback)
+        if (status === 401 && !useQueryAuth && attempt === 1) {
+          console.log('⚠️ Bearer auth failed (401) - switching to query param auth');
+          useQueryAuth = true;
+          // Don't count this as a failed attempt - retry immediately with query param
+          attempt--;
+          continue;
+        }
+
+        // SHORT-CIRCUIT: 401/403 are non-retryable auth errors - don't spam retries
+        if (status === 401 || status === 403) {
+          console.error(`❌ Authentication/authorization error ${status} - skipping retries`);
+          return null;
+        }
+
+        // 404 is expected (resource not found)
+        if (status === 404) {
+          return null;
+        }
+
+        // Retryable errors: 429 rate limit and 5xx server errors
         const isRetryable = status === 429 || (status >= 500 && status < 600);
 
         if (isRetryable && attempt < maxRetries) {
@@ -298,15 +290,9 @@ class PolygonService {
           continue;
         }
 
-        // Non-retryable error or max retries exceeded
-        if (status === 404) {
-          return null; // Resource not found is expected
-        }
-        
+        // Max retries exceeded or non-retryable error
         if (status === 429) {
           console.error(`❌ Rate limit exceeded after ${maxRetries} retries`);
-        } else if (status === 401 || status === 403) {
-          console.error(`❌ Authentication/authorization error ${status}`);
         } else {
           console.error(`❌ API request failed:`, error.message);
         }
@@ -858,8 +844,6 @@ class PolygonService {
     }
 
     try {
-      await PolygonRateLimiter.getInstance().acquire();
-      
       // Use aggregates (bars) endpoint to get previous close data
       // Get yesterday's bar and today's bar (if available)
       const to = new Date().toISOString().split('T')[0]; // Today YYYY-MM-DD
@@ -983,39 +967,27 @@ class PolygonService {
    */
   async fetchAllTickers(): Promise<string[]> {
     const allTickers: string[] = [];
-    let nextUrl: string | null = 'https://api.polygon.io/v3/reference/tickers';
-    
-    const params = new URLSearchParams({
-      market: 'stocks',
-      type: 'CS', // Common Stock only (no ETFs, warrants, etc.)
-      active: 'true',
-      limit: '1000',
-      apiKey: this.apiKey
-    });
+    let baseUrl = 'https://api.polygon.io/v3/reference/tickers?market=stocks&type=CS&active=true&limit=1000';
 
     try {
       console.log('🔍 Fetching all active US stock tickers from Polygon...');
       
       // Fetch all pages (pagination)
-      while (nextUrl) {
-        const url: string = nextUrl.includes('?') ? nextUrl : `${nextUrl}?${params}`;
+      let currentUrl: string | null = baseUrl;
+      while (currentUrl) {
+        const data: any = await this.makeRateLimitedRequest<any>(currentUrl, {
+          timeout: 10000,
+          maxRetries: 3
+        });
         
-        const response: any = await axios.get(url);
-        const data: any = response.data;
-        
-        if (data.results && Array.isArray(data.results)) {
+        if (data?.results && Array.isArray(data.results)) {
           const tickers = data.results.map((ticker: any) => ticker.ticker);
           allTickers.push(...tickers);
           console.log(`📊 Fetched ${tickers.length} tickers (total: ${allTickers.length})`);
         }
         
-        // Get next page URL
-        nextUrl = data.next_url || null;
-        
-        // Avoid rate limiting
-        if (nextUrl) {
-          await new Promise(resolve => setTimeout(resolve, 200));
-        }
+        // Get next page URL (Bottleneck handles rate limiting automatically)
+        currentUrl = data?.next_url || null;
       }
       
       console.log(`✅ Total tickers fetched: ${allTickers.length}`);
@@ -1281,7 +1253,7 @@ class PolygonService {
     
     // Circuit breaker: Check Polygon rate limiter status (skip in unlimited mode)
     if (!unlimited) {
-      const limiterStatus = this.rateLimiter.getStatus();
+      const limiterStatus = this.getRateLimitStatus();
       const shouldUseAlphaVantage = limiterStatus.queuedCalls > 10 && alphaVantageService.isConfigured();
       
       if (shouldUseAlphaVantage) {
@@ -1304,7 +1276,7 @@ class PolygonService {
     
     // Try Polygon first
     try {
-      const url = `https://api.polygon.io/v2/aggs/ticker/${symbol}/range/${multiplier}/${timespan}/${from}/${to}?adjusted=true&sort=asc`;
+      const url = `https://api.polygon.io/v2/aggs/ticker/${symbol}/range/${multiplier}/${timespan}/${from}/${to}?adjusted=true&sort=asc&limit=50000`;
       
       const data = await this.makeRateLimitedRequest<any>(url, {
         timeout: 10000,
@@ -1658,54 +1630,47 @@ class PolygonService {
     sort: string;
     order: string;
   }): Promise<any[]> {
-    const apiKey = process.env.POLYGON_API_KEY;
-    if (!apiKey) {
+    if (!this.apiKey) {
       throw new Error('No Polygon API key configured');
     }
 
-    await this.rateLimiter.acquire();
-    
     const url = `https://api.polygon.io/v3/reference/tickers?market=${params.market}&type=${params.type}&limit=${params.limit}&sort=${params.sort}&order=${params.order}`;
     
     try {
-      const response = await axios.get(url, { 
+      const data = await this.makeRateLimitedRequest<any>(url, {
         timeout: 10000,
-        headers: {
-          'Authorization': `Bearer ${apiKey}`
-        }
+        maxRetries: 3
       });
-      return response.data.results || [];
+      return data?.results || [];
     } catch (error: any) {
-      console.error('Error fetching top tickers from Polygon:', error.response?.data || error.message);
+      console.error('Error fetching top tickers from Polygon:', error.message);
       throw error; // Re-throw so caller can handle
     }
   }
 
   /**
    * Get options snapshot for a ticker
+   * @param ticker Stock symbol
+   * @param unlimited Skip Bottleneck throttling for high-speed scanners (Advanced Options Plan)
    */
-  async getOptionsSnapshot(ticker: string): Promise<any> {
+  async getOptionsSnapshot(ticker: string, unlimited: boolean = false): Promise<any> {
     try {
-      const apiKey = process.env.POLYGON_API_KEY;
-      if (!apiKey) {
-        console.warn('No Polygon API key configured');
+      if (!this.apiKey) {
+        console.warn('⚠️ No Polygon API key configured');
         return null;
       }
 
-      await this.rateLimiter.acquire();
+      const url = `https://api.polygon.io/v3/snapshot/options/${ticker}?limit=250`;
       
-      const url = `https://api.polygon.io/v3/snapshot/options/${ticker}`;
-      
-      const response = await axios.get(url, { 
+      const data = await this.makeRateLimitedRequest<any>(url, {
         timeout: 10000,
-        headers: {
-          'Authorization': `Bearer ${apiKey}`
-        }
+        maxRetries: 3,
+        unlimited: unlimited
       });
       
-      return response.data;
+      return data;
     } catch (error: any) {
-      console.error(`Error fetching options snapshot for ${ticker}:`, error.message);
+      console.error(`❌ Error fetching options snapshot for ${ticker}:`, error.message);
       return null;
     }
   }
@@ -1730,26 +1695,21 @@ class PolygonService {
     openInterest: number;
   } | null> {
     try {
-      const apiKey = process.env.POLYGON_API_KEY;
-      if (!apiKey) {
+      if (!this.apiKey) {
         console.warn('⚠️ No Polygon API key configured');
         return null;
       }
 
-      await this.rateLimiter.acquire();
-      
       // Get options snapshot for the underlying symbol
       const today = new Date().toISOString().split('T')[0];
       const url = `https://api.polygon.io/v3/snapshot/options/${symbol}?expiration_date.gte=${today}&contract_type=${optionType}&order=volume&sort=desc&limit=5`;
       
-      const response = await axios.get(url, { 
+      const data = await this.makeRateLimitedRequest<any>(url, {
         timeout: 10000,
-        headers: {
-          'Authorization': `Bearer ${apiKey}`
-        }
+        maxRetries: 3
       });
       
-      const topOption = response.data.results?.[0];
+      const topOption = data?.results?.[0];
       
       if (!topOption || !topOption.details || !topOption.greeks) {
         console.warn(`⚠️ No options data available for ${symbol}`);
@@ -1789,25 +1749,20 @@ class PolygonService {
     isUnusual: boolean; // true if ratio > 3
   } | null> {
     try {
-      const apiKey = process.env.POLYGON_API_KEY;
-      if (!apiKey) {
+      if (!this.apiKey) {
         console.warn('⚠️ No Polygon API key configured');
         return null;
       }
 
-      await this.rateLimiter.acquire();
-      
       // Get current options snapshot
       const today = new Date().toISOString().split('T')[0];
       const url = `https://api.polygon.io/v3/snapshot/options/${symbol}?expiration_date.gte=${today}&contract_type=${optionType}&order=volume&sort=desc&limit=1`;
       
-      const response = await axios.get(url, { 
+      const data = await this.makeRateLimitedRequest<any>(url, {
         timeout: 10000,
-        headers: {
-          'Authorization': `Bearer ${apiKey}`
-        }
+        maxRetries: 3
       });
-      const topOption = response.data.results?.[0];
+      const topOption = data?.results?.[0];
       
       if (!topOption || !topOption.day) {
         console.warn(`⚠️ No options data for unusual volume check: ${symbol}`);
@@ -1849,14 +1804,11 @@ class PolygonService {
     iv52WeekHigh: number;
   } | null> {
     try {
-      const apiKey = process.env.POLYGON_API_KEY;
-      if (!apiKey) {
+      if (!this.apiKey) {
         console.warn('⚠️ No Polygon API key configured');
         return null;
       }
 
-      await this.rateLimiter.acquire();
-      
       // Get 52-week date range
       const endDate = new Date().toISOString().split('T')[0];
       const startDate = new Date();
@@ -1867,13 +1819,11 @@ class PolygonService {
       // Note: Direct historical IV data is limited - using aggregate price volatility as proxy
       const url = `https://api.polygon.io/v2/aggs/ticker/${symbol}/range/1/day/${startDateStr}/${endDate}?adjusted=true&sort=asc&limit=365`;
       
-      const response = await axios.get(url, { 
+      const data = await this.makeRateLimitedRequest<any>(url, {
         timeout: 10000,
-        headers: {
-          'Authorization': `Bearer ${apiKey}`
-        }
+        maxRetries: 3
       });
-      const bars = response.data.results || [];
+      const bars = data?.results || [];
       
       if (bars.length < 30) {
         console.warn(`⚠️ Insufficient historical data for IV percentile: ${symbol}`);
