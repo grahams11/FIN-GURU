@@ -176,53 +176,11 @@ export class EliteScanner {
     try {
       // OVERNIGHT MODE — REAL ANALYSIS WITH EOD + OVERNIGHT AGGS
       if (isOvernight) {
-        let overnightSetup = await overnightDataFetcher.getOvernightSetup(symbol);
-        
-        // HISTORICAL FALLBACK: If EOD cache empty, pull last day's data directly
-        if (!overnightSetup || !overnightSetup.data) {
-          console.log(`📊 ${symbol}: No EOD cache, pulling historical data...`);
-          try {
-            const from = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-            const to = new Date().toISOString().split('T')[0];
-            const histData = await polygonService.getAggregates(symbol, 1, 'day', from, to, 50);
-            
-            if (histData && histData.length > 0) {
-              const latest = histData[histData.length - 1];
-              const chain = await polygonService.getOptionsChain(symbol);
-              overnightSetup = {
-                data: {
-                  eodSnapshot: {
-                    symbol,
-                    high: latest.h,
-                    low: latest.l,
-                    close: latest.c,
-                    volume: latest.v,
-                    timestamp: latest.t,
-                    date: new Date(latest.t).toISOString().split('T')[0]
-                  },
-                  overnightBars: histData.slice(-20).map((d: any) => ({
-                    time: d.t,
-                    open: d.o,
-                    high: d.h,
-                    low: d.l,
-                    close: d.c,
-                    volume: d.v
-                  })),
-                  overnightHigh: Math.max(...histData.slice(-5).map((d: any) => d.h)),
-                  overnightLow: Math.min(...histData.slice(-5).map((d: any) => d.l))
-                },
-                chain
-              };
-              console.log(`✅ ${symbol}: Historical fallback successful (${histData.length} bars)`);
-            }
-          } catch (err) {
-            console.log(`❌ ${symbol}: Historical fallback failed`);
-            return null;
-          }
-        }
+        const overnightSetup = await overnightDataFetcher.getOvernightSetup(symbol);
         
         // Validation: Need EOD snapshot, overnight bars, and option chain
         if (!overnightSetup || !overnightSetup.data || !overnightSetup.chain) {
+          // EOD cache is populated daily at 3 PM CST - will be available after first market close
           return null;
         }
         
@@ -266,15 +224,15 @@ export class EliteScanner {
         const passedFilters: string[] = [];
         let optionType: 'call' | 'put' | null = null;
         
-        // Filter 1: RSI Signal (Loosened: 50/50 for overnight detection)
-        if (rsi < 50) {
+        // Filter 1: RSI Signal (Asymmetric: 45/55 to avoid neutral zone)
+        if (rsi < 45) {
           optionType = 'call';
           passedFilters.push(`RSI Oversold ${rsi.toFixed(1)}`);
-        } else if (rsi > 50) {
+        } else if (rsi > 55) {
           optionType = 'put';
           passedFilters.push(`RSI Overbought ${rsi.toFixed(1)}`);
         } else {
-          console.log(`❌ ${symbol}: Neutral RSI ${rsi.toFixed(1)}`);
+          console.log(`❌ ${symbol}: Neutral RSI ${rsi.toFixed(1)} (need <45 or >55)`);
           return null; // Neutral RSI, skip
         }
         
