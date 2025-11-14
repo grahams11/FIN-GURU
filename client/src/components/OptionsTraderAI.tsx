@@ -107,20 +107,6 @@ export function OptionsTraderAI({ insights, trades, isLoading, liveQuotes }: Opt
         </Button>
       </div>
 
-      {/* Important Notice */}
-      <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-4 mb-6">
-        <div className="flex items-start space-x-3">
-          <Lightbulb className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
-          <div>
-            <p className="text-sm font-semibold text-amber-500 mb-1">Important: Premium Estimates</p>
-            <p className="text-xs text-muted-foreground">
-              Premium prices are calculated using the Black-Scholes model and may differ from your broker's actual prices. 
-              <strong className="text-foreground"> Always verify costs with your broker before trading.</strong>
-            </p>
-          </div>
-        </div>
-      </div>
-
       {/* AI Analysis Summary */}
       <div className="bg-secondary rounded-lg p-4 mb-6">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
