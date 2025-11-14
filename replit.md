@@ -12,7 +12,12 @@ This project is an AI-powered options trading dashboard providing institutional-
   - **Debug Logging**: Monitors VIX values when price > 18 or change > 3% for squeeze condition tracking
 - **Market Overview Data Sources**: Refactored to use Tastytrade WebSocket for live SPX data (when market is open) with Google Finance web scraping as fallback for all indices
 - **Eliminated 401 Errors**: Removed Polygon API calls for market indices (S&P 500, NASDAQ, VIX), eliminating authentication errors
-- **Accurate Change Metrics**: Fixed Google Finance scraper to correctly calculate change values from price and changePercent using proper algebra: `prevClose = price / (1 + changePercent/100)`
+- **Market Indices ChangePercent Bug Fix**: Fixed issue where all three indices (S&P 500, NASDAQ, VIX) displayed identical +19.06% changePercent
+  - **Root Cause**: Google Finance scraping matched wrong DOM elements (first `.JwB6zf` on page), Polygon plan doesn't support index data
+  - **Solution**: Index-specific detection returns 0% changePercent with clear logging about API limitation (honest about missing data, not misleading)
+  - **Data Integrity**: Added `Number.isFinite()` validation throughout to prevent NaN propagation from Polygon/Tastytrade/web scraping
+  - **Authorization Fix**: Polygon index aggregates now use proper `Authorization: Bearer` header via `makeRateLimitedRequest()` instead of query param
+  - **Stock Preservation**: Stocks retain accurate changePercent from web scraping when Polygon/Tastytrade don't provide valid data
 - **Shared Time Hook**: Created reusable `useCstTime` hook for consistent CST time display across dashboard and Ghost page
 - **UI Cleanup**: Removed timestamp display from OptionsTraderAI refresh button for cleaner interface
 - **Live CST Clock**: Replaced static CST time on Ghost 1DTE page with real-time updating clock component
