@@ -12,6 +12,7 @@ import { portfolioAnalysisEngine } from "./services/portfolioAnalysisEngine";
 import { Ghost1DTEService } from "./services/ghost1DTE";
 import { timeService } from "./services/timeService";
 import { marketStatusService } from "./services/marketStatusService";
+import { dailyIndexCache } from "./cache/DailyIndexCache";
 import { insertMarketDataSchema, insertOptionsTradeSchema, insertAiInsightsSchema, insertPortfolioPositionSchema, type OptionsTrade } from "@shared/schema";
 import { formatOptionSymbol, toPolygonSubscriptionTopic, toTastytradeOptionSymbol } from "./utils/optionSymbols";
 
@@ -367,53 +368,95 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       console.log('Fetching market overview...');
       
-      // Data Source Strategy:
-      // 1. SPX: Tastytrade (when market open) → Google Finance (fallback)
-      // 2. NASDAQ/VIX: Google Finance only (Tastytrade doesn't support these indices)
       const isMarketOpen = marketStatusService.isMarketOpen();
       
-      // Always get Google Finance data as baseline (now with accurate change values)
-      const scrapedData = await WebScraperService.scrapeMarketIndices();
+      // Get current trading date (YYYY-MM-DD format)
+      const cstTime = await timeService.getCurrentTime();
+      const tradingDate = cstTime.toISOString().split('T')[0];
       
-      // Try to enhance SPX with live Tastytrade data if market is open
-      let sp500Data = scrapedData.sp500;
-      if (isMarketOpen) {
-        try {
-          const spxQuote = await tastytradeService.getFuturesQuote('SPX');
-          if (spxQuote && spxQuote.price > 0) {
-            // Derive previous close from scraped data (now accurate since scraper calculates change)
-            const prevClose = scrapedData.sp500.price - scrapedData.sp500.change;
-            
-            // Guard against invalid prevClose
-            if (prevClose > 0) {
-              // Recalculate change metrics based on live price vs. previous close
-              const change = spxQuote.price - prevClose;
-              const changePercent = (change / prevClose) * 100;
-              
-              console.log(`✅ SPX from Tastytrade (live): $${spxQuote.price} (${changePercent.toFixed(2)}%)`);
-              
-              sp500Data = {
-                symbol: '^GSPC',
-                price: spxQuote.price,
-                change: parseFloat(change.toFixed(2)),
-                changePercent: parseFloat(changePercent.toFixed(2))
-              };
-            } else {
-              console.log('⚠️ Invalid prevClose, using Google Finance data');
-            }
-          } else {
-            console.log('⚠️ Tastytrade SPX unavailable, using Google Finance data');
+      // Clear stale cache entries for previous trading days
+      dailyIndexCache.clearOldData(tradingDate);
+      
+      // Index symbols to process
+      const indices = [
+        { symbol: '^GSPC', name: 'S&P 500' },
+        { symbol: '^IXIC', name: 'NASDAQ' },
+        { symbol: '^VIX', name: 'VIX' }
+      ];
+      
+      // Hydrate cache with Google Finance snapshots if missing open prices
+      for (const {symbol} of indices) {
+        const cached = dailyIndexCache.get(symbol);
+        if (!cached || cached.tradingDate !== tradingDate) {
+          console.log(`📊 ${symbol}: Fetching Google Finance snapshot to populate cache...`);
+          const snapshot = await WebScraperService.getGoogleIndexSnapshot(symbol);
+          
+          // Set open price (required for changePercent calculation)
+          if (snapshot.open !== null) {
+            dailyIndexCache.setOpenPrice(symbol, snapshot.open, tradingDate);
+          } else if (snapshot.previousClose !== null) {
+            // Fallback: use previous close as open if open not available yet
+            console.log(`⚠️ ${symbol}: Using previous close as open (market may not have opened yet)`);
+            dailyIndexCache.setOpenPrice(symbol, snapshot.previousClose, tradingDate);
           }
-        } catch (error) {
-          console.log('⚠️ Tastytrade SPX error, using Google Finance data:', error instanceof Error ? error.message : 'Unknown error');
+          
+          // Set close price if market is closed and we have close data
+          if (!isMarketOpen && snapshot.close !== null) {
+            dailyIndexCache.setClosePrice(symbol, snapshot.close, tradingDate);
+          }
         }
       }
       
+      // Get current prices and calculate changePercent using cache
+      // S&P 500: Try Tastytrade (live) → Google Finance (fallback)
+      let sp500Price: number;
+      try {
+        if (isMarketOpen) {
+          const spxQuote = await tastytradeService.getFuturesQuote('SPX');
+          if (spxQuote && spxQuote.price > 0) {
+            sp500Price = spxQuote.price;
+            console.log(`✅ SPX from Tastytrade (live): $${sp500Price.toFixed(2)}`);
+          } else {
+            const snapshot = await WebScraperService.getGoogleIndexSnapshot('^GSPC');
+            sp500Price = snapshot.last || 0;
+            console.log(`✅ SPX from Google Finance: $${sp500Price.toFixed(2)}`);
+          }
+        } else {
+          const snapshot = await WebScraperService.getGoogleIndexSnapshot('^GSPC');
+          sp500Price = snapshot.last || 0;
+        }
+      } catch (error) {
+        console.log('⚠️ SPX fetch error, using fallback');
+        const snapshot = await WebScraperService.getGoogleIndexSnapshot('^GSPC');
+        sp500Price = snapshot.last || 0;
+      }
+      
+      // NASDAQ & VIX: Google Finance only
+      const nasdaqSnapshot = await WebScraperService.getGoogleIndexSnapshot('^IXIC');
+      const vixSnapshot = await WebScraperService.getGoogleIndexSnapshot('^VIX');
+      
+      const nasdaqPrice = nasdaqSnapshot.last || 0;
+      const vixPrice = vixSnapshot.last || 0;
+      
+      // Calculate changePercent using cached open prices
+      const sp500ChangePercent = dailyIndexCache.calculateChangePercent('^GSPC', sp500Price, isMarketOpen) || 0;
+      const nasdaqChangePercent = dailyIndexCache.calculateChangePercent('^IXIC', nasdaqPrice, isMarketOpen) || 0;
+      const vixChangePercent = dailyIndexCache.calculateChangePercent('^VIX', vixPrice, isMarketOpen) || 0;
+      
+      // Calculate change values
+      const sp500Cached = dailyIndexCache.get('^GSPC');
+      const nasdaqCached = dailyIndexCache.get('^IXIC');
+      const vixCached = dailyIndexCache.get('^VIX');
+      
+      const sp500Change = sp500Cached ? sp500Price - sp500Cached.openPrice : 0;
+      const nasdaqChange = nasdaqCached ? nasdaqPrice - nasdaqCached.openPrice : 0;
+      const vixChange = vixCached ? vixPrice - vixCached.openPrice : 0;
+      
       // Build final market data
       const marketData = {
-        sp500: sp500Data,
-        nasdaq: scrapedData.nasdaq,
-        vix: scrapedData.vix
+        sp500: { symbol: '^GSPC', price: sp500Price, change: sp500Change, changePercent: sp500ChangePercent },
+        nasdaq: { symbol: '^IXIC', price: nasdaqPrice, change: nasdaqChange, changePercent: nasdaqChangePercent },
+        vix: { symbol: '^VIX', price: vixPrice, change: vixChange, changePercent: vixChangePercent }
       };
       
       // Calculate AI sentiment score
