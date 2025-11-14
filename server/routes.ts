@@ -11,6 +11,7 @@ import { exitAnalysisService } from "./services/exitAnalysis";
 import { portfolioAnalysisEngine } from "./services/portfolioAnalysisEngine";
 import { Ghost1DTEService } from "./services/ghost1DTE";
 import { timeService } from "./services/timeService";
+import { marketStatusService } from "./services/marketStatusService";
 import { insertMarketDataSchema, insertOptionsTradeSchema, insertAiInsightsSchema, insertPortfolioPositionSchema, type OptionsTrade } from "@shared/schema";
 import { formatOptionSymbol, toPolygonSubscriptionTopic, toTastytradeOptionSymbol } from "./utils/optionSymbols";
 
@@ -456,7 +457,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Simple CST time and market status endpoint
   app.get('/api/time', async (req, res) => {
     try {
-      const cstTime = timeService.getCurrentCSTTime();
+      const cstTime = await timeService.getCurrentTime();
       const isOpen = marketStatusService.isMarketOpen();
       
       res.json({
