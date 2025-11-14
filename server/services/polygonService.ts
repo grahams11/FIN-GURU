@@ -1877,6 +1877,48 @@ class PolygonService {
   }
 
   /**
+   * Get option contract snapshot for exit monitoring
+   * @param optionTicker - Polygon option ticker format (e.g., O:AAPL251121C00150000)
+   */
+  async getOptionSnapshot(optionTicker: string): Promise<{
+    last: number | null;
+    bid: number | null;
+    ask: number | null;
+    midpoint: number | null;
+  } | null> {
+    try {
+      if (!this.apiKey) {
+        console.warn('⚠️ No Polygon API key configured');
+        return null;
+      }
+
+      // Use /v3/snapshot/{optionTicker} for specific contract
+      const url = `https://api.polygon.io/v3/snapshot/options/${encodeURIComponent(optionTicker)}`;
+      
+      const data = await this.makeRateLimitedRequest<any>(url, {
+        timeout: 10000,
+        maxRetries: 3
+      });
+      
+      if (!data || !data.results || data.results.status !== 'OK') {
+        console.warn(`⚠️ No snapshot data for ${optionTicker}`);
+        return null;
+      }
+
+      const snapshot = data.results;
+      const last = snapshot.day?.last_quote?.last_price || null;
+      const bid = snapshot.last_quote?.bid || null;
+      const ask = snapshot.last_quote?.ask || null;
+      const midpoint = (bid && ask) ? (bid + ask) / 2 : null;
+
+      return { last, bid, ask, midpoint };
+    } catch (error: any) {
+      console.error(`❌ Failed to get option snapshot for ${optionTicker}:`, error.message);
+      return null;
+    }
+  }
+
+  /**
    * Close WebSocket connection
    */
   async close(): Promise<void> {

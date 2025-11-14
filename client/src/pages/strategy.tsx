@@ -22,6 +22,12 @@ interface StrategyMetrics {
   avgROI: number;
   profitFactor: number;
   totalTrades: number;
+  openTrades: number;
+  closedTrades: number;
+  wins: number;
+  losses: number;
+  totalProfit: number;
+  totalLoss: number;
   activeStrategyVersion: string;
   parameters: {
     rsiOversold: number;

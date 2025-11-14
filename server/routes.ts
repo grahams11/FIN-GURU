@@ -1659,14 +1659,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Get elite strategy performance metrics
   app.get('/api/strategy/metrics', async (req, res) => {
     try {
+      const { strategyMetricsService } = await import('./services/strategyMetrics');
       const { RecommendationTracker } = await import('./services/recommendationTracker');
       
-      const days = parseInt(req.query.days as string) || 30;
-      const metrics = await RecommendationTracker.getRecentWinRate(days);
+      // Get active parameters to filter metrics by strategy version
       const activeParams = await RecommendationTracker.getActiveParameters();
       
+      // Use SQL-aggregated metrics filtered by active strategy version
+      const metrics = await strategyMetricsService.calculateMetrics(activeParams?.version);
+      
       res.json({
-        ...metrics,
+        winRate: metrics.winRate,
+        avgROI: metrics.avgROI,
+        profitFactor: metrics.profitFactor,
+        totalTrades: metrics.totalTrades,
+        openTrades: metrics.openTrades,
+        closedTrades: metrics.closedTrades,
+        wins: metrics.wins,
+        losses: metrics.losses,
+        totalProfit: metrics.totalProfit,
+        totalLoss: metrics.totalLoss,
         activeStrategyVersion: activeParams?.version || 'v1.0.0',
         parameters: activeParams ? {
           rsiOversold: activeParams.rsiOversold,

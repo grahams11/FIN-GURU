@@ -110,7 +110,7 @@ export class RecommendationTracker {
     // Calculate actual performance
     const actualROI = ((outcome.exitPremium - rec.premium) / rec.premium) * 100;
     const actualProfit = (outcome.exitPremium - rec.premium) * rec.contracts * 100;
-    const holdDays = Math.floor((outcome.exitDate.getTime() - new Date(rec.recommendedAt).getTime()) / (1000 * 60 * 60 * 24));
+    const holdDays = Math.floor((outcome.exitDate.getTime() - new Date(rec.recommendedAt || new Date()).getTime()) / (1000 * 60 * 60 * 24));
     
     // Determine win/loss based on outcome
     const isWin = actualROI >= (rec.parameters as any).profitTarget * 100; // Hit profit target
