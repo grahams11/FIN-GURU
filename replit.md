@@ -4,7 +4,12 @@ This project is an AI-powered options trading dashboard providing institutional-
 
 # Recent Changes
 
-## November 14, 2025 - Market Data Routing & UI Enhancements
+## November 14, 2025 - VIX Squeeze Kill Switch & Market Data Enhancements
+- **VIX Squeeze Kill Switch**: Real-time alert system detecting high-confidence 0DTE PUT opportunities when VIX >= 20 with >5% change
+  - **Detection Logic**: Server-side monitoring checks `VIX >= 20 && |changePercent| > 5` on every market overview request
+  - **Alert UI**: Red pulsing banner displays "BUY SPY 0DTE PUT" with 94.1% confidence rating, VIX metrics, entry window (NOW - 3:00 PM CST), exit time (9:30 AM next day)
+  - **Auto-Refresh**: Component polls every 5 seconds for live alert status updates
+  - **Debug Logging**: Monitors VIX values when price > 18 or change > 3% for squeeze condition tracking
 - **Market Overview Data Sources**: Refactored to use Tastytrade WebSocket for live SPX data (when market is open) with Google Finance web scraping as fallback for all indices
 - **Eliminated 401 Errors**: Removed Polygon API calls for market indices (S&P 500, NASDAQ, VIX), eliminating authentication errors
 - **Accurate Change Metrics**: Fixed Google Finance scraper to correctly calculate change values from price and changePercent using proper algebra: `prevClose = price / (1 + changePercent/100)`
@@ -73,6 +78,12 @@ Preferred communication style: Simple, everyday language.
 - **Financial Calculations**: Black-Scholes for options Greeks and pricing.
 - **Trade Budget**: $1000 maximum per trade with smart contract allocation.
 - **Fibonacci Retracement Validation**: Validates entry points using Fibonacci levels with fractal swing detection.
+- **VIX Squeeze Kill Switch**: Real-time alert system for high-confidence 0DTE PUT trades
+  - **Detection Criteria**: VIX >= 20 AND |changePercent| > 5%
+  - **Alert UI**: Red pulsing banner with "BUY SPY 0DTE PUT", 94.1% confidence, VIX metrics, entry/exit windows
+  - **Auto-Refresh**: 5-second polling of `/api/market-overview` for live alert status
+  - **Trading Strategy**: Entry NOW through 3:00 PM CST, exit 9:30 AM next day
+  - **Debug Monitoring**: Logs VIX values when price > 18 or change > 3%
 - **Dashboard Market Overview**: Displays real-time S&P 500, NASDAQ, and VIX metrics using hierarchical data sources
   - **SPX**: Tastytrade WebSocket (when market open) → Google Finance scraping (fallback)
   - **NASDAQ/VIX**: Google Finance scraping only (Tastytrade doesn't support these indices)
