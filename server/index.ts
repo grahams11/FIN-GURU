@@ -71,8 +71,8 @@ app.use((req, res, next) => {
   await EliteStrategyEngine.getInstance().loadParametersFromDatabase();
   console.log('✅ Elite Strategy Engine ready with active parameters');
   
-  // Start Ghost 1DTE Scheduler (auto-triggers in 3:00-4:00pm EST window)
-  GhostScheduler.start();
+  // DISABLED: Ghost 1DTE Scheduler (causing API rate limits with 500+ S&P requests)
+  // GhostScheduler.start();
   
   // Start Recommendation Auto-Refresh Service (15min interval during market hours)
   const { RecommendationRefreshService } = await import('./services/recommendationRefreshService');
@@ -83,9 +83,8 @@ app.use((req, res, next) => {
   eodCacheService.startScheduler();
   console.log('✅ EOD Cache scheduler started - daily snapshot at 3:00 PM CST');
   
-  // 24/7 AUTO-SCAN — RUN BOTH SCANNERS EVERY 5 MINUTES
+  // 24/7 AUTO-SCAN — ELITE SCANNER ONLY (Ghost disabled to prevent API rate limits)
   const { eliteScanner } = await import('./services/eliteScanner');
-  const { Ghost1DTEService } = await import('./services/ghost1DTE');
   
   let isAutoScanRunning = false;
   
@@ -100,42 +99,15 @@ app.use((req, res, next) => {
     const startTime = Date.now();
     
     try {
-      console.log('🔄 24/7 AUTO-SCAN — Running Elite + Ghost scanners...');
-      const [eliteResults, ghostResults] = await Promise.allSettled([
-        eliteScanner.scan(),
-        Ghost1DTEService.scan()
-      ]);
-      
-      // Check Elite scanner results
-      let elitePlays = 0;
-      let eliteError = false;
-      if (eliteResults.status === 'fulfilled') {
-        elitePlays = eliteResults.value.results?.length || 0;
-      } else {
-        eliteError = true;
-        console.error('❌ Elite scanner failed:', eliteResults.reason?.message || eliteResults.reason);
-      }
-      
-      // Check Ghost scanner results
-      let ghostPlays = 0;
-      let ghostError = false;
-      if (ghostResults.status === 'fulfilled') {
-        ghostPlays = ghostResults.value.topPlays?.length || 0;
-      } else {
-        ghostError = true;
-        console.error('❌ Ghost scanner failed:', ghostResults.reason?.message || ghostResults.reason);
-      }
+      console.log('🔄 24/7 AUTO-SCAN — Running Elite scanner...');
+      const results = await eliteScanner.scan();
       
       const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+      const elitePlays = results.results?.length || 0;
       
-      // Only log success if both scanners completed
-      if (!eliteError && !ghostError) {
-        console.log(`✅ 24/7 AUTO-SCAN complete (${duration}s) — Elite: ${elitePlays} plays, Ghost: ${ghostPlays} plays`);
-      } else {
-        console.warn(`⚠️ 24/7 AUTO-SCAN partial failure (${duration}s) — Elite: ${eliteError ? 'FAILED' : `${elitePlays} plays`}, Ghost: ${ghostError ? 'FAILED' : `${ghostPlays} plays`}`);
-      }
+      console.log(`✅ Elite Scanner complete (${duration}s) — ${elitePlays} plays found`);
     } catch (error: any) {
-      console.error('❌ 24/7 AUTO-SCAN fatal error:', error.message);
+      console.error('❌ Elite Scanner failed:', error.message);
     } finally {
       isAutoScanRunning = false;
     }
