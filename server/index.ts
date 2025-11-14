@@ -89,7 +89,7 @@ app.use((req, res, next) => {
         Ghost1DTEService.scan()
       ]);
       
-      const elitePlays = eliteResults.status === 'fulfilled' ? eliteResults.value.plays?.length || 0 : 0;
+      const elitePlays = eliteResults.status === 'fulfilled' ? eliteResults.value.results?.length || 0 : 0;
       const ghostPlays = ghostResults.status === 'fulfilled' ? ghostResults.value.topPlays?.length || 0 : 0;
       
       console.log(`✅ 24/7 AUTO-SCAN complete — Elite: ${elitePlays} plays, Ghost: ${ghostPlays} plays`);
