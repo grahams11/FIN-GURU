@@ -68,14 +68,12 @@ export class TradeExitMonitor {
     const hoursUntil = Math.floor(msUntilNextRun / (1000 * 60 * 60));
     const minutesUntil = Math.floor((msUntilNextRun % (1000 * 60 * 60)) / (1000 * 60));
     
-    // Convert to JS Date for verification logs
-    const targetUTC = targetET.toJSDate();
+    // Convert to CST for user-friendly display
+    const targetCST = targetET.setZone('America/Chicago');
     
-    // Log scheduling with verification
-    console.log(`🚀 TradeExitMonitor: Next run scheduled for:`);
-    console.log(`   📅 ET time: ${targetET.toFormat('yyyy-MM-dd HH:mm:ss ZZZZ')}`);
-    console.log(`   🌍 UTC time: ${targetET.toUTC().toFormat('yyyy-MM-dd HH:mm:ss')}`);
-    console.log(`   ⏱️  In: ${hoursUntil}h ${minutesUntil}m (${msUntilNextRun}ms)`);
+    // Log scheduling in CST (4:15 PM ET = 3:15 PM CST)
+    console.log(`🚀 TradeExitMonitor: Next run scheduled for ${targetCST.toFormat('h:mm a')} CST (${targetCST.toFormat('MMM d, yyyy')})`);
+    console.log(`   ⏱️  In: ${hoursUntil}h ${minutesUntil}m`);
 
     this.monitoringTimeout = setTimeout(() => {
       this.runDailyCheck();
