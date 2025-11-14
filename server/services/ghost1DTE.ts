@@ -2,6 +2,7 @@ import { polygonService } from './polygonService';
 import { tastytradeService } from './tastytradeService';
 import { BlackScholesCalculator } from './financialCalculations';
 import sp500Data from '../data/sp500.json';
+import { TimeUtils } from './timeUtils';
 
 /**
  * 1DTE OVERNIGHT GHOST SCANNER (GROK PHASE 4 + S&P 500 EXPANSION)
@@ -111,6 +112,8 @@ interface GhostScanResult {
   contractsAnalyzed: number;
   contractsFiltered: number;
   timestamp: string;
+  isOvernight?: boolean; // True if scanned during overnight hours
+  overnightAlert?: string; // Alert message for overnight setups
 }
 
 /**
@@ -699,13 +702,19 @@ export class Ghost1DTEService {
     console.log(`🎯 Top plays: ${topPlays.length}`);
     console.log(`============================================\n`);
     
+    const isOvernight = TimeUtils.isOvernightHours();
+    
     return {
       topPlays,
       scanTime,
       apiCalls,
       contractsAnalyzed: allContracts.length,
       contractsFiltered: scoredContracts.length,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      isOvernight,
+      overnightAlert: isOvernight && topPlays.length > 0
+        ? `${topPlays.length} overnight 1DTE setup${topPlays.length > 1 ? 's' : ''} detected - VALIDATE AT 2:00 PM CST`
+        : undefined
     };
   }
   

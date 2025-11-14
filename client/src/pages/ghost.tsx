@@ -182,7 +182,7 @@ export default function GhostScanner() {
       const data: GhostScanResult = await response.json();
       
       setScanResult(data);
-      setLastScanTime(new Date().toLocaleTimeString('en-US', { timeZone: 'America/New_York' }));
+      setLastScanTime(new Date().toLocaleTimeString('en-US', { timeZone: 'America/Chicago' }));
     } catch (error) {
       console.error('Ghost scan failed:', error);
     } finally {

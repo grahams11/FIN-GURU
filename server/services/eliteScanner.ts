@@ -18,6 +18,7 @@ import { EliteStrategyEngine } from './eliteStrategyEngine';
 import { marketStatusService } from './marketStatusService';
 import { polygonService } from './polygonService';
 import { batchDataService } from './batchDataService';
+import { TimeUtils } from './timeUtils';
 
 export interface EliteScanResult {
   symbol: string;
@@ -83,12 +84,15 @@ export class EliteScanner {
     marketStatus: 'open' | 'closed';
     scannedSymbols: number;
     isLive: boolean;
+    isOvernight: boolean;
     scanDuration: number;
+    overnightAlert?: string;
   }> {
     const startTime = Date.now();
     const marketContext = liveDataAdapter.getMarketContext();
+    const isOvernight = TimeUtils.isOvernightHours();
     
-    console.log(`🔍 Starting Elite Scanner (${marketContext.isLive ? 'LIVE' : 'HISTORICAL'} data)...`);
+    console.log(`🔍 Starting Elite Scanner (${isOvernight ? 'OVERNIGHT' : marketContext.isLive ? 'LIVE' : 'HISTORICAL'} data)...`);
     
     // Load strategy parameters
     await this.strategyEngine.loadParametersFromDatabase();
@@ -140,7 +144,11 @@ export class EliteScanner {
       marketStatus: marketContext.marketStatus as 'open' | 'closed',
       scannedSymbols: allStocks.length,
       isLive: marketContext.isLive,
-      scanDuration
+      isOvernight,
+      scanDuration,
+      overnightAlert: isOvernight && topResults.length > 0
+        ? `${topResults.length} overnight setup${topResults.length > 1 ? 's' : ''} detected - WATCH AT 8:30 AM CST`
+        : undefined
     };
   }
   

@@ -1353,6 +1353,58 @@ class PolygonService {
   }
 
   /**
+   * Get minute-level aggregates for overnight scanning
+   * Used by overnight scanner to detect breakouts during extended hours
+   * 
+   * @param symbol Stock symbol
+   * @param from Start datetime (YYYY-MM-DD HH:MM:SS)
+   * @param to End datetime (YYYY-MM-DD HH:MM:SS)
+   * @param unlimited Bypass rate limiter for overnight scanning
+   * @returns Array of 1-minute bars or null on error
+   */
+  async getMinuteAggregates(
+    symbol: string,
+    from: string,
+    to: string,
+    unlimited: boolean = false
+  ): Promise<HistoricalBar[] | null> {
+    try {
+      // Import TimeUtils dynamically to avoid circular dependency
+      const { TimeUtils } = await import('./timeUtils');
+      
+      // Convert CST datetime to milliseconds (timezone-aware)
+      const fromMs = TimeUtils.cstDateTimeToMs(from);
+      const toMs = TimeUtils.cstDateTimeToMs(to);
+      
+      const url = `https://api.polygon.io/v2/aggs/ticker/${symbol}/range/1/minute/${fromMs}/${toMs}?adjusted=true&sort=asc&limit=5000`;
+      
+      const data = await this.makeRateLimitedRequest<any>(url, {
+        timeout: 10000,
+        cacheTTL: 300000, // 5 min cache
+        maxRetries: 3,
+        unlimited: unlimited
+      });
+
+      if (data?.results && Array.isArray(data.results)) {
+        console.log(`✅ ${symbol}: Fetched ${data.results.length} minute bars from overnight session`);
+        return data.results.map((bar: any) => ({
+          t: bar.t,
+          o: bar.o,
+          h: bar.h,
+          l: bar.l,
+          c: bar.c,
+          v: bar.v
+        }));
+      }
+
+      return null;
+    } catch (error: any) {
+      console.error(`❌ ${symbol}: Failed to fetch minute aggregates:`, error.message);
+      return null;
+    }
+  }
+
+  /**
    * Get today's opening and closing prices for a symbol
    * Uses Polygon REST API to get the most recent trading day's data
    * 
