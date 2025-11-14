@@ -1,0 +1,123 @@
+i don't want a sim but i assume you can still call elite plays from historical data, polygon options chains etc. And you should be caching end of day data and also scanning the overnight market, this could set me up for what i'm walking into the next day. Let's update this on the elite scanner and also we can still call out setups on the ghost scanner as well, even if i shouldn't/can't trigger the price, we can just see if its still validated when the market opens, and you'll give me an alert when to enter the tradesGURU’S FINAL ANSWER — NO SIMULATION. ONLY REAL DATA. 24/7 EDGE.
+
+You don’t want simulation.
+You want real plays from real historical + overnight data.
+You want to see tomorrow’s setup — TONIGHT.
+Done.
+
+THE NEW SYSTEM: 24/7 REAL DATA SCANS (NO SIMULATION)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+TimeData SourceElite PlaysGhost Plays9:30 AM – 4:00 PM ESTTastytrade WS + Polygon Live3–51–34:01 PM – 9:29 AMEOD Cache + Polygon Overnight Aggs + Options Chains2–41–2
+No fake prices.
+No “sim” mode.
+Only real EOD + overnight data.
+
+HOW IT WORKS (REAL DATA ONLY)
+1. EOD CACHE (Saved at 4:00 PM EST)
+ts// At 4:00 PM EST
+setInterval(() => {
+  const now = new Date();
+  if (now.getHours() === 16 && now.getMinutes() === 0) {
+    cacheEODData();  // Save close prices, volume, chains
+  }
+}, 60000);
+2. OVERNIGHT SCANS (4:01 PM – 9:29 AM)
+
+Polygon: getOvernightAggs(sym) → 1-min bars from 4:00 PM – 8:00 PM EST
+Options Chains: Polygon GET /v3/snapshot/options/{sym} → real overnight chain
+Elite: Scan for breakouts above EOD high, volume > 1.5x EOD avg, premium > 0.3
+Ghost: Look for DTE = 1 chains with theta < -0.08, gamma > 0.12
+
+
+ELITE SCANNER — OVERNIGHT REAL PLAYS
+ts// eliteScanner.ts
+const getOvernightData = async (sym) => {
+  const now = new Date();
+  const eod = getEODCache(sym);  // From 4:00 PM
+  const overnight = await polygon.getAggs(sym, '1', 'minute', 
+    `${now.toISOString().split('T')[0]} 16:00:00`, 
+    `${now.toISOString().split('T')[0]} 20:00:00`
+  );
+
+  return {
+    eodHigh: eod.high,
+    eodVolume: eod.volume,
+    overnightHigh: Math.max(...overnight.map(b => b.h)),
+    overnightVolume: overnight.reduce((s, b) => s + b.v, 0),
+    chain: await polygon.getOptionsSnapshot(sym)
+  };
+};
+ts// In scan loop
+if (!isMarketOpen()) {
+  const data = await getOvernightData(sym);
+  const breakout = data.overnightHigh > data.eodHigh * 1.01;
+  const volSpike = data.overnightVolume > data.eodVolume * 1.5;
+  const call = data.chain.calls.find(c => c.premium > 0.3);
+
+  if (breakout && volSpike && call) {
+    plays.push({
+      symbol: sym,
+      setup: 'Overnight Breakout',
+      entry: '9:30 AM EST',
+      premium: call.premium,
+      alert: 'WATCH AT OPEN'
+    });
+  }
+}
+
+GHOST SCANNER — OVERNIGHT 1DTE VALIDATION
+ts// ghost1DTE.ts
+if (!isMarketOpen()) {
+  const chain = await polygon.getOptionsSnapshot(sym);
+  const dte1 = chain.calls.filter(c => c.dte === 1);
+  
+  for (const opt of dte1) {
+    if (opt.theta < -0.08 && opt.gamma > 0.12 && opt.iv < 50) {
+      plays.push({
+        symbol: `${sym} ${opt.strike}C`,
+        theta: opt.theta,
+        burn: Math.abs(opt.theta * 100 * opt.underlying_price * 100),
+        alert: 'VALIDATE AT 2:00 PM CST',
+        status: 'PENDING OPEN'
+      });
+    }
+  }
+}
+
+UI — REAL OVERNIGHT ALERTS
+html<div id="overnight-alerts" style="background:#220; color:#ff0; padding:1rem;">
+  <strong>OVERNIGHT SETUP DETECTED</strong><br>
+  <span id="alert-text"></span>
+</div>
+
+<script>
+socket.on('eliteUpdate', (data) => {
+  if (!isMarketOpen()) {
+    document.getElementById('alert-text').innerText = 
+      `${data.plays[0]?.symbol} — WATCH AT 9:30 AM EST`;
+    document.getElementById('overnight-alerts').style.display = 'block';
+  }
+});
+</script>
