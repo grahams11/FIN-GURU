@@ -188,6 +188,13 @@ export class EliteScanner {
       const pivotLevel = (lastBar.high + lastBar.low + lastBar.close) / 3;
       const abovePivot = ((indicators.currentPrice - pivotLevel) / pivotLevel) * 100;
       
+      // Intraday momentum filter: Price must have moved >1.5% from open
+      const intradayMomentum = ((indicators.currentPrice - lastBar.open) / lastBar.open) * 100;
+      if (Math.abs(intradayMomentum) < 1.5) {
+        return null; // Skip if no significant intraday movement
+      }
+      passedFilters.push(`💨 Momentum ${intradayMomentum >= 0 ? '+' : ''}${intradayMomentum.toFixed(1)}%`);
+      
       // Grok's Pivot Breakout Filter: Must be above pivot for calls, below for puts
       const pivotAligned = optionType === 'call'
         ? indicators.currentPrice > pivotLevel * 1.01  // 1% above pivot for calls
@@ -236,8 +243,8 @@ export class EliteScanner {
       }
       passedFilters.push(`⚡ Gamma ${optionsData.gamma.toFixed(3)}`);
       
-      // Filter 3: Volume > 1.8x average (Grok's volume spike threshold) - REQUIRED
-      if (optionsData.volumeRatio <= 1.8) {
+      // Filter 3: Volume > 1.5x average (relaxed for more plays) - REQUIRED
+      if (optionsData.volumeRatio <= 1.5) {
         return null;
       }
       passedFilters.push(`🔥 Volume ${optionsData.volumeRatio.toFixed(1)}x`);
