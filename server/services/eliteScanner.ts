@@ -121,9 +121,8 @@ export class EliteScanner {
     
     console.log(`🔎 Basic filters: ${allStocks.length} → ${basicFiltered.length} stocks`);
     
-    // STEP 3: Analyze top candidates with full technical + options data
-    // ADAPTIVE PROCESSING: Stop once we find target number of qualified plays
-    // This prevents excessive API calls while still scanning the full market
+    // STEP 3: WEBSOCKET-ONLY APPROACH - Subscribe all candidates upfront for LIVE data
+    // This eliminates REST API bottleneck and prevents 429 errors
     const MAX_QUALIFIED_PLAYS = 12; // Target: 8-12 plays per scan
     const MAX_CANDIDATES_TO_ANALYZE = 100; // Safety cap to prevent infinite processing
     
@@ -136,8 +135,18 @@ export class EliteScanner {
       })
       .slice(0, MAX_CANDIDATES_TO_ANALYZE);
     
-    console.log(`🧮 Analyzing candidates (adaptive mode, target: ${MAX_QUALIFIED_PLAYS} plays)...`);
-    console.log(`🔄 Processing up to ${sortedCandidates.length} candidates sequentially...`);
+    console.log(`🧮 Analyzing ${sortedCandidates.length} candidates (adaptive mode, target: ${MAX_QUALIFIED_PLAYS} plays)...`);
+    
+    // CRITICAL: Subscribe ALL candidates to WebSocket BEFORE analysis
+    // This populates the cache with LIVE quotes so we don't need REST API calls
+    if (marketContext.isLive) {
+      const symbolsToSubscribe = sortedCandidates.map(c => c.ticker);
+      console.log(`📡 Subscribing ${symbolsToSubscribe.length} symbols to Polygon WebSocket for LIVE quotes...`);
+      await liveDataAdapter.subscribeForLiveQuotes(symbolsToSubscribe);
+      console.log(`✅ WebSocket cache populated - ready for zero-REST-API analysis`);
+    }
+    
+    console.log(`🔄 Processing candidates using WebSocket-cached LIVE data...`);
     
     const analysisResults: (EliteScanResult | null)[] = [];
     let totalPlaysFound = 0;

@@ -139,20 +139,40 @@ export class LiveDataAdapter {
   // ===== STOCK QUOTES =====
   
   /**
+   * Batch-subscribe symbols to WebSocket for LIVE quotes (used by Elite Scanner)
+   * This eliminates REST API calls by pre-populating the WebSocket cache
+   */
+  async subscribeForLiveQuotes(symbols: string[]): Promise<void> {
+    if (!marketStatusService.isMarketOpen()) {
+      console.log(`⚠️ Market closed - skipping WebSocket subscription`);
+      return;
+    }
+    
+    // Subscribe all symbols at once
+    polygonService.subscribeToSymbols(symbols);
+    
+    // Wait 2 seconds for WebSocket to receive and cache quotes
+    // Polygon typically streams quotes within 100-500ms per symbol
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    // Log cache population stats
+    let cachedCount = 0;
+    for (const symbol of symbols) {
+      const quote = polygonService.getQuote(symbol);
+      if (quote) cachedCount++;
+    }
+    console.log(`📊 WebSocket cache: ${cachedCount}/${symbols.length} symbols received`);
+  }
+  
+  /**
    * Get current stock quote (routes to live WebSocket or historical)
    */
   async getQuote(symbol: string): Promise<QuoteSnapshot> {
     const isLive = marketStatusService.isMarketOpen();
     
     if (isLive) {
-      // CRITICAL FIX: Subscribe symbol to WebSocket for LIVE quotes
-      // This ensures we get real-time data, not stale historical data
-      polygonService.subscribeToSymbols([symbol]);
-      
-      // Wait briefly for WebSocket to populate cache (50ms should be enough)
-      await new Promise(resolve => setTimeout(resolve, 50));
-      
-      // Get LIVE quote from WebSocket cache
+      // Get LIVE quote from WebSocket cache (pre-populated by subscribeForLiveQuotes)
+      // NO REST API calls during market hours - WebSocket only!
       const wsQuote = polygonService.getQuote(symbol);
       
       if (wsQuote && this.isQuoteFresh(wsQuote.timestamp)) {
@@ -168,20 +188,8 @@ export class LiveDataAdapter {
         };
       }
       
-      // Fallback to cached quote if WebSocket hasn't received data yet
-      const restQuote = await polygonService.getCachedQuote(symbol);
-      if (restQuote) {
-        return {
-          symbol,
-          price: restQuote.lastPrice,
-          bidPrice: restQuote.bidPrice,
-          askPrice: restQuote.askPrice,
-          volume: restQuote.volume || 0,
-          timestamp: Date.now(),
-          source: 'fallback',
-          isStale: false
-        };
-      }
+      // Symbol not in WebSocket cache - will be subscribed in next scan cycle
+      console.warn(`⚠️ ${symbol}: Not in WebSocket cache - using historical fallback`);
     }
     
     // Market closed - use historical data

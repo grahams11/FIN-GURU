@@ -800,12 +800,11 @@ class PolygonService {
    * Options Advanced plan provides stock data via WebSocket (not REST API)
    */
   async getStockQuote(symbol: string): Promise<{ price: number; changePercent: number } | null> {
-    // Handle market index symbols via Polygon's index snapshot API
+    // DISABLED: Index symbols (I:SPX, I:COMP, I:VIX) not in Polygon Options Advanced plan
+    // Use Tastytrade WebSocket for SPX and Google Finance for NASDAQ/VIX instead
     if (symbol.includes('^') || symbol.includes('%5E')) {
-      console.log(`🔍 ${symbol}: Detected as index symbol, calling getIndexSnapshot...`);
-      const result = await this.getIndexSnapshot(symbol);
-      console.log(`📊 ${symbol}: getIndexSnapshot returned:`, result);
-      return result;
+      console.log(`⚠️ ${symbol}: Index symbol - skipping Polygon (not in plan), use Tastytrade/Google Finance`);
+      return null; // Let caller fall back to Tastytrade WebSocket or Google Finance
     }
 
     // Get quote from WebSocket cache
