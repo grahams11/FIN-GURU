@@ -383,19 +383,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         if (isMarketOpen) {
           const spxQuote = await tastytradeService.getFuturesQuote('SPX');
-          if (spxQuote && spxQuote.price > 0) {
+          if (spxQuote && spxQuote.price > 0 && Number.isFinite(spxQuote.price)) {
             sp500Price = spxQuote.price;
             console.log(`✅ SPX from Tastytrade (live): $${sp500Price.toFixed(2)}`);
             
-            // Store opening price on first data of the day
+            // Store opening price on first data of the day (with validation)
             const cached = dailyIndexCache.get('^GSPC');
-            if (!cached || cached.tradingDate !== tradingDate) {
+            if ((!cached || cached.tradingDate !== tradingDate) && Number.isFinite(sp500Price) && sp500Price > 0) {
               dailyIndexCache.setOpenPrice('^GSPC', sp500Price, tradingDate);
               console.log(`📊 ^GSPC: Captured opening price $${sp500Price.toFixed(2)} for ${tradingDate}`);
             }
           } else {
             const scrapedData = await WebScraperService.scrapeMarketIndices();
             sp500Price = scrapedData.sp500.price;
+            
+            // Store opening price on first data of the day (Google Finance fallback, with validation)
+            const cached = dailyIndexCache.get('^GSPC');
+            if ((!cached || cached.tradingDate !== tradingDate) && Number.isFinite(sp500Price) && sp500Price > 0) {
+              dailyIndexCache.setOpenPrice('^GSPC', sp500Price, tradingDate);
+              console.log(`📊 ^GSPC: Captured opening price $${sp500Price.toFixed(2)} for ${tradingDate} (Google Finance)`);
+            }
           }
         } else {
           const scrapedData = await WebScraperService.scrapeMarketIndices();
@@ -412,34 +419,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const nasdaqPrice = scrapedData.nasdaq.price;
       const vixPrice = scrapedData.vix.price;
       
-      // Store opening prices when market opens
+      // Store opening prices when market opens (with validation)
       if (isMarketOpen) {
         const nasdaqCached = dailyIndexCache.get('^IXIC');
-        if (!nasdaqCached || nasdaqCached.tradingDate !== tradingDate) {
+        if ((!nasdaqCached || nasdaqCached.tradingDate !== tradingDate) && Number.isFinite(nasdaqPrice) && nasdaqPrice > 0) {
           dailyIndexCache.setOpenPrice('^IXIC', nasdaqPrice, tradingDate);
           console.log(`📊 ^IXIC: Captured opening price $${nasdaqPrice.toFixed(2)} for ${tradingDate}`);
         }
         
         const vixCached = dailyIndexCache.get('^VIX');
-        if (!vixCached || vixCached.tradingDate !== tradingDate) {
+        if ((!vixCached || vixCached.tradingDate !== tradingDate) && Number.isFinite(vixPrice) && vixPrice > 0) {
           dailyIndexCache.setOpenPrice('^VIX', vixPrice, tradingDate);
           console.log(`📊 ^VIX: Captured opening price $${vixPrice.toFixed(2)} for ${tradingDate}`);
         }
       }
       
-      // Calculate changePercent using cached open prices (or 0 if market is closed)
-      const sp500ChangePercent = dailyIndexCache.calculateChangePercent('^GSPC', sp500Price, isMarketOpen) || 0;
-      const nasdaqChangePercent = dailyIndexCache.calculateChangePercent('^IXIC', nasdaqPrice, isMarketOpen) || 0;
-      const vixChangePercent = dailyIndexCache.calculateChangePercent('^VIX', vixPrice, isMarketOpen) || 0;
-      
-      // Calculate change values
+      // Calculate changePercent and change values using cached open prices
+      // If no cached opening price, both change and changePercent are 0
       const sp500Cached = dailyIndexCache.get('^GSPC');
       const nasdaqCached = dailyIndexCache.get('^IXIC');
       const vixCached = dailyIndexCache.get('^VIX');
       
-      const sp500Change = sp500Cached && isMarketOpen ? sp500Price - sp500Cached.openPrice : 0;
-      const nasdaqChange = nasdaqCached && isMarketOpen ? nasdaqPrice - nasdaqCached.openPrice : 0;
-      const vixChange = vixCached && isMarketOpen ? vixPrice - vixCached.openPrice : 0;
+      const sp500ChangePercent = sp500Cached && Number.isFinite(sp500Price) 
+        ? ((sp500Price - sp500Cached.openPrice) / sp500Cached.openPrice) * 100 
+        : 0;
+      const nasdaqChangePercent = nasdaqCached && Number.isFinite(nasdaqPrice) 
+        ? ((nasdaqPrice - nasdaqCached.openPrice) / nasdaqCached.openPrice) * 100 
+        : 0;
+      const vixChangePercent = vixCached && Number.isFinite(vixPrice) 
+        ? ((vixPrice - vixCached.openPrice) / vixCached.openPrice) * 100 
+        : 0;
+      
+      const sp500Change = sp500Cached && Number.isFinite(sp500Price) ? sp500Price - sp500Cached.openPrice : 0;
+      const nasdaqChange = nasdaqCached && Number.isFinite(nasdaqPrice) ? nasdaqPrice - nasdaqCached.openPrice : 0;
+      const vixChange = vixCached && Number.isFinite(vixPrice) ? vixPrice - vixCached.openPrice : 0;
       
       // Build final market data
       const marketData = {
