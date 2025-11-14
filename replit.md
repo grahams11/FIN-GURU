@@ -45,8 +45,19 @@ Preferred communication style: Simple, everyday language.
 
 ### Trading Systems
 - **Ghost 1DTE Overnight Scanner (GROK PHASE 4 ENHANCED)**: High-win-rate strategy for SPY, QQQ, IWM using a 4-layer AI scoring system for entry signals and robust technical optimizations. Includes a manual pre-trade checklist for execution.
+  - **Grok AI Enhancements (Phase 4)**:
+    - **Strict Theta Filtering**: Theta must be < -0.08 with daily burn rate calculation (|theta| × underlyingPrice × 100)
+    - **Gamma Filtering**: Gamma must be > 0.12 for acceleration sensitivity
+    - **IV Range**: 20-60% volatility sweet spot with symbol-specific caps
+    - **Entry Window**: 2:00-3:00 PM CST only (enforced via time synchronization)
+    - **Exit Time**: 8:32 AM CST next day
 - **Day Trading System (SPX Only)**: Uses VIX + RSI for BUY/SELL signals on SPX weekly expirations.
 - **Elite Dual-Strategy Scanner (Stocks)**: RSI-only momentum scanner for CALL/PUT strategies on 100+ stocks and ETFs.
+  - **Grok AI Enhancements**:
+    - **Pivot Level Calculation**: (High + Low + Close) / 3 for breakout confirmation
+    - **Volume Spike Detection**: 1.8x average volume threshold (increased from 1.5x)
+    - **Breakout Filter**: Price must break above pivot with volume confirmation
+    - **RSI Integration**: 14-period momentum indicator combined with pivot analysis
 
 ### Shared Features
 - **Financial Calculations**: Black-Scholes for options Greeks and pricing.
@@ -78,10 +89,20 @@ Preferred communication style: Simple, everyday language.
 - **Fallback**: NTP servers (time.google.com, pool.ntp.org, time.cloudflare.com) - may be blocked in some environments.
 - **Manual Override**: Admin endpoints allow manual time correction when external sources fail.
 - **Safety**: Manual offset clears automatically when external sync succeeds to prevent double-offset bugs.
-- **Admin Endpoints**:
+- **API Endpoints**:
+  - `GET /api/time` - Returns CST time and market open status (simple endpoint for UI)
   - `GET /api/time/status` - View current time sync status and offsets
   - `POST /api/time-offset` - Set manual time offset (development/admin only, includes audit logging)
 - **Security Note**: Manual offset endpoint is unauthenticated for development ease but should be restricted in production using authentication middleware.
+
+### UI Features
+- **CST Clock Component**: Real-time clock display on dashboard showing accurate CST time with market status indicator
+  - **Update Frequency**: 1-second polling via TanStack Query
+  - **Market Status**: Green "LIVE" badge during market hours (9:30 AM - 4:00 PM CST), red "CLOSED" badge otherwise
+  - **Time Format**: 12-hour format with AM/PM (e.g., "2:45:30 PM")
+  - **Performance**: No performance regressions with 1-second polling interval
+- **Manual Scan Triggers**: Ghost 1DTE scanner includes "Run Scan" button for on-demand analysis
+- **Real-Time Dashboard**: Market overview with live S&P 500, NASDAQ, and VIX metrics via SSE streaming
 
 # External Dependencies
 
