@@ -1184,7 +1184,8 @@ class TastytradeService {
   }
 
   /**
-   * Fetch lifetime realized P/L from all closed positions
+   * Fetch YTD realized P/L directly from Tastytrade API
+   * Uses the account metrics endpoint to get realized P/L
    */
   async fetchLifetimeRealizedPnL(): Promise<number> {
     try {
@@ -1195,93 +1196,62 @@ class TastytradeService {
         return 0;
       }
 
-      // Fetch all transactions with pagination
-      let allTransactions: any[] = [];
-      let page = 0;
-      const perPage = 250;
-      let hasMore = true;
-
-      while (hasMore) {
-        const response = await this.apiClient.get(`/accounts/${this.accountNumber}/transactions`, {
-          params: {
-            'per-page': perPage,
-            'page-offset': page * perPage,
-            'sort': 'Asc'
+      // Try the metrics endpoint first - this should have YTD performance data
+      try {
+        const metricsResponse = await this.apiClient.get(`/accounts/${this.accountNumber}/metrics`);
+        if (metricsResponse.data && metricsResponse.data.data) {
+          const metricsData = metricsResponse.data.data;
+          console.log('📊 Metrics endpoint fields:', Object.keys(metricsData));
+          console.log('📊 Metrics data:', JSON.stringify(metricsData, null, 2));
+          
+          // Look for realized P/L fields
+          const ytdPnL = parseFloat(
+            metricsData['realized-ytd'] ||
+            metricsData['ytd-realized-pnl'] ||
+            metricsData['total-realized-pnl'] ||
+            '0'
+          );
+          
+          if (ytdPnL !== 0) {
+            console.log(`📊 YTD Realized P/L from metrics: $${ytdPnL.toFixed(2)}`);
+            return ytdPnL;
           }
-        });
-
-        if (!response.data || !response.data.data || !response.data.data.items) {
-          break;
         }
-
-        const items = response.data.data.items;
-        allTransactions = allTransactions.concat(items);
-
-        // Check if there are more pages
-        hasMore = items.length === perPage;
-        page++;
+      } catch (metricsError) {
+        console.log('⚠️ Metrics endpoint not available, trying balances snapshots...');
       }
 
-      if (allTransactions.length === 0) {
+      // Fallback: Try balances snapshots which might have cumulative P/L
+      const response = await this.apiClient.get(`/accounts/${this.accountNumber}/balance-snapshots`);
+      
+      if (!response.data || !response.data.data || !response.data.data.items) {
+        console.error('❌ No balance snapshot data available');
         return 0;
       }
 
-      console.log(`📊 Processing ${allTransactions.length} transactions for lifetime P/L`);
-
-      // Build cost basis map: symbol -> { totalCost, totalQuantity }
-      const costBasis = new Map<string, { totalCost: number; totalQuantity: number }>();
-      let totalRealizedPnL = 0;
+      const snapshots = response.data.data.items;
+      console.log(`📊 Found ${snapshots.length} balance snapshots`);
       
-      allTransactions.forEach((tx: any) => {
-        const symbol = tx.symbol;
-        const subType = tx['transaction-sub-type'];
-        const netValue = parseFloat(tx['net-value'] || 0);
-        const quantity = Math.abs(parseFloat(tx.quantity || 0));
+      if (snapshots.length > 0) {
+        const latestSnapshot = snapshots[0];
+        console.log('📊 Latest snapshot fields:', Object.keys(latestSnapshot));
+        console.log('📊 Latest snapshot:', JSON.stringify(latestSnapshot, null, 2));
         
-        // Track opening transactions for cost basis
-        if (subType === 'Buy to Open' || subType === 'Sell to Open') {
-          if (!costBasis.has(symbol)) {
-            costBasis.set(symbol, { totalCost: 0, totalQuantity: 0 });
-          }
-          const basis = costBasis.get(symbol)!;
-          
-          if (subType === 'Buy to Open') {
-            basis.totalCost += netValue;
-            basis.totalQuantity += quantity;
-          } else {
-            // Sell to Open: credit (short position)
-            basis.totalCost -= netValue;
-            basis.totalQuantity += quantity;
-          }
-        }
+        // Look for realized P/L in snapshot
+        const ytdPnL = parseFloat(
+          latestSnapshot['realized-day-gain'] ||
+          latestSnapshot['cumulative-realized-pnl'] ||
+          latestSnapshot['total-realized'] ||
+          '0'
+        );
         
-        // Calculate realized P/L for closing transactions
-        if (subType === 'Sell to Close' || subType === 'Buy to Close') {
-          const basis = costBasis.get(symbol);
-          
-          if (basis && basis.totalQuantity > 0) {
-            const costPerContract = basis.totalCost / basis.totalQuantity;
-            const costOfClosedPosition = costPerContract * quantity;
-            
-            if (subType === 'Sell to Close') {
-              // Closed long: P/L = proceeds - cost
-              totalRealizedPnL += (netValue - costOfClosedPosition);
-            } else {
-              // Closed short: P/L = cost - buy price
-              totalRealizedPnL += (costOfClosedPosition - netValue);
-            }
-            
-            // Update cost basis after close
-            basis.totalCost -= costOfClosedPosition;
-            basis.totalQuantity -= quantity;
-          }
-        }
-      });
+        console.log(`📊 YTD Realized P/L from snapshot: $${ytdPnL.toFixed(2)}`);
+        return ytdPnL;
+      }
       
-      console.log(`📊 Lifetime Realized P/L: $${totalRealizedPnL.toFixed(2)}`);
-      return totalRealizedPnL;
+      return 0;
     } catch (error: any) {
-      console.error('❌ Error fetching lifetime realized P/L:', error.response?.data || error.message);
+      console.error('❌ Error fetching YTD realized P/L:', error.response?.data || error.message);
       return 0;
     }
   }
