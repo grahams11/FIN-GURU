@@ -20,6 +20,7 @@ import { polygonService } from './polygonService';
 import { batchDataService } from './batchDataService';
 import { TimeUtils } from './timeUtils';
 import { overnightDataFetcher } from './overnightDataFetcher';
+import { calculateRSI, calculateEMA, calculateATR } from '../utils/indicators';
 
 export interface EliteScanResult {
   symbol: string;
@@ -173,21 +174,162 @@ export class EliteScanner {
     isOvernight: boolean = false
   ): Promise<EliteScanResult | null> {
     try {
-      // OVERNIGHT MODE — USE EOD + OVERNIGHT AGGS
+      // OVERNIGHT MODE — REAL ANALYSIS WITH EOD + OVERNIGHT AGGS
       if (isOvernight) {
-        console.log(`🌙 ${symbol}: Overnight mode — using EOD + overnight aggs`);
         const overnightSetup = await overnightDataFetcher.getOvernightSetup(symbol);
         
+        // Validation: Need EOD snapshot, overnight bars, and option chain
         if (!overnightSetup || !overnightSetup.data || !overnightSetup.chain) {
-          console.log(`⚠️ ${symbol}: No overnight data available, skipping`);
-          return null; // No data
+          return null;
         }
         
-        // Use overnight data instead of live data adapter
-        // TODO: Implement full overnight analysis using overnightSetup.data and overnightSetup.chain
-        // For now, skip to prevent errors - needs full implementation
-        console.log(`📊 ${symbol}: Overnight setup available - full analysis pending implementation`);
-        return null;
+        const { data: overnightData, chain } = overnightSetup;
+        const eod = overnightData.eodSnapshot;
+        const bars = overnightData.overnightBars;
+        
+        // Require minimum 20 bars for indicators (EOD + overnight)
+        if (bars.length < 20) {
+          return null;
+        }
+        
+        // Filter out bars with zero volume (sparse overnight data)
+        const validBars = bars.filter(b => b.volume > 0);
+        if (validBars.length < bars.length * 0.5) {
+          return null; // Skip if >50% bars are invalid
+        }
+        
+        // Combine EOD close + overnight closes for indicator context
+        const closes = [eod.close, ...validBars.map(b => b.close)];
+        
+        // Normalize bars to {h, l, c} format for ATR calculation
+        const normalizedBars = [
+          { h: eod.high, l: eod.low, c: eod.close },
+          ...validBars.map(b => ({ h: b.high, l: b.low, c: b.close }))
+        ];
+        
+        // Calculate indicators from combined EOD + overnight bars
+        const rsi = calculateRSI(closes);
+        const ema20 = calculateEMA(closes, 20);
+        const atr = calculateATR(normalizedBars);
+        
+        const currentPrice = closes[closes.length - 1];
+        const priceChange = ((currentPrice - eod.close) / eod.close) * 100;
+        
+        // OVERNIGHT FILTERS (Liquidity-aware, slightly tighter than live)
+        const passedFilters: string[] = [];
+        let optionType: 'call' | 'put' | null = null;
+        
+        // Filter 1: RSI Signal (Tighter: 42/58 vs live 40/60)
+        if (rsi < 42) {
+          optionType = 'call';
+          passedFilters.push(`RSI Oversold ${rsi.toFixed(1)}`);
+        } else if (rsi > 58) {
+          optionType = 'put';
+          passedFilters.push(`RSI Overbought ${rsi.toFixed(1)}`);
+        } else {
+          return null; // Neutral RSI, skip
+        }
+        
+        // Filter 2: Price/EMA Alignment
+        const trendAligned = optionType === 'call' 
+          ? currentPrice > ema20 
+          : currentPrice < ema20;
+        
+        if (!trendAligned) {
+          return null;
+        }
+        passedFilters.push('EMA Aligned');
+        
+        // Filter 3: Minimum Price Movement (0.8% vs EOD)
+        if (Math.abs(priceChange) < 0.8) {
+          return null;
+        }
+        passedFilters.push(`Move ${priceChange >= 0 ? '+' : ''}${priceChange.toFixed(1)}%`);
+        
+        // Filter 4: Volume Spike (Relaxed: 1.2x vs live 1.5x)
+        const overnightVolume = validBars.reduce((sum, b) => sum + b.volume, 0);
+        const volumeRatio = overnightVolume / eod.volume;
+        if (volumeRatio < 1.2) {
+          return null;
+        }
+        passedFilters.push(`Vol ${volumeRatio.toFixed(1)}x`);
+        
+        // Filter 5: ATR Breakout (Relaxed: 1.2x vs live 1.5x)
+        if (Math.abs(currentPrice - eod.close) < atr * 1.2) {
+          return null;
+        }
+        passedFilters.push('ATR Breakout');
+        
+        // Select best option contract (ATM bias, DTE 3-7, premium ≥$0.30)
+        const contracts = optionType === 'call' ? chain.calls : chain.puts;
+        if (!contracts || contracts.length === 0) {
+          return null;
+        }
+        
+        // Filter contracts: ATM ±5%, DTE 3-7, premium ≥$0.30, delta 0.3-0.6
+        const atmContracts = contracts.filter(c => {
+          const strikeDistance = Math.abs(c.strike - currentPrice) / currentPrice;
+          const inATMRange = strikeDistance <= 0.05; // Within 5% of current price
+          const validDTE = c.dte >= 3 && c.dte <= 7;
+          const validPremium = c.premium >= 0.30;
+          const validDelta = c.delta >= 0.3 && c.delta <= 0.6;
+          
+          return inATMRange && validDTE && validPremium && validDelta;
+        });
+        
+        if (atmContracts.length === 0) {
+          return null; // No suitable contracts
+        }
+        
+        // Rank by highest volume/OI combo
+        const bestContract = atmContracts.sort((a, b) => {
+          const scoreA = (a.volume || 0) + (a.openInterest || 0);
+          const scoreB = (b.volume || 0) + (b.openInterest || 0);
+          return scoreB - scoreA;
+        })[0];
+        
+        // Calculate pivot from overnight data
+        const pivotLevel = (overnightData.overnightHigh + overnightData.overnightLow + currentPrice) / 3;
+        const abovePivot = ((currentPrice - pivotLevel) / pivotLevel) * 100;
+        
+        // Calculate signal quality (cap at 80 for overnight due to missing live Greeks)
+        const signalQuality = Math.min(80, 
+          (rsi < 42 || rsi > 58 ? 30 : 0) + // RSI extreme
+          (volumeRatio > 1.5 ? 20 : 10) +   // Volume spike
+          (Math.abs(priceChange) > 1.5 ? 20 : 10) + // Price movement
+          (bestContract.premium > 0.50 ? 10 : 5) +  // Premium size
+          (bestContract.openInterest > 100 ? 10 : 5) // Liquidity
+        );
+        
+        passedFilters.push('Overnight Setup', `Quality ${signalQuality}`);
+        
+        // Return full EliteScanResult for overnight analysis
+        return {
+          symbol,
+          optionType,
+          stockPrice: currentPrice,
+          rsi,
+          rsiPrevious: closes.length > 1 ? calculateRSI(closes.slice(0, -1)) : rsi,
+          ema20,
+          atrShort: atr,
+          atrLong: atr, // Same for overnight
+          pivotLevel,
+          abovePivot,
+          strike: bestContract.strike,
+          expiry: bestContract.expiry,
+          delta: bestContract.delta,
+          gamma: bestContract.gamma || 0,
+          theta: bestContract.theta || 0,
+          vega: bestContract.vega || 0,
+          impliedVolatility: bestContract.iv,
+          ivPercentile: 0, // Not available for overnight
+          volumeRatio,
+          isUnusualVolume: volumeRatio > 3,
+          signalQuality,
+          passedFilters,
+          isLive: false,
+          scannedAt: Date.now()
+        };
       }
       
       // LIVE/HISTORICAL MODE — USE LIVE DATA ADAPTER

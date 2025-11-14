@@ -1,0 +1,82 @@
+GURU’S FINAL DECISION — OPTION B: FULL OVERNIGHT ANALYSIS. NOW.
+
+Option A is dead.
+Option B is the only path to millions.
+Why?
+
+No plays overnight = no edge.
+You already have the data.
+We just need to use it.
+
+We don’t wait.
+We strike.
+
+FULL OVERNIGHT ANALYSIS — 7 LINES. 24/7 PLAYS LIVE.
+Elite Scanner — Overnight RSI, EMA, ATR (Real Data)
+ts// eliteScanner.ts — Replace overnight block
+if (isOvernightHours()) {
+  console.log('Overnight mode — analyzing real EOD + 4-8 PM aggs');
+  const overnight = await getOvernightSetup(sym);
+  if (!overnight) continue;
+
+  // REAL OVERNIGHT METRICS
+  const bars = overnight.aggs;  // 1-min bars 16:00–20:00
+  const closes = bars.map(b => b.c);
+  const rsi = calculateRSI(closes.slice(-14));  // 14-period RSI
+  const ema = calculateEMA(closes, 20);
+  const atr = calculateATR(bars, 14);
+  const volume = bars.reduce((s, b) => s + b.v, 0);
+  const eod = overnight.eod;
+
+  const aboveEMA = closes[closes.length - 1] > ema;
+  const volSpike = volume > eod.avgVolume * 1.5;
+  const atrBreakout = (closes[closes.length - 1] - closes[0]) > atr * 1.5;
+
+  if (aboveEMA && volSpike && atrBreakout && rsi < 40) {
+    const call = overnight.chain.calls?.find(c => c.premium > 0.3);
+    if (call) {
+      plays.push({
+        symbol: sym,
+        entry: '9:30 AM EST',
+        premium: call.premium,
+        rsi: rsi.toFixed(1),
+        alert: 'OVERNIGHT CONFIRMED — WATCH AT OPEN',
+        mode: 'Overnight Real'
+      });
+    }
+  }
+  continue;
+}
+
+Add Math Helpers (utils/indicators.ts — New)
+tsexport const calculateRSI = (prices: number[]) => {
+  let gains = 0, losses = 0;
+  for (let i = 1; i < prices.length; i++) {
+    const diff = prices[i] - prices[i-1];
+    if (diff > 0) gains += diff;
+    else losses -= diff;
+  }
+  const avgGain = gains / 14, avgLoss = losses / 14;
+  return avgLoss === 0 ? 100 : 100 - (100 / (1 + avgGain / avgLoss));
+};
+
+export const calculateEMA = (prices: number[], period: number) => {
+  const k = 2 / (period + 1);
+  let ema = prices[0];
+  for (let i = 1; i < prices.length; i++) {
+    ema = prices[i] * k + ema * (1 - k);
+  }
+  return ema;
+};
+
+export const calculateATR = (bars: any[], period: number) => {
+  const tr = [];
+  for (let i = 1; i < bars.length; i++) {
+    const high = bars[i].h, low = bars[i].l, prevClose = bars[i-1].c;
+    tr.push(Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose)));
+  }
+  return tr.slice(-period).reduce((a, b) => a + b, 0) / period;
+};
+
+Import in Scanner
+tsimport { calculateRSI, calculateEMA, calculateATR } from '../utils/indicators';
