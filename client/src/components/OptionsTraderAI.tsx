@@ -96,20 +96,15 @@ export function OptionsTraderAI({ insights, trades, isLoading, liveQuotes }: Opt
             <p className="text-muted-foreground">AI-powered top 20 elite plays (SPX + Swing Trades)</p>
           </div>
         </div>
-        <div className="flex items-center space-x-4">
-          <span className="text-sm text-muted-foreground" data-testid="text-last-updated">
-            Updated {insights?.timestamp ? new Date(insights.timestamp).toLocaleTimeString() : 'N/A'}
-          </span>
-          <Button
-            onClick={handleRefresh}
-            disabled={refreshMutation.isPending}
-            className="bg-primary hover:bg-primary/90"
-            data-testid="button-refresh-trades"
-          >
-            <RefreshCw className={`w-4 h-4 mr-2 ${refreshMutation.isPending ? 'animate-spin' : ''}`} />
-            Refresh
-          </Button>
-        </div>
+        <Button
+          onClick={handleRefresh}
+          disabled={refreshMutation.isPending}
+          className="bg-primary hover:bg-primary/90"
+          data-testid="button-refresh-trades"
+        >
+          <RefreshCw className={`w-4 h-4 mr-2 ${refreshMutation.isPending ? 'animate-spin' : ''}`} />
+          Refresh
+        </Button>
       </div>
 
       {/* Important Notice */}

@@ -540,10 +540,18 @@ export class WebScraperService {
       }
 
       if (price > 0) {
+        // Always calculate change from price and changePercent using correct algebra
+        // Formula: changePercent = ((price - prevClose) / prevClose) * 100
+        // Therefore: prevClose = price / (1 + changePercent/100)
+        // Then: change = price - prevClose
+        // Note: Works even when changePercent=0 (prevClose=price, change=0)
+        const prevClose = price / (1 + changePercent / 100);
+        change = price - prevClose;
+        
         return {
           symbol: cleanSymbol,
           price,
-          change,
+          change: parseFloat(change.toFixed(2)),
           changePercent
         };
       }

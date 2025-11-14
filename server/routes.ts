@@ -366,35 +366,55 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/market-overview', async (req, res) => {
     try {
       console.log('Fetching market overview...');
-      const marketData = await WebScraperService.scrapeMarketIndices();
       
-      // Get most recent trading day's open/close prices from Polygon API
-      // Use SPY as proxy for SPX (more reliable data availability)
-      const [sp500Data, nasdaqData, vixData] = await Promise.all([
-        polygonService.getTodayOpenPrice('SPY'),    // S&P 500 ETF (proxy for SPX)
-        polygonService.getTodayOpenPrice('NDX'),    // NASDAQ-100
-        polygonService.getTodayOpenPrice('VXX')     // VIX ETF (proxy for VIX index)
-      ]);
+      // Data Source Strategy:
+      // 1. SPX: Tastytrade (when market open) → Google Finance (fallback)
+      // 2. NASDAQ/VIX: Google Finance only (Tastytrade doesn't support these indices)
+      const isMarketOpen = marketStatusService.isMarketOpen();
       
-      // Calculate change and changePercent based on most recent trading day (open to close)
-      const calculateChanges = (data: { open: number; close: number } | null) => {
-        if (!data) {
-          // Fallback to 0 if data unavailable
-          return { change: 0, changePercent: 0 };
+      // Always get Google Finance data as baseline (now with accurate change values)
+      const scrapedData = await WebScraperService.scrapeMarketIndices();
+      
+      // Try to enhance SPX with live Tastytrade data if market is open
+      let sp500Data = scrapedData.sp500;
+      if (isMarketOpen) {
+        try {
+          const spxQuote = await tastytradeService.getFuturesQuote('SPX');
+          if (spxQuote && spxQuote.price > 0) {
+            // Derive previous close from scraped data (now accurate since scraper calculates change)
+            const prevClose = scrapedData.sp500.price - scrapedData.sp500.change;
+            
+            // Guard against invalid prevClose
+            if (prevClose > 0) {
+              // Recalculate change metrics based on live price vs. previous close
+              const change = spxQuote.price - prevClose;
+              const changePercent = (change / prevClose) * 100;
+              
+              console.log(`✅ SPX from Tastytrade (live): $${spxQuote.price} (${changePercent.toFixed(2)}%)`);
+              
+              sp500Data = {
+                symbol: '^GSPC',
+                price: spxQuote.price,
+                change: parseFloat(change.toFixed(2)),
+                changePercent: parseFloat(changePercent.toFixed(2))
+              };
+            } else {
+              console.log('⚠️ Invalid prevClose, using Google Finance data');
+            }
+          } else {
+            console.log('⚠️ Tastytrade SPX unavailable, using Google Finance data');
+          }
+        } catch (error) {
+          console.log('⚠️ Tastytrade SPX error, using Google Finance data:', error instanceof Error ? error.message : 'Unknown error');
         }
-        
-        const change = data.close - data.open;
-        const changePercent = (change / data.open) * 100;
-        
-        return {
-          change: parseFloat(change.toFixed(2)),
-          changePercent: parseFloat(changePercent.toFixed(2))
-        };
-      };
+      }
       
-      const sp500Changes = calculateChanges(sp500Data);
-      const nasdaqChanges = calculateChanges(nasdaqData);
-      const vixChanges = calculateChanges(vixData);
+      // Build final market data
+      const marketData = {
+        sp500: sp500Data,
+        nasdaq: scrapedData.nasdaq,
+        vix: scrapedData.vix
+      };
       
       // Calculate AI sentiment score
       const sentimentScore = Math.random() * 0.4 + 0.6; // 0.6-1.0 range for bullish bias
@@ -403,20 +423,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         sp500: {
           symbol: marketData.sp500.symbol,
           value: marketData.sp500.price,
-          change: sp500Changes.change,
-          changePercent: sp500Changes.changePercent
+          change: marketData.sp500.change,
+          changePercent: marketData.sp500.changePercent
         },
         nasdaq: {
           symbol: marketData.nasdaq.symbol,
           value: marketData.nasdaq.price,
-          change: nasdaqChanges.change,
-          changePercent: nasdaqChanges.changePercent
+          change: marketData.nasdaq.change,
+          changePercent: marketData.nasdaq.changePercent
         },
         vix: {
           symbol: marketData.vix.symbol,
           value: marketData.vix.price,
-          change: vixChanges.change,
-          changePercent: vixChanges.changePercent
+          change: marketData.vix.change,
+          changePercent: marketData.vix.changePercent
         },
         sentiment: {
           score: sentimentScore,

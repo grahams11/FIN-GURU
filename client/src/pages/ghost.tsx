@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Checkbox } from '@/components/ui/checkbox';
+import { useCstTime } from '@/hooks/use-cst-time';
 import { 
   Play, 
   Ghost, 
@@ -20,7 +21,8 @@ import {
   Database,
   CheckCircle2,
   AlertCircle,
-  ClipboardCheck
+  ClipboardCheck,
+  Circle
 } from 'lucide-react';
 
 /**
@@ -119,6 +121,9 @@ export default function GhostScanner() {
   const [scanResult, setScanResult] = useState<GhostScanResult | null>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [lastScanTime, setLastScanTime] = useState<string | null>(null);
+  
+  // Real-time CST clock
+  const { formattedTime: cstTime, isMarketOpen } = useCstTime();
 
   // Pre-trade checklist state
   const [checklist, setChecklist] = useState({
@@ -244,8 +249,21 @@ export default function GhostScanner() {
             <CardContent className="p-6">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div>
-                  <div className="text-sm text-purple-300">Current Time (CST)</div>
-                  <div className="text-xl font-bold text-white">{status.currentTime}</div>
+                  <div className="text-sm text-purple-300 flex items-center gap-2">
+                    <Clock className="w-4 h-4" />
+                    Current Time (CST)
+                  </div>
+                  <div className="text-xl font-bold text-white" data-testid="text-ghost-cst-time">
+                    {cstTime}
+                  </div>
+                  <div className="flex items-center gap-1 mt-1">
+                    <Circle 
+                      className={`w-2 h-2 fill-current ${isMarketOpen ? 'text-green-400' : 'text-red-400'}`}
+                    />
+                    <span className={`text-xs ${isMarketOpen ? 'text-green-400' : 'text-red-400'}`}>
+                      {isMarketOpen ? 'LIVE' : 'CLOSED'}
+                    </span>
+                  </div>
                 </div>
                 <div>
                   <div className="text-sm text-purple-300">Scan Window</div>
