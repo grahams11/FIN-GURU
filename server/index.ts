@@ -81,7 +81,18 @@ app.use((req, res, next) => {
   const { eliteScanner } = await import('./services/eliteScanner');
   const { Ghost1DTEService } = await import('./services/ghost1DTE');
   
+  let isAutoScanRunning = false;
+  
   const runAutoScan = async () => {
+    // Prevent overlapping scans
+    if (isAutoScanRunning) {
+      console.warn('⏭️ AUTO-SCAN skipped — previous scan still running');
+      return;
+    }
+    
+    isAutoScanRunning = true;
+    const startTime = Date.now();
+    
     try {
       console.log('🔄 24/7 AUTO-SCAN — Running Elite + Ghost scanners...');
       const [eliteResults, ghostResults] = await Promise.allSettled([
@@ -89,12 +100,38 @@ app.use((req, res, next) => {
         Ghost1DTEService.scan()
       ]);
       
-      const elitePlays = eliteResults.status === 'fulfilled' ? eliteResults.value.results?.length || 0 : 0;
-      const ghostPlays = ghostResults.status === 'fulfilled' ? ghostResults.value.topPlays?.length || 0 : 0;
+      // Check Elite scanner results
+      let elitePlays = 0;
+      let eliteError = false;
+      if (eliteResults.status === 'fulfilled') {
+        elitePlays = eliteResults.value.results?.length || 0;
+      } else {
+        eliteError = true;
+        console.error('❌ Elite scanner failed:', eliteResults.reason?.message || eliteResults.reason);
+      }
       
-      console.log(`✅ 24/7 AUTO-SCAN complete — Elite: ${elitePlays} plays, Ghost: ${ghostPlays} plays`);
+      // Check Ghost scanner results
+      let ghostPlays = 0;
+      let ghostError = false;
+      if (ghostResults.status === 'fulfilled') {
+        ghostPlays = ghostResults.value.topPlays?.length || 0;
+      } else {
+        ghostError = true;
+        console.error('❌ Ghost scanner failed:', ghostResults.reason?.message || ghostResults.reason);
+      }
+      
+      const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+      
+      // Only log success if both scanners completed
+      if (!eliteError && !ghostError) {
+        console.log(`✅ 24/7 AUTO-SCAN complete (${duration}s) — Elite: ${elitePlays} plays, Ghost: ${ghostPlays} plays`);
+      } else {
+        console.warn(`⚠️ 24/7 AUTO-SCAN partial failure (${duration}s) — Elite: ${eliteError ? 'FAILED' : `${elitePlays} plays`}, Ghost: ${ghostError ? 'FAILED' : `${ghostPlays} plays`}`);
+      }
     } catch (error: any) {
-      console.error('❌ 24/7 AUTO-SCAN error:', error.message);
+      console.error('❌ 24/7 AUTO-SCAN fatal error:', error.message);
+    } finally {
+      isAutoScanRunning = false;
     }
   };
   
