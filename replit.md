@@ -82,6 +82,11 @@ Preferred communication style: Simple, everyday language.
   - **Change Calculation**: Real-time changePercent using `(currentPrice - openPrice) / openPrice * 100`.
 - **Recommendation Validation System**: Automatically filters stale (>120min old) and invalid (>2% adverse price movement) recommendations.
   - **Auto-Refresh**: Background job refreshes recommendations every 15 minutes during market hours.
+- **TradeExitMonitor**: Tracks historical trade recommendations and evaluates strategy win percentage.
+  - **Scheduling**: Runs once daily at 4:15 PM ET (21:15 UTC) using Luxon timezone-aware scheduling.
+  - **Purpose**: Checks 145 historical recommendations for profit targets (65%) and stop losses (30%) once daily after market close.
+  - **API Efficiency**: Reduced from 60-second polling (~2,100 req/min) to once-daily execution (~145 req/day), eliminating API quota exhaustion.
+  - **Impact**: Restored Elite Scanner functionality (now receives 11,624 stocks vs. 0 stocks before fix).
 
 ### Self-Learning System (AI Education Engine)
 - **Architecture**: Five core services orchestrate autonomous learning using Grok AI reasoning.
@@ -146,4 +151,5 @@ Preferred communication style: Simple, everyday language.
 - **Axios**: HTTP client.
 - **Cheerio**: HTML parsing.
 - **Date-fns**: Date utilities.
+- **Luxon**: Timezone-aware date/time library for TradeExitMonitor scheduling.
 - **Class Variance Authority**: Type-safe CSS class management.
