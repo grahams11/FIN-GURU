@@ -43,8 +43,10 @@ Preferred communication style: Simple, everyday language.
 ### Trading Systems
 - **Ghost 1DTE Overnight Scanner**: High-win-rate strategy scanning the full S&P 500 (503 tickers) using a 4-layer AI scoring system for entry signals.
   - **Universe**: S&P 500 with parallel batch processing (50 symbols/batch).
+  - **Performance**: Completes 503-ticker scan in under 3 seconds with 30-second timeout protection.
+  - **Error Handling**: Graceful initialization fallback using default HV values (20%) when Polygon historical data unavailable.
+  - **Data Sources**: Polygon unlimited mode with fail-fast logic (no Alpha Vantage fallback to prevent rate-limiting delays).
   - **Grok AI Enhancements (Phase 4)**: Includes strict Theta (< -0.08) and Gamma (> 0.12) filtering, specific IV ranges, and a defined entry window (2:00-3:00 PM CST) and exit time (8:32 AM CST next day).
-  - **Performance**: Completes 503-ticker scan in under 3 seconds.
 - **Day Trading System (SPX Only)**: Utilizes VIX + RSI for BUY/SELL signals on SPX weekly expirations.
 - **Elite Dual-Strategy Scanner (Stocks)**: RSI-only momentum scanner for CALL/PUT strategies on 100+ stocks and ETFs.
   - **Grok AI Enhancements**: Incorporates pivot level calculation, volume spike detection (1.5x average), intraday momentum (>1.5% from open), and breakout confirmation.
