@@ -160,7 +160,14 @@ export class EliteScanner {
       }
       
       const stock = sortedCandidates[i];
-      const result = await this.analyzeTicker(stock.ticker, config, marketContext.isLive, isOvernight);
+      // Pass bulk snapshot data for immediate analysis (no WebSocket wait needed)
+      const snapshotContext = {
+        price: stock.price,
+        changePercent: stock.changePercent,
+        volume: stock.volume,
+        timestamp: stock.timestamp
+      };
+      const result = await this.analyzeTicker(stock.ticker, config, marketContext.isLive, isOvernight, snapshotContext);
       analysisResults.push(result);
       totalAnalyzed++;
       
@@ -218,7 +225,8 @@ export class EliteScanner {
     symbol: string,
     config: any,
     isLive: boolean,
-    isOvernight: boolean = false
+    isOvernight: boolean = false,
+    snapshot?: import('./batchDataService').SnapshotContext
   ): Promise<EliteScanResult | null> {
     try {
       // OVERNIGHT MODE — REAL ANALYSIS WITH EOD + OVERNIGHT AGGS
@@ -395,7 +403,8 @@ export class EliteScanner {
       }
       
       // LIVE/HISTORICAL MODE — USE LIVE DATA ADAPTER
-      const indicators = await liveDataAdapter.getIndicatorBundle(symbol, 14);
+      // Pass snapshot context for immediate analysis with bulk snapshot data
+      const indicators = await liveDataAdapter.getIndicatorBundle(symbol, 14, snapshot);
       
       if (!indicators || indicators.rsi === undefined) {
         return null;

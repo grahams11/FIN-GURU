@@ -15,6 +15,7 @@
 import { polygonService } from './polygonService';
 import { historicalDataService } from './historicalDataService';
 import { marketStatusService } from './marketStatusService';
+import { SnapshotContext } from './batchDataService';
 
 // ===== INTERFACES =====
 
@@ -32,7 +33,7 @@ export interface QuoteSnapshot {
   askPrice: number;
   volume: number;
   timestamp: number;
-  source: 'websocket' | 'historical' | 'fallback';
+  source: 'websocket' | 'snapshot' | 'historical' | 'fallback';
   isStale: boolean;
 }
 
@@ -140,7 +141,7 @@ export class LiveDataAdapter {
   
   /**
    * Batch-subscribe symbols to WebSocket for LIVE quotes (used by Elite Scanner)
-   * This eliminates REST API calls by pre-populating the WebSocket cache
+   * Non-blocking: subscribes in background, scanner uses bulk snapshot data immediately
    */
   async subscribeForLiveQuotes(symbols: string[]): Promise<void> {
     if (!marketStatusService.isMarketOpen()) {
@@ -148,31 +149,20 @@ export class LiveDataAdapter {
       return;
     }
     
-    // Subscribe all symbols at once
+    // Subscribe all symbols at once (non-blocking - updates arrive in background)
     polygonService.subscribeToSymbols(symbols);
-    
-    // Wait 2 seconds for WebSocket to receive and cache quotes
-    // Polygon typically streams quotes within 100-500ms per symbol
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    // Log cache population stats
-    let cachedCount = 0;
-    for (const symbol of symbols) {
-      const quote = polygonService.getQuote(symbol);
-      if (quote) cachedCount++;
-    }
-    console.log(`📊 WebSocket cache: ${cachedCount}/${symbols.length} symbols received`);
+    console.log(`📡 Subscribed ${symbols.length} symbols to WebSocket (updates streaming in background)`);
   }
   
   /**
-   * Get current stock quote (routes to live WebSocket or historical)
+   * Get current stock quote (routes to live WebSocket, snapshot, or historical)
+   * Priority: WebSocket > Snapshot > Historical
    */
-  async getQuote(symbol: string): Promise<QuoteSnapshot> {
+  async getQuote(symbol: string, snapshot?: SnapshotContext): Promise<QuoteSnapshot> {
     const isLive = marketStatusService.isMarketOpen();
     
     if (isLive) {
-      // Get LIVE quote from WebSocket cache (pre-populated by subscribeForLiveQuotes)
-      // NO REST API calls during market hours - WebSocket only!
+      // Priority 1: WebSocket cache (real-time updates)
       const wsQuote = polygonService.getQuote(symbol);
       
       if (wsQuote && this.isQuoteFresh(wsQuote.timestamp)) {
@@ -188,8 +178,25 @@ export class LiveDataAdapter {
         };
       }
       
-      // Symbol not in WebSocket cache - will be subscribed in next scan cycle
-      console.warn(`⚠️ ${symbol}: Not in WebSocket cache - using historical fallback`);
+      // Priority 2: Bulk snapshot data (fresh from same scan cycle)
+      if (snapshot) {
+        const snapshotAge = Date.now() - snapshot.timestamp;
+        const isSnapshotFresh = snapshotAge < 60000; // 60 seconds freshness threshold
+        
+        return {
+          symbol,
+          price: snapshot.price,
+          bidPrice: snapshot.price,
+          askPrice: snapshot.price,
+          volume: snapshot.volume,
+          timestamp: snapshot.timestamp,
+          source: 'snapshot',
+          isStale: !isSnapshotFresh
+        };
+      }
+      
+      // Symbol not in WebSocket cache or snapshot - fall back to historical
+      console.warn(`⚠️ ${symbol}: Not in WebSocket cache or snapshot - using historical fallback`);
     }
     
     // Market closed - use historical data
@@ -229,8 +236,9 @@ export class LiveDataAdapter {
   
   /**
    * Get indicator bundle (RSI, EMA, ATR) with hybrid live+historical bars
+   * Accepts optional snapshot for immediate analysis without WebSocket wait
    */
-  async getIndicatorBundle(symbol: string, period: number = 14): Promise<IndicatorBundle | null> {
+  async getIndicatorBundle(symbol: string, period: number = 14, snapshot?: SnapshotContext): Promise<IndicatorBundle | null> {
     try {
       // Fetch historical bars (need enough for calculation)
       const daysNeeded = Math.max(period * 2, 50); // Extra days for warmup
@@ -244,8 +252,8 @@ export class LiveDataAdapter {
         return null;
       }
       
-      // Get current price (live if market open)
-      const currentQuote = await this.getQuote(symbol);
+      // Get current price (prioritizes WebSocket > Snapshot > Historical)
+      const currentQuote = await this.getQuote(symbol, snapshot);
       
       // Calculate technical indicators
       const closes = bars.map(b => b.close);
