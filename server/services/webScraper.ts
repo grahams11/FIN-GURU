@@ -1021,7 +1021,85 @@ export class WebScraperService {
     }
   }
 
+  /**
+   * Get open and close prices for a market index from Google Finance
+   * Returns: { open, close, last, previousClose }
+   */
+  static async getGoogleIndexSnapshot(symbol: string): Promise<{ 
+    open: number | null; 
+    close: number | null; 
+    last: number | null;
+    previousClose: number | null;
+  }> {
+    try {
+      // Map symbols to Google Finance index tickers
+      const googleTickerMap: Record<string, string> = {
+        '^GSPC': 'INDEXSP:.INX',      // S&P 500
+        '%5EGSPC': 'INDEXSP:.INX',
+        'SPX': 'INDEXSP:.INX',
+        '^IXIC': 'NASDAQ:NDX',         // NASDAQ
+        '%5EIXIC': 'NASDAQ:NDX',
+        '^VIX': 'INDEXCBOE:VIX',       // VIX
+        '%5EVIX': 'INDEXCBOE:VIX'
+      };
 
+      const googleTicker = googleTickerMap[symbol] || symbol;
+      const url = `https://www.google.com/finance/quote/${googleTicker}`;
+      
+      console.log(`📡 ${symbol}: Fetching Google Finance snapshot for ${googleTicker}...`);
+
+      const response = await axios.get(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        },
+        timeout: 10000
+      });
+
+      const $ = cheerio.load(response.data);
+      
+      let open: number | null = null;
+      let close: number | null = null;
+      let last: number | null = null;
+      let previousClose: number | null = null;
+
+      // Extract current/last price from main price display
+      const lastPriceElement = $('[data-last-price]').first();
+      if (lastPriceElement.length > 0) {
+        const lastPriceStr = lastPriceElement.attr('data-last-price');
+        if (lastPriceStr) {
+          last = parseFloat(lastPriceStr);
+          console.log(`${symbol}: Found last price $${last}`);
+        }
+      }
+
+      // Extract open and previous close from summary table
+      // Look for div.G4DfZc containers which have label + value pairs
+      $('.G4DfZc').each((_idx, element) => {
+        const label = $(element).find('.mfs7Fc').text().trim();
+        const value = $(element).find('.YMlKec').text().trim();
+        
+        if (label && value) {
+          const numValue = parseFloat(value.replace(/[,$]/g, ''));
+          
+          if (label.toLowerCase().includes('open') && !isNaN(numValue)) {
+            open = numValue;
+            console.log(`${symbol}: Found open price $${open}`);
+          } else if (label.toLowerCase().includes('previous close') && !isNaN(numValue)) {
+            previousClose = numValue;
+            console.log(`${symbol}: Found previous close $${previousClose}`);
+          } else if (label.toLowerCase().includes('close') && !label.toLowerCase().includes('previous') && !isNaN(numValue)) {
+            close = numValue;
+            console.log(`${symbol}: Found close price $${close}`);
+          }
+        }
+      });
+
+      return { open, close, last, previousClose };
+    } catch (error) {
+      console.error(`❌ ${symbol}: Google Finance snapshot failed:`, error instanceof Error ? error.message : 'Unknown');
+      return { open: null, close: null, last: null, previousClose: null };
+    }
+  }
 
   private static getDefaultData(symbol: string): StockData {
     // Fallback data when scraping fails

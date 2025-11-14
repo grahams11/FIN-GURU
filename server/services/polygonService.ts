@@ -871,7 +871,7 @@ class PolygonService {
       // Use makeRateLimitedRequest to apply proper Authorization header (not query param)
       // makeRateLimitedRequest returns the parsed data directly (not wrapped in .data)
       const url = `https://api.polygon.io/v2/aggs/ticker/${polygonTicker}/range/1/day/${from}/${to}?adjusted=true&sort=desc&limit=5`;
-      const response = await this.makeRateLimitedRequest(url);
+      const response = await this.makeRateLimitedRequest(url) as any;
 
       if (response?.status === 'OK' && response?.results?.length > 0) {
         const bars = response.results;
