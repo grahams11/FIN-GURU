@@ -283,7 +283,7 @@ export default function GhostScanner() {
                 </div>
                 <div>
                   <div className="text-sm text-purple-300">Target Universe</div>
-                  <div className="text-xl font-bold text-white">{status.targetUniverse.join(', ')}</div>
+                  <div className="text-xl font-bold text-white">{status.targetUniverse}</div>
                 </div>
               </div>
             </CardContent>

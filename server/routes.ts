@@ -1906,7 +1906,7 @@ Historical win rate same setup: ${play.historicalWinRate.toFixed(1)}%`
         nextScanTime: nextScanStr,
         timeUntilScan: `${hoursUntil}h ${minutesUntil}m`,
         systemStatus: 'operational',
-        targetUniverse: ['SPY', 'QQQ', 'IWM'],
+        targetUniverse: 'Full S&P 500 (503 Tickers)',
         expectedWinRate: '94.1%',
         holdPeriod: 'Overnight (2:00-3:00 PM → 8:32 AM CST)',
         apiLimit: 4,
