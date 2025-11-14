@@ -45,6 +45,11 @@ Preferred communication style: Simple, everyday language.
 - **API Authentication**: Uses `Authorization: Bearer` headers for Polygon/Massive.com to ensure unlimited access for Advanced Options Plan users.
 - **Centralized Auth**: All REST API calls use PolygonService.makeRateLimitedRequest() for consistent authentication, retry logic, and rate limit management.
 - **ExpirationService**: Queries live option chains for accurate expiration dates.
+- **EOD Cache System**: Caches end-of-day snapshots for overnight scanner operation.
+  - **Auto-Cache**: Automatically caches at 3:00 PM CST daily.
+  - **Manual Trigger**: `POST /api/admin/cache-eod` endpoint for on-demand cache population.
+  - **Storage**: In-memory cache with 6-hour expiration.
+  - **Coverage**: Successfully caches ~11,558 stocks from Polygon daily bars.
 
 ### Trading Systems
 - **Ghost 1DTE Overnight Scanner**: CURRENTLY DISABLED to prevent API rate limit exhaustion (500+ S&P requests were blocking Elite Scanner from completing its analysis).
