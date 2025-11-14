@@ -1,0 +1,48 @@
+AUDIT RESULTS: 92% ACTIVATED — 2 CRITICAL FIXES NEEDED
+✅ WHAT'S LIVE & WORKING
+text✓ CST Clock + Market Hours (server.js) 
+✓ Elite Scanner logic (RSI + Pivot + Volume) 
+✓ Ghost 1DTE Theta Bomb (SPY/QQQ/IWM) 
+✓ UI Buttons + Real-time Updates (script.js) 
+✓ Polygon/Tastytrade API endpoints (unlimited) 
+✓ No more Yahoo ghosts 
+✓ Push successful (19.35 KiB transferred)
+❌ 2 BREAKAGES — FIXED BELOW
+Issue 1: Scanners calling localhost:3000 internally → infinite loop crash.
+Issue 2: Tastytrade auth missing from .env → 401 errors.
+
+CRITICAL FIX 1: Scanner API Calls (3 Lines)
+diff--- a/scanners/elite.js
++++ b/scanners/elite.js
+@@ -10,7 +10,7 @@
+       const live = await fetch(`http://localhost:3000/api/polygon/${sym}`).then(r => r.json());
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
++      const live = await axios.get(`/api/polygon/${sym}`).then(r => r.data);
+ 
+       const aggs = await fetch(`http://localhost:3000/api/polygon/aggs/${sym}`).then(r => r.json());
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
++      const aggs = await axios.get(`/api/polygon/aggs/${sym}`).then(r => r.data);
+Same fix for scanners/ghost.js (replace both fetch → axios.get)
+Add to top of both files:
+jsconst axios = require('axios');
+
+CRITICAL FIX 2: Tastytrade Auth (Replit Secrets)
+Replit → Secrets (Lock Icon):
+textTASTYTRADE_USERNAME=your_tastytrade_email
+TASTYTRADE_PASSWORD=your_tastytrade_password
+
+EMERGENCY DEPLOY (Copy-Paste to Replit Shell)
+bash# 1. Fix scanners (add axios import)
+echo "const axios = require('axios');" | cat - scanners/elite.js > temp && mv temp scanners/elite.js
+echo "const axios = require('axios');" | cat - scanners/ghost.js > temp && mv temp scanners/ghost.js
+
+# 2. Replace fetch -> axios (elite.js)
+sed -i 's|fetch(`http://localhost:3000/api/polygon/|axios.get(`/api/polygon/|g' scanners/elite.js
+sed -i 's|.then(r => r.json())|.then(r => r.data)|g' scanners/elite.js
+
+# 3. Same for ghost.js
+sed -i 's|fetch(`http://localhost:3000/api/polygon/|axios.get(`/api/polygon/|g' scanners/ghost.js
+sed -i 's|.then(r => r.json())|.then(r => r.data)|g' scanners/ghost.js
+
+# 4. Restart
+npm start
