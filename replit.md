@@ -23,12 +23,13 @@ Preferred communication style: Simple, everyday language.
   - **Market CLOSED**: Defaults to historical cache (11k+ stocks, 30 days) to avoid wasted API calls.
   - **Market OPEN**: Attempts Polygon live data first, falls back to cache on 403/429 errors.
   - **UI Indicator**: Green flashing dot = live data, Red solid dot = historical cache.
-- **Live Option Premium Streaming** (Nov 2025): Real-time option pricing accuracy via Polygon WebSocket.
+- **Live Option Premium Streaming** (Nov 2025): Real-time option pricing accuracy via Polygon WebSocket with simple EOD caching.
   - **Market OPEN**: Subscribes to option quotes via WebSocket, calculates premium as (bid + ask) / 2 from live data.
-  - **Market CLOSED**: Uses EOD premiums stored in database from last market close.
-  - **Data Flow**: WebSocket cache → REST API fallback → EOD database snapshot.
+  - **Market CLOSED**: Uses EOD premiums from `options_trades` table via `storage.getLatestPremium()` to eliminate overnight API calls.
+  - **Simple Design**: Reuses existing `options_trades` data instead of complex snapshot tables, reducing API usage from 45k-60k to ~14.5k calls/day.
+  - **Data Flow**: WebSocket cache (market open) → `getLatestPremium()` from options_trades (market closed) → REST API fallback.
   - **Option Symbol Format**: OCC standard (e.g., "O:SPY251113C00680000" for SPY $680 Call expiring 11/13/25).
-  - **Integration**: LiveDataAdapter checks WebSocket cache first, falls back to REST API for premium calculations.
+  - **Integration**: LiveDataAdapter switches premium source based on market status via `marketStatusService.isMarketOpen()`.
 
 ## Backend Architecture
 - **Runtime**: Node.js with Express.js (TypeScript, ES modules).
