@@ -116,58 +116,59 @@ export class OvernightDataFetcher {
         return null;
       }
       
-      // Use the EOD snapshot date for overnight window
-      // This ensures we always query the correct trading day, even after weekends/holidays
-      const dateStr = eodSnapshot.date; // Already in YYYY-MM-DD format
-      
-      // Fetch 1-min bars from 3:00 PM - 7:00 PM CST (extended hours)
-      const fromTime = `${dateStr} 15:00:00`;
-      const toTime = `${dateStr} 19:00:00`;
-      
-      const bars = await polygonService.getMinuteAggregates(
-        symbol,
-        fromTime,
-        toTime,
-        true // unlimited mode for overnight scanning
-      );
-      
-      if (!bars || bars.length === 0) {
-        console.log(`📊 No overnight bars for ${symbol} (market may not have traded)`);
+      // Use cached historical bars for RSI calculation instead of API calls
+      // We already have 24 days of daily bars - perfect for indicator calculations
+      if (historicalData && historicalData.bars.length >= 20) {
+        // Convert historical daily bars to overnight bar format for indicator calculations
+        const overnightBars: OvernightBar[] = historicalData.bars.map(bar => ({
+          timestamp: bar.timestamp,
+          open: bar.open,
+          high: bar.high,
+          low: bar.low,
+          close: bar.close,
+          volume: bar.volume
+        }));
+        
+        // Use PREVIOUS day as EOD baseline and MOST RECENT as current price
+        // This allows scanner to calculate movement = (mostRecent - previous) / previous
+        const previousBar = historicalData.bars[historicalData.bars.length - 2];
+        const mostRecentBar = historicalData.bars[historicalData.bars.length - 1];
+        
+        // Override EOD snapshot to use previous day's close for movement calculation
+        eodSnapshot = {
+          symbol,
+          date: new Date(previousBar.timestamp).toISOString().split('T')[0],
+          high: previousBar.high,
+          low: previousBar.low,
+          close: previousBar.close,
+          volume: previousBar.volume,
+          timestamp: previousBar.timestamp
+        };
+        
+        console.log(`📊 ${symbol}: Using ${historicalData.bars.length} cached daily bars for indicators`);
+        
         return {
           symbol,
           eodSnapshot,
-          overnightBars: [],
-          overnightHigh: eodSnapshot.close,
-          overnightLow: eodSnapshot.close,
-          overnightVolume: 0,
+          overnightBars,
+          overnightHigh: mostRecentBar.high,
+          overnightLow: mostRecentBar.low,
+          overnightVolume: mostRecentBar.volume,
           breakoutDetected: false,
           timestamp: Date.now()
         };
       }
       
-      // Calculate overnight metrics (bars use {t, o, h, l, c, v} format from Polygon)
-      const overnightHigh = Math.max(...bars.map((b: any) => b.h));
-      const overnightLow = Math.min(...bars.map((b: any) => b.l));
-      const overnightVolume = bars.reduce((sum: number, b: any) => sum + b.v, 0);
-      
-      // Detect breakout: overnight high > EOD high by 1%
-      const breakoutDetected = overnightHigh > eodSnapshot.high * 1.01;
-      
+      // Fallback: no cached data, no bars
+      console.warn(`⚠️ ${symbol}: Insufficient historical data (${historicalData?.bars.length || 0} bars)`);
       return {
         symbol,
         eodSnapshot,
-        overnightBars: bars.map((b: any) => ({
-          timestamp: b.t,
-          open: b.o,
-          high: b.h,
-          low: b.l,
-          close: b.c,
-          volume: b.v
-        })),
-        overnightHigh,
-        overnightLow,
-        overnightVolume,
-        breakoutDetected,
+        overnightBars: [],
+        overnightHigh: eodSnapshot.close,
+        overnightLow: eodSnapshot.close,
+        overnightVolume: 0,
+        breakoutDetected: false,
         timestamp: Date.now()
       };
     } catch (error: any) {
