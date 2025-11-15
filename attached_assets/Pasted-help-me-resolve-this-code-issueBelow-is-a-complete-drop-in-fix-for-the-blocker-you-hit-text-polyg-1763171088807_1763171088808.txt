@@ -1,0 +1,228 @@
+help me resolve this code issueBelow is a complete, drop-in fix for the blocker you hit:
+text❌ polygonService.getGroupedDailyBars()  // does NOT exist
+Polygon does not expose a “grouped daily bars” endpoint – the method you need is the Aggregates (Bars) endpoint (GET /v2/aggs/ticker/{ticker}/range/{multiplier}/{timespan}/{from}/{to}) or the vX “grouped daily” endpoint (GET /v2/aggs/grouped/locale/us/market/stocks/{date}).
+Since you are building a historical cache that covers the last ~30 trading days, the vX grouped-daily endpoint is the most efficient (one call → all tickers for a single date).
+If you also need per-ticker granularity (e.g. different multipliers), fall back to the classic Aggregates endpoint.
+
+1. Add the missing method to PolygonService
+ts// src/services/PolygonService.ts
+import axios from 'axios';
+import { POLYGON_API_KEY } from '../config';
+
+export class PolygonService {
+  private baseURL = 'https://api.polygon.io';
+
+  // ------------------------------------------------------------------
+  // 1. GROUPED DAILY (all US equities for a single date)
+  // ------------------------------------------------------------------
+  async getGroupedDaily(date: string) {
+    // date format: YYYY-MM-DD
+    const url = `${this.baseURL}/v2/aggs/grouped/locale/us/market/stocks/${date}`;
+    const { data } = await axios.get(url, {
+      params: { adjusted: true, apiKey: POLYGON_API_KEY },
+      timeout: 15_000,
+    });
+    return data; // { results: [{ t, o, h, l, c, v, ... }], ... }
+  }
+
+  // ------------------------------------------------------------------
+  // 2. FALLBACK – classic per-ticker aggregates (any range)
+  // ------------------------------------------------------------------
+  async getAggregates(
+    ticker: string,
+    multiplier: number,
+    timespan: 'minute' | 'hour' | 'day' | 'week' | 'month' | 'quarter' | 'year',
+    from: string, // YYYY-MM-DD
+    to: string    // YYYY-MM-DD
+  ) {
+    const url = `${this.baseURL}/v2/aggs/ticker/${ticker}/range/${multiplier}/${timespan}/${from}/${to}`;
+    const { data } = await axios.get(url, {
+      params: { adjusted: true, apiKey: POLYGON_API_KEY },
+      timeout: 15_000,
+    });
+    return data;
+  }
+}
+Why this works
+getGroupedDaily → 1 request per trading day → ~30 calls for your 30-day cache.
+Unlimited on your Options Unlimited plan (you already pay $200/mo).
+Returns every ticker in one payload → perfect for bulk caching.
+
+
+2. Replace the bogus call in your HistoricalDataCache service
+ts// src/services/HistoricalDataCache.ts
+import { PolygonService } from './PolygonService';
+import { addDays, format, isWeekend, subDays } from 'date-fns';
+import pMap from 'p-map';
+
+const polygon = new PolygonService();
+
+export class HistoricalDataCache {
+  private cache: Map<string, any> = new Map(); // key = YYYY-MM-DD
+
+  // ------------------------------------------------------------------
+  // Public entry point – called by OvernightDataFetcher
+  // ------------------------------------------------------------------
+  async ensureCache(populateIfStale = true) {
+    const today = new Date();
+    const neededDates = this.tradingDaysBack(30); // last 30 trading days
+
+    const missing = neededDates.filter(d => !this.cache.has(d));
+    if (missing.length && populateIfStale) {
+      await this.populate(missing);
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Core population logic
+  // ------------------------------------------------------------------
+  private async populate(dates: string[]) {
+    // 3 retries with exponential backoff
+    const fetchWithRetry = async (date: string, attempt = 1): Promise<any> => {
+      try {
+        const data = await polygon.getGroupedDaily(date);
+        this.cache.set(date, data);
+        return data;
+      } catch (err: any) {
+        if (attempt >= 3) throw err;
+        const delay = 2 ** attempt * 1000; // 2s, 4s, 8s
+        await new Promise(r => setTimeout(r, delay));
+        return fetchWithRetry(date, attempt + 1);
+      }
+    };
+
+    // Parallel but respectful of rate-limit (5 req/min → 1 every 12s)
+    await pMap(
+      dates,
+      async date => {
+        await fetchWithRetry(date);
+        await new Promise(r => setTimeout(r, 12_000)); // stay under 5/min
+      },
+      { concurrency: 1 }
+    );
+  }
+
+  // ------------------------------------------------------------------
+  // Helper: last N *trading* days (skip weekends)
+  // ------------------------------------------------------------------
+  private tradingDaysBack(count: number): string[] {
+    const dates: string[] = [];
+    let cur = new Date();
+
+    while (dates.length < count) {
+      cur = subDays(cur, 1);
+      if (!isWeekend(cur)) {
+        dates.push(format(cur, 'yyyy-MM-dd'));
+      }
+    }
+    return dates; // newest → oldest
+  }
+
+  // ------------------------------------------------------------------
+  // Public getter used by OvernightDataFetcher
+  // ------------------------------------------------------------------
+  get(date: string) {
+    return this.cache.get(date);
+  }
+}
+What changed?
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Old codeNew codepolygonService.getGroupedDailyBars()polygon.getGroupedDaily(date)No retry / rate-limit handling3-attempt exponential backoff + 12 s sleepNo weekend skiptradingDaysBack() skips Sat/Sun
+
+3. Wire it into OvernightDataFetcher
+ts// src/services/OvernightDataFetcher.ts
+import { HistoricalDataCache } from './HistoricalDataCache';
+
+const cache = new HistoricalDataCache();
+
+export async function fetchOvernightData() {
+  await cache.ensureCache(); // warm-up if needed
+
+  const yesterday = format(subDays(new Date(), 1), 'yyyy-MM-dd');
+  const cached = cache.get(yesterday);
+
+  if (cached) {
+    console.log('Using cached grouped daily data');
+    return cached.results; // array of all tickers
+  }
+
+  // Fallback (should never hit after cache is warm)
+  console.warn('Cache miss – hitting live API (expensive!)');
+  const live = await polygon.getGroupedDaily(yesterday);
+  return live.results;
+}
+
+4. Quick admin endpoints (optional but handy)
+ts// src/routes/admin.ts
+router.get('/cache/status', async (req, res) => {
+  const stats = {
+    size: cache['cache'].size, // expose via getter if private
+    keys: Array.from(cache['cache'].keys()),
+  };
+  res.json(stats);
+});
+
+router.post('/cache/refresh', async (req, res) => {
+  await cache.ensureCache(true);
+  res.send('Cache refresh queued');
+});
+
+5. Result – API-call reduction
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+SourceCalls / day (before)Calls / day (after)Ghost scanner~14 0000Overnight scans (30 dates)~30 × #tickers (thousands)~30 (one per date)Total saved—≈ 42 800
+You stay well under the 5-call/minute ceiling even during the nightly warm-up.
+
+6. TL;DR Checklist (copy-paste into your ticket)
+bash# 1. Add PolygonService methods (above)
+# 2. Replace getGroupedDailyBars() → polygon.getGroupedDaily(date)
+# 3. Add retry + 12 s sleep
+# 4. Use tradingDaysBack() to skip weekends
+# 5. Wire OvernightDataFetcher to read from cache
+# 6. (Optional) Add /admin/cache endpoints
+# 7. Run tests:
+   npm run test:cache
+   # → should see 30 cached dates, 0 live calls after first run

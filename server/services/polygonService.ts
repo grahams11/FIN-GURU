@@ -1376,6 +1376,36 @@ class PolygonService {
   }
 
   /**
+   * Get grouped daily bars for all US stocks on a specific date
+   * Single API call fetches ALL symbols for one trading day
+   * Used by HistoricalDataCache to populate 30-day cache efficiently
+   * 
+   * @param date Trading date in YYYY-MM-DD format
+   * @returns Array of bars with { T, o, h, l, c, v, t } structure, or null on error
+   */
+  async getGroupedDailyBars(date: string): Promise<any[] | null> {
+    try {
+      const url = `https://api.polygon.io/v2/aggs/grouped/locale/us/market/stocks/${date}?adjusted=true`;
+      
+      const data = await this.makeRateLimitedRequest<any>(url, {
+        timeout: 15000,
+        cacheTTL: 0,
+        maxRetries: 3,
+        unlimited: true
+      });
+
+      if (data?.results && Array.isArray(data.results)) {
+        return data.results;
+      }
+
+      return null;
+    } catch (error: any) {
+      console.error(`❌ Failed to fetch grouped bars for ${date}:`, error.message);
+      return null;
+    }
+  }
+
+  /**
    * Get today's opening and closing prices for a symbol
    * Uses Polygon REST API to get the most recent trading day's data
    * 

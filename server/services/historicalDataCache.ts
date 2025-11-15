@@ -225,6 +225,12 @@ export class HistoricalDataCache {
         
         // Move to next day
         currentDate.setDate(currentDate.getDate() + 1);
+        
+        // Add 5-second delay between dates to respect fair-use policy
+        // Prevents 429 errors on unlimited plan (30 days × 5s = 2.5 min total)
+        if (currentDate <= endDate) {
+          await new Promise(resolve => setTimeout(resolve, 5000));
+        }
       }
       
       // Validate we got enough trading days
@@ -234,11 +240,11 @@ export class HistoricalDataCache {
       
       // Filter symbols with sufficient data and populate cache
       let cachedCount = 0;
-      for (const [symbol, bars] of symbolBarsMap.entries()) {
+      for (const [symbol, bars] of Array.from(symbolBarsMap.entries())) {
         // Require at least 20 bars for indicator calculation
         if (bars.length >= 20) {
           // Sort bars by timestamp (oldest first)
-          bars.sort((a, b) => a.timestamp - b.timestamp);
+          bars.sort((a: HistoricalBar, b: HistoricalBar) => a.timestamp - b.timestamp);
           this.cache.set(symbol, bars);
           cachedCount++;
         }
