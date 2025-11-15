@@ -545,6 +545,7 @@ export interface Greeks {
 
 export interface TradeRecommendation {
   ticker: string;
+  optionSymbol?: string; // OCC format for live premium WebSocket (e.g., "O:SPY251113C00680000")
   optionType: 'call' | 'put';
   currentPrice: number;
   strikePrice: number;

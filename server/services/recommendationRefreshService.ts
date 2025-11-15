@@ -10,12 +10,29 @@
 import { storage } from '../storage';
 import { RecommendationValidator } from './recommendationValidator';
 import { eliteScanner, type EliteScanResult } from './eliteScanner';
+import { polygonService } from './polygonService';
 import type { TradeRecommendation } from '@shared/schema';
 
 export class RecommendationRefreshService {
   private static refreshInterval: NodeJS.Timeout | null = null;
   private static readonly REFRESH_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
   private static isRefreshing = false;
+  
+  /**
+   * Format option symbol for Polygon WebSocket (O:SPY251113C00680000)
+   */
+  private static formatOptionSymbol(underlying: string, strike: number, expiry: string, optionType: 'call' | 'put'): string {
+    const expiryParts = expiry.split('-');
+    const yy = expiryParts[0].slice(2);
+    const mm = expiryParts[1];
+    const dd = expiryParts[2];
+    const expiryFormatted = `${yy}${mm}${dd}`;
+    
+    const strikeFormatted = Math.round(strike * 1000).toString().padStart(8, '0');
+    const optType = optionType === 'call' ? 'C' : 'P';
+    
+    return `O:${underlying}${expiryFormatted}${optType}${strikeFormatted}`;
+  }
   
   /**
    * Convert EliteScanResult to TradeRecommendation format
@@ -62,8 +79,12 @@ export class RecommendationRefreshService {
     const targetMove = result.optionType === 'call' ? 1.05 : 0.95; // 5% move
     const stockExitPrice = result.stockPrice * targetMove;
     
+    // Format option symbol for Polygon WebSocket live premium tracking
+    const optionSymbol = this.formatOptionSymbol(result.symbol, result.strike, result.expiry, result.optionType);
+    
     return {
       ticker: result.symbol,
+      optionSymbol, // For live premium WebSocket streaming
       optionType: result.optionType,
       currentPrice: result.stockPrice,
       strikePrice: result.strike,
@@ -166,6 +187,8 @@ export class RecommendationRefreshService {
         
         // Store new recommendations
         let storedCount = 0;
+        const optionSymbols: string[] = [];
+        
         for (const rec of newRecommendations) {
           try {
             const validFibLevel = rec.fibonacciLevel !== null && rec.fibonacciLevel !== undefined 
@@ -177,6 +200,7 @@ export class RecommendationRefreshService {
 
             await storage.createOptionsTrade({
               ticker: rec.ticker,
+              optionSymbol: rec.optionSymbol || null, // Store option symbol for live premium tracking
               optionType: rec.optionType,
               currentPrice: rec.currentPrice,
               strikePrice: rec.strikePrice,
@@ -200,6 +224,12 @@ export class RecommendationRefreshService {
               isExecuted: false,
               isWatchlist: rec.isWatchlist ?? false
             });
+            
+            // Collect option symbols for WebSocket subscription
+            if (rec.optionSymbol) {
+              optionSymbols.push(rec.optionSymbol);
+            }
+            
             storedCount++;
           } catch (error) {
             console.error(`❌ Failed to store ${rec.ticker}:`, error);
@@ -207,6 +237,16 @@ export class RecommendationRefreshService {
         }
         
         console.log(`💾 Stored ${storedCount}/${newRecommendations.length} new recommendations`);
+        
+        // Subscribe to option quotes for live premium tracking (market hours only)
+        if (optionSymbols.length > 0) {
+          try {
+            await polygonService.subscribeToOptionQuotes(optionSymbols);
+            console.log(`📡 Subscribed to ${optionSymbols.length} option quotes for live premium streaming`);
+          } catch (error) {
+            console.error('❌ Failed to subscribe to option quotes:', error);
+          }
+        }
       } else {
         console.log('✅ All recommendations still valid - no refresh needed');
       }

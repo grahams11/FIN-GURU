@@ -93,6 +93,7 @@ class PolygonService {
   private isConnected = false;
   private subscribedSymbols: Set<string> = new Set();
   private subscribedOptionPatterns: string[] = []; // Track option trade subscriptions for reconnection
+  private subscribedOptionQuotes: Set<string> = new Set(); // Track option quote subscriptions for reconnection
   private reconnectAttempts = 0;
   private reconnectDelay = 5000; // Initial delay: 5 seconds
   private apiKey: string;
@@ -544,6 +545,19 @@ class PolygonService {
       console.log(`🔄 Re-establishing ${patternsSnapshot.length} option trade subscriptions after reconnect`);
       this.subscribeToOptionTrades(patternsSnapshot);
     }
+    
+    // Re-subscribe to option quotes for live premium streaming
+    if (this.subscribedOptionQuotes.size > 0) {
+      const optionQuotesSnapshot = Array.from(this.subscribedOptionQuotes);
+      console.log(`🔄 Re-establishing ${optionQuotesSnapshot.length} option quote subscriptions after reconnect`);
+      
+      // Clear the set temporarily to allow re-subscription
+      const quotesToRestore = new Set(this.subscribedOptionQuotes);
+      this.subscribedOptionQuotes.clear();
+      
+      // Re-subscribe (this will repopulate the set)
+      this.subscribeToOptionQuotes(optionQuotesSnapshot);
+    }
   }
 
   /**
@@ -669,6 +683,37 @@ class PolygonService {
     const subscribeMessage = {
       action: 'subscribe',
       params: patterns.join(',')
+    };
+
+    this.ws.send(JSON.stringify(subscribeMessage));
+  }
+
+  /**
+   * Subscribe to option quotes for live premium streaming
+   * @param optionSymbols Array of option symbols like ['O:SPY251113C00680000', 'O:AAPL251115P00250000']
+   */
+  async subscribeToOptionQuotes(optionSymbols: string[]): Promise<void> {
+    if (optionSymbols.length === 0) {
+      return;
+    }
+
+    // Persist subscriptions for reconnection (add to existing set)
+    optionSymbols.forEach(sym => this.subscribedOptionQuotes.add(sym));
+
+    // If WebSocket not ready, subscriptions will be sent after authentication
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      console.log(`📋 Queued ${optionSymbols.length} option quote subscriptions (WebSocket not ready - will subscribe after connection)`);
+      return;
+    }
+
+    // Format subscription params: Q.O:SPY251113C00680000, Q.O:AAPL251115P00250000
+    const subscriptions = optionSymbols.map(sym => `Q.${sym}`);
+
+    console.log(`📡 Subscribing to ${subscriptions.length} option quotes for live premium streaming...`);
+
+    const subscribeMessage = {
+      action: 'subscribe',
+      params: subscriptions.join(',')
     };
 
     this.ws.send(JSON.stringify(subscribeMessage));

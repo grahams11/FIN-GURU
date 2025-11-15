@@ -88,7 +88,7 @@ export interface OptionsAnalytics {
   
   // Metadata
   timestamp: number;
-  source: 'polygon-rest';
+  source: 'polygon-rest' | 'polygon-websocket';
   cacheAge: number; // seconds since fetch
   error?: string;
 }
@@ -343,12 +343,33 @@ export class LiveDataAdapter {
     }
     
     try {
-      // Fetch Greeks and IV from PolygonService
+      // Fetch Greeks and IV from PolygonService REST API
       const greeks = await polygonService.getOptionsGreeks(symbol, optionType);
       
       if (!greeks) {
         console.warn(`⚠️ No options data for ${symbol}`);
         return null;
+      }
+      
+      // Construct option symbol for WebSocket lookup (O:SPY251113C00680000)
+      const optionSymbol = this.formatOptionSymbol(symbol, greeks.strike, greeks.expiry, optionType);
+      
+      // Try to get live premium from Polygon WebSocket cache (market hours only)
+      const wsQuote = polygonService.getCachedOptionQuote(optionSymbol);
+      
+      // Use WebSocket live data if available and fresh (<60s), otherwise fall back to REST API
+      let bid = greeks.bid;
+      let ask = greeks.ask;
+      let premium = greeks.bid > 0 && greeks.ask > 0 ? (greeks.bid + greeks.ask) / 2 : greeks.lastPrice;
+      let dataSource: 'polygon-rest' | 'polygon-websocket' = 'polygon-rest';
+      
+      if (wsQuote && wsQuote.premium > 0) {
+        // Live WebSocket data available - use it for pricing
+        bid = wsQuote.bid;
+        ask = wsQuote.ask;
+        premium = wsQuote.premium;
+        dataSource = 'polygon-websocket';
+        console.log(`💎 Using live WebSocket premium for ${symbol}: $${premium.toFixed(2)} (Bid $${bid.toFixed(2)}, Ask $${ask.toFixed(2)})`);
       }
       
       // Get IV percentile from PolygonService
@@ -363,7 +384,7 @@ export class LiveDataAdapter {
         expiry: greeks.expiry,
         optionType,
         
-        // Greeks
+        // Greeks (from REST API)
         delta: greeks.delta,
         gamma: greeks.gamma,
         theta: greeks.theta,
@@ -379,17 +400,15 @@ export class LiveDataAdapter {
         avgVolume20Day: volumeData?.avgVolume20Day || greeks.volume,
         volumeRatio: volumeData?.volumeRatio || 1,
         
-        // Pricing
-        bid: greeks.bid,
-        ask: greeks.ask,
+        // Pricing (WebSocket if available, REST API otherwise)
+        bid,
+        ask,
         lastPrice: greeks.lastPrice,
-        premium: greeks.bid > 0 && greeks.ask > 0 
-          ? (greeks.bid + greeks.ask) / 2 
-          : greeks.lastPrice,
+        premium,
         
         // Metadata
         timestamp: Date.now(),
-        source: 'polygon-rest',
+        source: dataSource,
         cacheAge: 0
       };
       
@@ -404,6 +423,26 @@ export class LiveDataAdapter {
       console.error(`Failed to fetch options analytics for ${symbol}:`, error.message);
       return null;
     }
+  }
+
+  /**
+   * Format option symbol for Polygon (O:SPY251113C00680000)
+   */
+  private formatOptionSymbol(underlying: string, strike: number, expiry: string, optionType: 'call' | 'put'): string {
+    // Convert expiry from YYYY-MM-DD to YYMMDD
+    const expiryParts = expiry.split('-');
+    const yy = expiryParts[0].slice(2);
+    const mm = expiryParts[1];
+    const dd = expiryParts[2];
+    const expiryFormatted = `${yy}${mm}${dd}`;
+    
+    // Format strike as 8-digit integer (multiply by 1000)
+    const strikeFormatted = Math.round(strike * 1000).toString().padStart(8, '0');
+    
+    // Option type: C or P
+    const optType = optionType === 'call' ? 'C' : 'P';
+    
+    return `O:${underlying}${expiryFormatted}${optType}${strikeFormatted}`;
   }
   
   
