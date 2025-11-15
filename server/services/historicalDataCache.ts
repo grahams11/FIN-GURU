@@ -306,6 +306,34 @@ export class HistoricalDataCache {
   }
   
   /**
+   * Get all cached symbols
+   */
+  getAllSymbols(): string[] {
+    if (this.isCacheStale()) {
+      return [];
+    }
+    return Array.from(this.cache.keys());
+  }
+  
+  /**
+   * Get symbol's historical data with metadata
+   */
+  getHistoricalData(symbol: string): SymbolHistoricalData | null {
+    const bars = this.getHistoricalBars(symbol);
+    if (!bars || bars.length === 0) {
+      return null;
+    }
+    
+    return {
+      symbol,
+      bars,
+      startDate: this.cacheStartDate || '',
+      endDate: this.cacheEndDate || '',
+      lastUpdated: this.lastCacheTime
+    };
+  }
+  
+  /**
    * Check if cache is stale (older than 24 hours)
    */
   private isCacheStale(): boolean {

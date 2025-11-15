@@ -15,6 +15,7 @@ import { timeService } from "./services/timeService";
 import { marketStatusService } from "./services/marketStatusService";
 import { dailyIndexCache } from "./cache/DailyIndexCache";
 import { eodCacheService } from "./services/eodCache";
+import { batchDataService } from "./services/batchDataService";
 import { insertMarketDataSchema, insertOptionsTradeSchema, insertAiInsightsSchema, insertPortfolioPositionSchema, type OptionsTrade, appConfig } from "@shared/schema";
 import { formatOptionSymbol, toPolygonSubscriptionTopic, toTastytradeOptionSymbol } from "./utils/optionSymbols";
 import { eq } from "drizzle-orm";
@@ -553,6 +554,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error generating AI insights:', error);
       res.status(500).json({ message: 'Failed to generate AI insights' });
+    }
+  });
+
+  // Data source status endpoint - shows if using live or cached data
+  app.get('/api/data-source-status', async (req, res) => {
+    try {
+      const status = batchDataService.getDataSourceStatus();
+      res.json(status);
+    } catch (error) {
+      console.error('Error fetching data source status:', error);
+      res.status(500).json({ 
+        message: 'Failed to fetch data source status',
+        isLive: false,
+        source: 'cache',
+        lastUpdate: 0,
+        marketOpen: false
+      });
     }
   });
 

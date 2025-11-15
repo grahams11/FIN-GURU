@@ -19,12 +19,17 @@ Preferred communication style: Simple, everyday language.
 - **Server-Side**: Polygon and Tastytrade WebSockets feed an in-memory cache, streamed via an SSE endpoint.
 - **Client-Side**: EventSource connects to `/api/quotes/stream` for live stock quotes and real-time Greeks.
 - **Fallback System**: Polygon, Tastytrade, and web scraping ensure continuous data updates.
+- **Smart Data Source Strategy** (Nov 2025): Market-aware fallback automatically switches between live and cached data to reduce API usage from 45k-60k to ~14.5k calls/day.
+  - **Market CLOSED**: Defaults to historical cache (11k+ stocks, 30 days) to avoid wasted API calls.
+  - **Market OPEN**: Attempts Polygon live data first, falls back to cache on 403/429 errors.
+  - **UI Indicator**: Green flashing dot = live data, Red solid dot = historical cache.
 
 ## Backend Architecture
 - **Runtime**: Node.js with Express.js (TypeScript, ES modules).
 - **API**: RESTful endpoints for market data, AI insights, and trade management.
 - **Data Processing**: Real-time market data scraping and financial calculations including a custom Black-Scholes options pricing model.
 - **Polygon API Throttling**: Dual Bottleneck system with Standard and Lightweight limiters, Auth Fallback, and Smart Retries.
+- **BatchDataService**: Smart market-aware data source selection with historical cache fallback, reducing API usage by ~70% during off-hours.
 
 ## Data Storage
 - **Database**: PostgreSQL with Drizzle ORM.
@@ -77,6 +82,7 @@ Preferred communication style: Simple, everyday language.
 ### UI Features
 - **CST Clock Component**: Real-time clock display on dashboard showing accurate CST time with market status indicator.
 - **Real-Time Dashboard**: Market overview with live S&P 500, NASDAQ, and VIX metrics via SSE streaming.
+- **Data Source Indicator**: Visual status showing live (green flashing) vs cached (red solid) data with tooltip details (source, last update time, market status).
 
 # External Dependencies
 

@@ -1,13 +1,16 @@
 import { polygonService } from './polygonService';
+import { historicalDataCache } from './historicalDataCache';
+import { MarketStatusService } from './marketStatusService';
 
 /**
  * BatchDataService - Efficient bulk stock data management
  * 
- * Strategy:
- * - Fetches ALL ~9,000 stocks in ONE Polygon API call (bulk snapshot)
+ * Smart Data Strategy:
+ * - When market is CLOSED: Use historical cache (11k+ stocks, 30 days of data)
+ * - When market is OPEN: Try Polygon API first, fall back to cache on failure
  * - Caches data for 6 hours to minimize API usage
  * - Shared across Elite Scanner, UOA Scanner, and other services
- * - Automatically refreshes when cache expires
+ * - Tracks data source (live vs cached) for status indicators
  */
 
 interface StockSnapshot {
@@ -37,8 +40,15 @@ class BatchDataService {
   private readonly CACHE_DURATION_MS = 6 * 60 * 60 * 1000; // 6 hours
   private refreshing = false;
   private refreshPromise: Promise<StockSnapshot[]> | null = null;
+  private marketStatusService: MarketStatusService;
+  
+  // Data source tracking
+  private currentDataSource: 'live' | 'cache' = 'cache';
+  private lastLiveDataTime: number = 0;
 
-  private constructor() {}
+  private constructor() {
+    this.marketStatusService = MarketStatusService.getInstance();
+  }
 
   static getInstance(): BatchDataService {
     if (!BatchDataService.instance) {
@@ -81,15 +91,24 @@ class BatchDataService {
   }
 
   /**
-   * Fetch fresh stock data from Polygon bulk snapshot
-   * Uses SINGLE API call to get all stocks
+   * Fetch fresh stock data - smart source selection
+   * Strategy: Use historical cache when market closed, try live when open
    */
   private async refreshStockUniverse(): Promise<StockSnapshot[]> {
-    console.log('🔄 Refreshing stock universe from Polygon bulk snapshot...');
     const startTime = Date.now();
-
+    const marketOpen = this.marketStatusService.isMarketOpen();
+    
+    console.log(`🔄 Refreshing stock universe (market ${marketOpen ? 'OPEN' : 'CLOSED'})...`);
+    
+    // Strategy 1: Market is closed - use historical cache directly
+    if (!marketOpen) {
+      console.log('🌙 Market closed - using historical cache');
+      return this.getHistoricalCacheData();
+    }
+    
+    // Strategy 2: Market is open - try live first, fall back to cache
     try {
-      // Single bulk API call fetches ~9,000 stocks
+      console.log('📡 Market open - attempting live Polygon API...');
       const bulkData = await polygonService.getBulkMarketSnapshot();
       
       // Transform to StockSnapshot format
@@ -115,23 +134,98 @@ class BatchDataService {
         timestamp: now,
         expiresAt: now + this.CACHE_DURATION_MS
       };
+      
+      // Track live data source
+      this.currentDataSource = 'live';
+      this.lastLiveDataTime = now;
 
       const duration = Date.now() - startTime;
-      console.log(`✅ Stock universe refreshed: ${snapshots.length} stocks in ${(duration / 1000).toFixed(1)}s`);
+      console.log(`✅ Live data: ${snapshots.length} stocks in ${(duration / 1000).toFixed(1)}s`);
       console.log(`💾 Cached for 6 hours (expires at ${new Date(this.cache.expiresAt).toLocaleTimeString()})`);
 
       return snapshots;
-    } catch (error) {
-      console.error('❌ Error refreshing stock universe:', error);
+    } catch (error: any) {
+      const errorCode = error?.response?.status || error?.status || 'unknown';
+      console.error(`❌ Live API failed (${errorCode}):`, error.message);
       
-      // Return stale cache if available as fallback
+      // Fall back to historical cache
+      console.log('🔄 Falling back to historical cache...');
+      return this.getHistoricalCacheData();
+    }
+  }
+  
+  /**
+   * Get data from historical cache and transform to StockSnapshot format
+   */
+  private async getHistoricalCacheData(): Promise<StockSnapshot[]> {
+    if (!historicalDataCache.isReady()) {
+      console.warn('⚠️ Historical cache not ready yet');
+      
+      // Return stale cache if available
       if (this.cache) {
-        console.log('⚠️ Using stale cached data as fallback');
+        console.log('⚠️ Using stale BatchData cache as last resort');
+        this.currentDataSource = 'cache';
         return this.cache.data;
       }
       
-      throw error;
+      throw new Error('No data available - historical cache not ready and no fallback cache');
     }
+    
+    // Get all cached symbols
+    const allSymbols = historicalDataCache.getAllSymbols();
+    console.log(`📊 Transforming ${allSymbols.length} symbols from historical cache...`);
+    
+    const snapshots: StockSnapshot[] = [];
+    
+    for (const symbol of allSymbols) {
+      try {
+        const bars = historicalDataCache.getHistoricalBars(symbol);
+        
+        if (!bars || bars.length === 0) {
+          continue;
+        }
+        
+        // Use the most recent bar (yesterday's data)
+        const latestBar = bars[bars.length - 1];
+        const previousBar = bars.length > 1 ? bars[bars.length - 2] : null;
+        
+        // Calculate change from previous bar
+        const change = previousBar ? latestBar.close - previousBar.close : 0;
+        const changePercent = previousBar ? ((change / previousBar.close) * 100) : 0;
+        
+        snapshots.push({
+          ticker: symbol,
+          price: latestBar.close,
+          change,
+          changePercent,
+          volume: latestBar.volume,
+          high: latestBar.high,
+          low: latestBar.low,
+          open: latestBar.open,
+          close: latestBar.close,
+          timestamp: latestBar.timestamp
+        });
+      } catch (error) {
+        // Skip symbols with errors
+        continue;
+      }
+    }
+    
+    // Cache the results
+    const now = Date.now();
+    this.cache = {
+      data: snapshots,
+      timestamp: now,
+      expiresAt: now + this.CACHE_DURATION_MS
+    };
+    
+    // Track cache data source
+    this.currentDataSource = 'cache';
+    
+    console.log(`✅ Historical cache data: ${snapshots.length} stocks`);
+    console.log(`💾 Cached for 6 hours (expires at ${new Date(this.cache.expiresAt).toLocaleTimeString()})`);
+    
+    return snapshots;
   }
 
   /**
@@ -170,6 +264,23 @@ class BatchDataService {
       stockCount: this.cache.data.length,
       ageMinutes,
       expiresInMinutes
+    };
+  }
+  
+  /**
+   * Get data source status for frontend indicator
+   */
+  getDataSourceStatus(): {
+    isLive: boolean;
+    source: 'live' | 'cache';
+    lastUpdate: number;
+    marketOpen: boolean;
+  } {
+    return {
+      isLive: this.currentDataSource === 'live',
+      source: this.currentDataSource,
+      lastUpdate: this.cache?.timestamp || 0,
+      marketOpen: this.marketStatusService.isMarketOpen()
     };
   }
 
