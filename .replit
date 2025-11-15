@@ -4,7 +4,7 @@ hidden = [".config", ".git", "generated-icon.png", "node_modules", "dist"]
 
 [nix]
 channel = "stable-24_05"
-packages = ["zip"]
+packages = ["zip", "run"]
 
 [deployment]
 deploymentTarget = "autoscale"
@@ -79,7 +79,11 @@ externalPort = 6800
 PORT = "5000"
 
 [agent]
-integrations = ["javascript_openai:1.0.0", "javascript_database:1.0.0", "javascript_xai:1.0.0"]
+integrations = [
+  "javascript_openai:1.0.0",
+  "javascript_database:1.0.0",
+  "javascript_xai:1.0.0",
+]
 
 [workflows]
 runButton = "Project"
@@ -101,3 +105,8 @@ author = "agent"
 task = "shell.exec"
 args = "npm run dev"
 waitForPort = 5000
+run = "npm start"
+language = "nodejs"
+
+[git]
+add = ["."]
