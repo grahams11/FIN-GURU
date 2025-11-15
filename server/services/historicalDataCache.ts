@@ -16,6 +16,9 @@
  */
 
 import { polygonService } from './polygonService';
+import { db } from '../db';
+import { historicalBars } from '../../shared/schema';
+import { eq, and, gte, lte } from 'drizzle-orm';
 
 export interface HistoricalBar {
   timestamp: number;
@@ -60,21 +63,143 @@ export class HistoricalDataCache {
   }
   
   /**
+   * Load cache from database (instant startup)
+   */
+  private async loadFromDatabase(): Promise<boolean> {
+    try {
+      console.log('💾 Loading historical cache from database...');
+      const startTime = Date.now();
+      
+      // Fetch all bars from DB
+      const rows = await db.select().from(historicalBars);
+      
+      if (rows.length === 0) {
+        console.log('⚠️ Database is empty - no cached data available');
+        return false;
+      }
+      
+      // Group bars by symbol
+      const symbolBarsMap = new Map<string, HistoricalBar[]>();
+      let minTimestamp = Infinity;
+      let maxTimestamp = 0;
+      
+      for (const row of rows) {
+        const symbol = row.symbol;
+        const barTimestamp = new Date(row.barTimestamp).getTime();
+        
+        if (!symbolBarsMap.has(symbol)) {
+          symbolBarsMap.set(symbol, []);
+        }
+        
+        symbolBarsMap.get(symbol)!.push({
+          timestamp: barTimestamp,
+          open: row.open,
+          high: row.high,
+          low: row.low,
+          close: row.close,
+          volume: row.volume
+        });
+        
+        minTimestamp = Math.min(minTimestamp, barTimestamp);
+        maxTimestamp = Math.max(maxTimestamp, barTimestamp);
+      }
+      
+      // Populate cache and sort bars by timestamp
+      this.cache.clear();
+      for (const [symbol, bars] of symbolBarsMap.entries()) {
+        bars.sort((a, b) => a.timestamp - b.timestamp);
+        this.cache.set(symbol, bars);
+      }
+      
+      // Update metadata
+      this.cacheStartDate = new Date(minTimestamp).toISOString().split('T')[0];
+      this.cacheEndDate = new Date(maxTimestamp).toISOString().split('T')[0];
+      this.lastCacheTime = Date.now();
+      
+      const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+      console.log(`✅ Loaded ${this.cache.size} symbols (${rows.length} bars) from database in ${duration}s`);
+      console.log(`📊 Cache range: ${this.cacheStartDate} → ${this.cacheEndDate}`);
+      return true;
+    } catch (error: any) {
+      console.error('❌ Failed to load cache from database:', error.message);
+      return false;
+    }
+  }
+  
+  /**
+   * Save cache to database (atomic batch write with transaction)
+   */
+  private async saveToDatabase(): Promise<void> {
+    try {
+      console.log('💾 Saving historical cache to database...');
+      const startTime = Date.now();
+      
+      // Prepare all batch inserts before transaction
+      const batchInserts: any[] = [];
+      
+      for (const [symbol, bars] of this.cache.entries()) {
+        for (const bar of bars) {
+          batchInserts.push({
+            symbol,
+            barTimestamp: new Date(bar.timestamp),
+            open: bar.open,
+            high: bar.high,
+            low: bar.low,
+            close: bar.close,
+            volume: bar.volume,
+            lastUpdated: new Date()
+          });
+        }
+      }
+      
+      // Wrap delete + batch inserts in a transaction for atomicity
+      await db.transaction(async (tx) => {
+        // Clear existing data first
+        await tx.delete(historicalBars);
+        
+        // Insert in batches of 5000 to avoid memory issues
+        const BATCH_SIZE = 5000;
+        for (let i = 0; i < batchInserts.length; i += BATCH_SIZE) {
+          const batch = batchInserts.slice(i, i + BATCH_SIZE);
+          await tx.insert(historicalBars).values(batch);
+          console.log(`💾 Saved batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(batchInserts.length / BATCH_SIZE)}`);
+        }
+      });
+      
+      const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+      console.log(`✅ Saved ${batchInserts.length} bars to database in ${duration}s`);
+    } catch (error: any) {
+      console.error('❌ Failed to save cache to database:', error.message);
+      console.warn('⚠️ Transaction rolled back - previous cache data remains intact');
+      // Non-fatal error - cache still works in-memory, old DB data preserved
+    }
+  }
+  
+  /**
    * Initialize cache on server startup with retry logic
+   * Tries DB first, falls back to API refresh if empty
    */
   async initialize(): Promise<void> {
     console.log('📊 Initializing Historical Data Cache...');
     
+    // Try loading from database first (instant)
+    const dbLoaded = await this.loadFromDatabase();
+    
+    if (dbLoaded) {
+      console.log('✅ Historical cache initialized from database');
+      this.startScheduler();
+      return;
+    }
+    
+    // Database empty - need to refresh from API
+    console.log('⚠️ Database cache empty - fetching from API...');
     const maxRetries = 3;
     let retries = 0;
     
     while (retries < maxRetries) {
       try {
-        // Populate cache immediately
         await this.refreshCache();
         console.log('✅ Historical cache initialized successfully');
-        
-        // Schedule daily refresh at 4:00 PM CST
         this.startScheduler();
         return;
       } catch (error: any) {
@@ -89,10 +214,19 @@ export class HistoricalDataCache {
       }
     }
     
-    // If all retries failed, reject promise to prevent scanner from starting
-    const error = new Error('Historical cache initialization failed after all retries');
+    // If all retries failed, try one more DB load (serve stale data)
+    console.warn('⚠️ API refresh failed - attempting to serve stale database data...');
+    const staleLoaded = await this.loadFromDatabase();
+    
+    if (staleLoaded) {
+      console.warn('⚠️ Serving stale cache from database - scheduler will retry refresh later');
+      this.startScheduler();
+      return;
+    }
+    
+    // Complete failure - no data available
+    const error = new Error('Historical cache initialization failed: no API data and no DB fallback');
     console.error('❌ Historical cache initialization failed after all retries');
-    console.warn('⚠️ Scheduler disabled - cache will remain empty until manual refresh');
     throw error;
   }
   
@@ -269,6 +403,9 @@ export class HistoricalDataCache {
       console.log(`📊 Trading days: ${tradingDays}, API calls: ${apiCalls}`);
       console.log(`📊 Cache range: ${startDateStr} → ${endDateStr}`);
       console.log(`💾 Cache expires in 24 hours`);
+      
+      // Persist cache to database
+      await this.saveToDatabase();
       
     } catch (error: any) {
       console.error('❌ Failed to refresh historical cache:', error);
