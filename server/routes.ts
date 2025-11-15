@@ -924,6 +924,86 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Refresh trade calculations endpoint - recalculates exitPrice and projectedROIAmount for all trades
+  app.post('/api/refresh-trade-calculations', async (req, res) => {
+    try {
+      console.log('🔄 Refreshing trade calculations with correct delta-based formula...');
+      
+      // Get all existing trades
+      const allTrades = await storage.getTopTrades();
+      
+      if (allTrades.length === 0) {
+        return res.json({ 
+          success: true,
+          message: 'No trades to refresh',
+          updated: 0 
+        });
+      }
+      
+      let updated = 0;
+      let errors = 0;
+      
+      // Recalculate each trade
+      for (const trade of allTrades) {
+        try {
+          // Extract delta from greeks
+          const delta = typeof trade.greeks === 'object' && trade.greeks !== null 
+            ? (trade.greeks as any).delta || 0.5
+            : 0.5;
+          
+          // Calculate stock movement
+          const stockMovement = Math.abs((trade.stockExitPrice || trade.currentPrice * 1.05) - trade.stockEntryPrice);
+          
+          // Calculate exit price using correct formula: premium + (stockMovement × |delta|)
+          const exitPrice = trade.premium + (stockMovement * Math.abs(delta));
+          
+          // Calculate projected ROI amount (total exit value in dollars)
+          const contractMultiplier = 100;
+          const projectedROIAmount = trade.contracts * exitPrice * contractMultiplier;
+          
+          // Calculate projected ROI percentage
+          const profit = projectedROIAmount - trade.totalCost;
+          const projectedROI = (profit / trade.totalCost) * 100;
+          
+          // Update the trade in the database
+          await db
+            .update(optionsTrade)
+            .set({ 
+              exitPrice,
+              projectedROI,
+              projectedROIAmount
+            })
+            .where(eq(optionsTrade.id, trade.id));
+          
+          updated++;
+          console.log(`✅ ${trade.ticker}: Updated exitPrice $${exitPrice.toFixed(2)} (was $${trade.exitPrice.toFixed(2)}), projectedROIAmount $${projectedROIAmount.toFixed(0)}`);
+          
+        } catch (error) {
+          errors++;
+          console.error(`❌ Error updating ${trade.ticker}:`, error);
+        }
+      }
+      
+      console.log(`🎉 Refresh complete: ${updated} trades updated, ${errors} errors`);
+      
+      res.json({
+        success: true,
+        message: `Successfully refreshed ${updated} trade calculations`,
+        updated,
+        errors,
+        total: allTrades.length
+      });
+      
+    } catch (error) {
+      console.error('❌ Trade calculation refresh error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to refresh trade calculations',
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
   // Execute trade endpoint
   app.post('/api/execute-trade/:id', async (req, res) => {
     try {
