@@ -2,7 +2,8 @@ import { db } from "./db";
 import { 
   users, 
   marketData, 
-  optionsTrade, 
+  optionsTrade,
+  optionsAnalyticsSnapshots,
   aiInsights, 
   portfolioPositions, 
   tradeHistory, 
@@ -23,6 +24,8 @@ import type {
   InsertMarketData, 
   OptionsTrade, 
   InsertOptionsTrade,
+  OptionsAnalyticsSnapshot,
+  InsertOptionsAnalyticsSnapshot,
   AiInsights,
   InsertAiInsights,
   PortfolioPosition,
@@ -58,6 +61,9 @@ export interface IStorage {
   executeTrade(tradeId: string): Promise<boolean>;
   deleteOptionsTrade(tradeId: string): Promise<boolean>;
   clearTrades(): Promise<void>;
+  getLatestPremium(ticker: string, optionType: 'call' | 'put'): Promise<number | null>;
+  saveOptionsSnapshot(snapshot: InsertOptionsAnalyticsSnapshot): Promise<OptionsAnalyticsSnapshot>;
+  getOptionsSnapshot(symbol: string, optionType: 'call' | 'put'): Promise<OptionsAnalyticsSnapshot | null>;
   createAiInsight(insight: InsertAiInsights): Promise<AiInsights>;
   getLatestAiInsights(): Promise<AiInsights | undefined>;
   getPortfolioSummary(userId?: string): Promise<any>;
@@ -188,6 +194,37 @@ export class DatabaseStorage implements IStorage {
 
   async clearTrades(): Promise<void> {
     await db.delete(optionsTrade);
+  }
+
+  async getLatestPremium(ticker: string, optionType: 'call' | 'put'): Promise<number | null> {
+    const [trade] = await db
+      .select()
+      .from(optionsTrade)
+      .where(and(eq(optionsTrade.ticker, ticker), eq(optionsTrade.optionType, optionType)))
+      .orderBy(desc(optionsTrade.createdAt))
+      .limit(1);
+    return trade?.premium || null;
+  }
+
+  async saveOptionsSnapshot(snapshot: InsertOptionsAnalyticsSnapshot): Promise<OptionsAnalyticsSnapshot> {
+    const [saved] = await db
+      .insert(optionsAnalyticsSnapshots)
+      .values(snapshot)
+      .returning();
+    return saved;
+  }
+
+  async getOptionsSnapshot(symbol: string, optionType: 'call' | 'put'): Promise<OptionsAnalyticsSnapshot | null> {
+    const [snapshot] = await db
+      .select()
+      .from(optionsAnalyticsSnapshots)
+      .where(and(
+        eq(optionsAnalyticsSnapshots.symbol, symbol),
+        eq(optionsAnalyticsSnapshots.optionType, optionType)
+      ))
+      .orderBy(desc(optionsAnalyticsSnapshots.fetchedAt))
+      .limit(1);
+    return snapshot || null;
   }
 
   async createAiInsight(insight: InsertAiInsights): Promise<AiInsights> {

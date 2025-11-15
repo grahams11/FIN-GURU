@@ -15,6 +15,7 @@
 import { polygonService } from './polygonService';
 import { historicalDataService } from './historicalDataService';
 import { marketStatusService } from './marketStatusService';
+import { storage } from '../storage';
 
 // ===== INTERFACES =====
 
@@ -88,7 +89,7 @@ export interface OptionsAnalytics {
   
   // Metadata
   timestamp: number;
-  source: 'polygon-rest' | 'polygon-websocket';
+  source: 'polygon-rest' | 'polygon-websocket' | 'database';
   cacheAge: number; // seconds since fetch
   error?: string;
 }
@@ -343,7 +344,42 @@ export class LiveDataAdapter {
     }
     
     try {
-      // Fetch Greeks and IV from PolygonService REST API
+      const isMarketOpen = marketStatusService.isMarketOpen();
+      
+      // MARKET CLOSED: Use database snapshot (zero Polygon calls)
+      if (!isMarketOpen) {
+        const snapshot = await storage.getOptionsSnapshot(symbol, optionType);
+        if (snapshot && snapshot.fetchedAt) {
+          const hoursAgo = Math.floor((Date.now() - new Date(snapshot.fetchedAt).getTime()) / 3600000);
+          console.log(`💾 DB Snapshot: ${symbol} $${snapshot.premium.toFixed(2)} (saved ${hoursAgo}h ago)`);
+          
+          return {
+            symbol,
+            strike: snapshot.strike,
+            expiry: snapshot.expiry,
+            optionType,
+            delta: snapshot.delta,
+            gamma: snapshot.gamma,
+            theta: snapshot.theta,
+            vega: snapshot.vega,
+            impliedVolatility: snapshot.impliedVolatility,
+            ivPercentile: snapshot.ivPercentile,
+            volume: snapshot.volume,
+            openInterest: snapshot.openInterest,
+            avgVolume20Day: snapshot.avgVolume20Day,
+            volumeRatio: snapshot.volumeRatio,
+            bid: snapshot.bid,
+            ask: snapshot.ask,
+            lastPrice: snapshot.lastPrice,
+            premium: snapshot.premium,
+            timestamp: Date.now(),
+            source: 'database',
+            cacheAge: snapshot.fetchedAt ? Math.floor((Date.now() - new Date(snapshot.fetchedAt).getTime()) / 1000) : 0
+          };
+        }
+      }
+      
+      // MARKET OPEN or no snapshot: Fetch from Polygon
       const greeks = await polygonService.getOptionsGreeks(symbol, optionType);
       
       if (!greeks) {
@@ -351,25 +387,23 @@ export class LiveDataAdapter {
         return null;
       }
       
-      // Construct option symbol for WebSocket lookup (O:SPY251113C00680000)
       const optionSymbol = this.formatOptionSymbol(symbol, greeks.strike, greeks.expiry, optionType);
       
-      // Try to get live premium from Polygon WebSocket cache (market hours only)
-      const wsQuote = polygonService.getCachedOptionQuote(optionSymbol);
-      
-      // Use WebSocket live data if available and fresh (<60s), otherwise fall back to REST API
+      // Premium sourcing: Prioritize WebSocket when market open
       let bid = greeks.bid;
       let ask = greeks.ask;
       let premium = greeks.bid > 0 && greeks.ask > 0 ? (greeks.bid + greeks.ask) / 2 : greeks.lastPrice;
-      let dataSource: 'polygon-rest' | 'polygon-websocket' = 'polygon-rest';
+      let dataSource: 'polygon-rest' | 'polygon-websocket' | 'database' = 'polygon-rest';
       
-      if (wsQuote && wsQuote.premium > 0) {
-        // Live WebSocket data available - use it for pricing
-        bid = wsQuote.bid;
-        ask = wsQuote.ask;
-        premium = wsQuote.premium;
-        dataSource = 'polygon-websocket';
-        console.log(`💎 Using live WebSocket premium for ${symbol}: $${premium.toFixed(2)} (Bid $${bid.toFixed(2)}, Ask $${ask.toFixed(2)})`);
+      if (isMarketOpen) {
+        const wsQuote = polygonService.getCachedOptionQuote(optionSymbol);
+        if (wsQuote && wsQuote.premium > 0) {
+          bid = wsQuote.bid;
+          ask = wsQuote.ask;
+          premium = wsQuote.premium;
+          dataSource = 'polygon-websocket';
+          console.log(`💎 Live WebSocket: ${symbol} $${premium.toFixed(2)}`);
+        }
       }
       
       // Get IV percentile from PolygonService
@@ -416,6 +450,29 @@ export class LiveDataAdapter {
       this.optionsCache.set(cacheKey, {
         data: analytics,
         fetchedAt: Date.now()
+      });
+      
+      // Save snapshot to database for overnight use
+      await storage.saveOptionsSnapshot({
+        symbol,
+        optionType,
+        strike: greeks.strike,
+        expiry: greeks.expiry,
+        delta: greeks.delta,
+        gamma: greeks.gamma,
+        theta: greeks.theta,
+        vega: greeks.vega,
+        impliedVolatility: greeks.impliedVolatility,
+        ivPercentile: ivPercentileData?.ivPercentile || 50,
+        volume: greeks.volume,
+        openInterest: greeks.openInterest,
+        avgVolume20Day: volumeData?.avgVolume20Day || greeks.volume,
+        volumeRatio: volumeData?.volumeRatio || 1,
+        bid,
+        ask,
+        lastPrice: greeks.lastPrice,
+        premium,
+        source: dataSource
       });
       
       return analytics;

@@ -45,6 +45,7 @@ export interface EliteScanResult {
   vega: number;
   impliedVolatility: number;
   ivPercentile: number;
+  premium: number;
   
   // Volume metrics
   volumeRatio: number; // Current/avg (>3 = unusual)
@@ -450,6 +451,12 @@ export class EliteScanner {
         
         console.log(`✅ ${symbol}: PASSED ALL FILTERS → ${optionType.toUpperCase()} setup (${passedFilters.join(', ')})`);
 
+        // Try to get options analytics from database snapshot (market closed)
+        // This provides real premiums/Greeks if available from previous market session
+        const snapshotAnalytics = await liveDataAdapter.getOptionsAnalytics(symbol, optionType);
+        if (snapshotAnalytics && snapshotAnalytics.source === 'database') {
+          console.log(`💾 Using DB snapshot for ${symbol} ${optionType.toUpperCase()}: $${snapshotAnalytics.premium.toFixed(2)}`);
+        }
         
         // Calculate pivot from overnight data (or use EOD if no overnight)
         const pivotHigh = hasOvernightBars ? overnightData.overnightHigh : eod.high;
@@ -477,6 +484,7 @@ export class EliteScanner {
         defaultExpiry.setDate(today.getDate() + 5); // 5 DTE default
         
         // Return full EliteScanResult for overnight analysis
+        // Prioritize snapshot analytics if available, then bestContract, then defaults
         return {
           symbol,
           optionType,
@@ -488,21 +496,22 @@ export class EliteScanner {
           atrLong: atr, // Same for overnight
           pivotLevel,
           abovePivot,
-          strike: bestContract?.strike || defaultStrike,
-          expiry: bestContract?.expiry || defaultExpiry.toISOString().split('T')[0],
-          delta: bestContract?.delta || (optionType === 'call' ? 0.5 : -0.5),
-          gamma: bestContract?.gamma || 0,
-          theta: bestContract?.theta || 0,
-          vega: bestContract?.vega || 0,
-          impliedVolatility: bestContract?.iv || 0,
-          ivPercentile: 0, // Not available for overnight
-          volumeRatio,
-          isUnusualVolume: volumeRatio > 3,
+          strike: snapshotAnalytics?.strike || bestContract?.strike || defaultStrike,
+          expiry: snapshotAnalytics?.expiry || bestContract?.expiry || defaultExpiry.toISOString().split('T')[0],
+          delta: snapshotAnalytics?.delta || bestContract?.delta || (optionType === 'call' ? 0.5 : -0.5),
+          gamma: snapshotAnalytics?.gamma || bestContract?.gamma || 0,
+          theta: snapshotAnalytics?.theta || bestContract?.theta || 0,
+          vega: snapshotAnalytics?.vega || bestContract?.vega || 0,
+          impliedVolatility: snapshotAnalytics?.impliedVolatility || bestContract?.iv || 0,
+          ivPercentile: snapshotAnalytics?.ivPercentile || 0,
+          volumeRatio: snapshotAnalytics?.volumeRatio || volumeRatio,
+          isUnusualVolume: (snapshotAnalytics?.volumeRatio || volumeRatio) > 3,
           signalQuality,
           passedFilters,
           isLive: false,
           isWatchlist,
-          scannedAt: Date.now()
+          scannedAt: Date.now(),
+          premium: snapshotAnalytics?.premium || bestContract?.premium || 0
         };
       }
       
