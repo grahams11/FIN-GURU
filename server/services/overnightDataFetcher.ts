@@ -129,12 +129,13 @@ export class OvernightDataFetcher {
           volume: bar.volume
         }));
         
-        // Use PREVIOUS day as EOD baseline and MOST RECENT as current price
-        // This allows scanner to calculate movement = (mostRecent - previous) / previous
+        // Use PREVIOUS day as EOD baseline (e.g., Nov 13)
+        // and MOST RECENT as current price (e.g., Nov 14 = last trading day)
+        // This allows scanner to calculate movement = (Nov 14 - Nov 13) / Nov 13
         const previousBar = historicalData.bars[historicalData.bars.length - 2];
         const mostRecentBar = historicalData.bars[historicalData.bars.length - 1];
         
-        // Override EOD snapshot to use previous day's close for movement calculation
+        // EOD snapshot = previous day's close for movement baseline
         eodSnapshot = {
           symbol,
           date: new Date(previousBar.timestamp).toISOString().split('T')[0],
@@ -145,7 +146,7 @@ export class OvernightDataFetcher {
           timestamp: previousBar.timestamp
         };
         
-        console.log(`📊 ${symbol}: Using ${historicalData.bars.length} cached daily bars for indicators`);
+        console.log(`📊 ${symbol}: Using ${historicalData.bars.length} cached daily bars (Last: ${new Date(mostRecentBar.timestamp).toISOString().split('T')[0]})`);
         
         return {
           symbol,
@@ -154,7 +155,7 @@ export class OvernightDataFetcher {
           overnightHigh: mostRecentBar.high,
           overnightLow: mostRecentBar.low,
           overnightVolume: mostRecentBar.volume,
-          breakoutDetected: false,
+          breakoutDetected: mostRecentBar.high > previousBar.high,
           timestamp: Date.now()
         };
       }
