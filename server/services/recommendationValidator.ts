@@ -27,10 +27,32 @@ export class RecommendationValidator {
   
   /**
    * Check if a recommendation is still valid and actionable
+   * WATCHLIST EXEMPTION: Overnight watchlist plays skip age/price checks
    */
   static async validateRecommendation(trade: OptionsTrade): Promise<ValidationResult> {
-    // 1. Check age (stale recommendations)
     const ageMinutes = this.getAgeMinutes(trade.createdAt);
+    
+    // WATCHLIST EXEMPTION: Skip age/price validation for overnight watchlist plays
+    // They're meant to persist overnight for pre-market research
+    if (trade.isWatchlist) {
+      // Only check expiration for watchlist plays
+      const expirationDate = new Date(trade.expiry);
+      if (expirationDate < new Date()) {
+        return {
+          isValid: false,
+          reason: 'Expired',
+          ageMinutes
+        };
+      }
+      
+      return {
+        isValid: true,
+        ageMinutes
+      };
+    }
+    
+    // PREMIUM PLAYS: Full validation (age + price drift + expiration)
+    // 1. Check age (stale recommendations)
     if (ageMinutes > (this.MAX_AGE_MS / 60000)) {
       return {
         isValid: false,

@@ -59,7 +59,10 @@ Preferred communication style: Simple, everyday language.
 - **VIX Squeeze Kill Switch**: Real-time alert system for high-confidence 0DTE PUT opportunities when VIX >= 20 with >5% change.
 - **24/7 Auto-Scan System**: Runs Elite Scanner every 5 minutes continuously, integrating historical cache.
 - **Dashboard Market Overview**: Displays real-time S&P 500, NASDAQ, and VIX metrics.
-- **Recommendation Validation System**: Filters stale (>120min old) and invalid (>2% adverse price movement) recommendations.
+- **Recommendation Validation System** (Nov 2025): Two-tier validation with watchlist exemption.
+  - **Premium Plays**: Full validation (age <15min, price drift <3%, expiration check) to ensure setups remain actionable.
+  - **Watchlist Plays**: Exempted from age/price checks to persist overnight for pre-market research. Only checked for expiration.
+  - Prevents watchlist plays from being filtered out by staleness checks during overnight/weekend periods.
 - **TradeExitMonitor**: Tracks historical trade recommendations and evaluates strategy win percentage daily at 4:15 PM ET.
 
 ### Self-Learning System (AI Education Engine)
