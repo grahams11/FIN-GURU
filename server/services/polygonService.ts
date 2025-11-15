@@ -1790,6 +1790,18 @@ class PolygonService {
         return null;
       }
       
+      // Check if we have real Greeks or just nulls
+      const hasRealGreeks = topOption.greeks.delta !== null && 
+                            topOption.greeks.delta !== undefined &&
+                            topOption.greeks.gamma !== null && 
+                            topOption.greeks.gamma !== undefined;
+      
+      if (!hasRealGreeks) {
+        console.warn(`⚠️ ${symbol}: Polygon returned null Greeks - will use defaults`);
+      } else {
+        console.log(`✅ ${symbol}: Got real Greeks from Polygon (Δ${topOption.greeks.delta.toFixed(4)}, Γ${topOption.greeks.gamma.toFixed(4)})`);
+      }
+      
       return {
         symbol,
         strike: topOption.details.strike_price,
