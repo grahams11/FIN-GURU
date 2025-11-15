@@ -652,8 +652,83 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Clear existing trades
       await storage.clearTrades();
       
-      // Generate new recommendations
-      const recommendations = await AIAnalysisService.generateTradeRecommendations();
+      // Generate new recommendations using Elite Scanner
+      const { eliteScanner } = await import('./services/eliteScanner');
+      const scanResponse = await eliteScanner.scan();
+      const scanResults = scanResponse.results; // Destructure results array from response object
+      console.log(`🔍 Elite Scanner found ${scanResults.length} opportunities (${scanResults.filter(r => r.isWatchlist).length} watchlist)`);
+      
+      // Convert scan results to TradeRecommendation format (same logic as RecommendationRefreshService)
+      // Filter out invalid trades with guards against NaN/0 values
+      const recommendations = scanResults.map(result => {
+        // Estimate premium based on delta (typical options pricing relationship)
+        const timeFactor = 0.15; // ~15% for 3-7 day options
+        const premium = result.stockPrice * Math.abs(result.delta) * timeFactor;
+        
+        // Guard: Skip if premium is invalid (same as AIAnalysisService)
+        if (!premium || premium <= 0 || !isFinite(premium)) {
+          console.warn(`${result.symbol}: Invalid premium $${premium?.toFixed(2)}, skipping trade`);
+          return null;
+        }
+        
+        // Calculate contracts using $1000 budget
+        const maxTradeAmount = 1000;
+        const costPerContract = premium * 100;
+        const optimalContracts = Math.floor(maxTradeAmount / costPerContract);
+        const contracts = Math.max(1, Math.min(50, optimalContracts));
+        
+        // Calculate total cost
+        const totalCost = contracts * premium * 100;
+        
+        // Guard: Skip if total cost is invalid (same as AIAnalysisService)
+        if (!totalCost || totalCost <= 0 || !isFinite(totalCost)) {
+          console.warn(`${result.symbol}: Invalid total cost $${totalCost?.toFixed(2)}, skipping trade`);
+          return null;
+        }
+        
+        // Calculate exit price (2x premium for 100% ROI)
+        const exitPrice = premium * 2.0;
+        
+        // Calculate projected ROI (guarded by totalCost validation above)
+        const contractMultiplier = 100;
+        const totalExitValue = contracts * exitPrice * contractMultiplier;
+        const profit = totalExitValue - totalCost;
+        const projectedROI = (profit / totalCost) * 100;
+        
+        // Calculate target stock price for exit
+        const targetMove = result.optionType === 'call' ? 1.05 : 0.95;
+        const stockExitPrice = result.stockPrice * targetMove;
+        
+        return {
+          ticker: result.symbol,
+          optionType: result.optionType,
+          currentPrice: result.stockPrice,
+          strikePrice: result.strike,
+          expiry: result.expiry,
+          stockEntryPrice: result.stockPrice,
+          stockExitPrice,
+          premium,
+          entryPrice: premium,
+          exitPrice,
+          totalCost,
+          contracts,
+          projectedROI,
+          aiConfidence: result.signalQuality,
+          greeks: {
+            delta: result.delta,
+            gamma: result.gamma,
+            theta: result.theta,
+            vega: result.vega,
+            rho: 0
+          },
+          sentiment: result.rsi > 50 ? 0.7 : 0.3,
+          score: result.signalQuality,
+          holdDays: 3,
+          isWatchlist: result.isWatchlist
+        };
+      }).filter((rec): rec is TradeRecommendation => rec !== null); // Filter out null values from guards
+      
+      console.log(`✅ Converted ${recommendations.length} valid recommendations from ${scanResults.length} scan results`);
       
       // Filter out invalid recommendations and add validation
       const validRecommendations = recommendations.filter(rec => {
