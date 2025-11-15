@@ -42,7 +42,11 @@ Preferred communication style: Simple, everyday language.
 
 ### Trading Systems
 - **Day Trading System (SPX Only)**: Utilizes VIX + RSI for BUY/SELL signals on SPX weekly expirations.
-- **Elite Dual-Strategy Scanner (Stocks)**: Momentum-based scanner for CALL/PUT strategies on 100+ stocks and ETFs, targeting 3-5 high-quality plays per day. Operates 24/7 with dual-mode analysis (live during market hours, EOD + overnight aggregates when closed). Incorporates Grok AI for pivot level calculation, volume spike detection, and breakout confirmation.
+- **Elite Dual-Strategy Scanner (Stocks)**: Momentum-based scanner for CALL/PUT strategies on 100+ stocks and ETFs with two-tier classification system:
+  - **Premium Tier**: Strict filtering (RSI <45/>55, 0.8% movement, 1.2x volume, 1.2x ATR) for high-confidence plays. Targets 3-5 during market hours, up to 12 during overnight mode.
+  - **Watchlist Tier** (Overnight Only, 8 PM - 8:30 AM CST): Relaxed filtering (RSI 40-60 full range, 0.5% movement, 1.0x volume, 1.0x ATR) to capture emerging setups for pre-market research. Minimum 10 total plays (premium + watchlist) during overnight mode.
+  - **Visual UI**: Premium plays display "Bullish/Bearish Elite Play" subtitle. Watchlist plays show yellow "WATCHLIST" badge with "Overnight Watchlist Setup" subtitle.
+  - Operates 24/7 with dual-mode analysis (live during market hours, EOD + overnight aggregates when closed). Incorporates Grok AI for pivot level calculation, volume spike detection, and breakout confirmation.
 
 ### Shared Features
 - **Trade Budget**: $1000 maximum per trade with smart contract allocation.
