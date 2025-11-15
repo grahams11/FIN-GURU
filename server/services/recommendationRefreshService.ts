@@ -147,7 +147,7 @@ export class RecommendationRefreshService {
       const validationResults = await RecommendationValidator.validateRecommendations(existingTrades);
       const invalidCount = Array.from(validationResults.values()).filter(r => !r.isValid).length;
       
-      if (invalidCount > 0) {
+      if (invalidCount > 0 || existingTrades.length === 0) {
         console.log(`🧹 Found ${invalidCount} stale/invalid recommendations - clearing and regenerating...`);
         
         // Clear all trades and regenerate fresh ones
@@ -175,7 +175,7 @@ export class RecommendationRefreshService {
               ? rec.estimatedProfit 
               : null;
 
-            await storage.addTrade({
+            await storage.createOptionsTrade({
               ticker: rec.ticker,
               optionType: rec.optionType,
               currentPrice: rec.currentPrice,

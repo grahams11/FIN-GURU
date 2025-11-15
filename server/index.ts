@@ -75,10 +75,8 @@ app.use((req, res, next) => {
   // DISABLED: Ghost 1DTE Scheduler (causing API rate limits with 500+ S&P requests)
   // GhostScheduler.start();
   
-  // Start Recommendation Auto-Refresh Service (15min interval during market hours)
+  // Auto-Refresh Service will start after cache initialization (see below)
   const { RecommendationRefreshService } = await import('./services/recommendationRefreshService');
-  RecommendationRefreshService.start();
-  console.log('✅ Recommendation auto-refresh service started');
   
   // ACTIVATE EOD CACHE — DAILY 3:00 PM CST
   eodCacheService.startScheduler();
@@ -149,10 +147,17 @@ app.use((req, res, next) => {
     .then(() => {
       setTimeout(runAutoScan, 5000); // 5s delay after cache ready
       console.log('🎯 Elite Scanner will start in 5s (cache ready)');
+      
+      // Start auto-refresh service after cache is ready (6s delay to avoid startup congestion)
+      setTimeout(() => {
+        RecommendationRefreshService.start();
+        console.log('✅ Recommendation auto-refresh service started (cache ready)');
+      }, 6000);
     })
     .catch(() => {
       console.error('❌ Elite Scanner DISABLED — historical cache initialization failed');
       console.warn('⚠️ Scanner will not run automatically to prevent API quota exhaustion');
+      console.error('❌ Auto-refresh service DISABLED — historical cache initialization failed');
     });
   
   // Run auto-scan every 5 minutes
