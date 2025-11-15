@@ -59,6 +59,7 @@ export interface IStorage {
   deleteOptionsTrade(tradeId: string): Promise<boolean>;
   clearTrades(): Promise<void>;
   getLatestPremium(ticker: string, optionType: 'call' | 'put'): Promise<number | null>;
+  getLatestOptionsData(ticker: string, optionType: 'call' | 'put'): Promise<{ premium: number; greeks: any; strike: number; expiry: string } | null>;
   createAiInsight(insight: InsertAiInsights): Promise<AiInsights>;
   getLatestAiInsights(): Promise<AiInsights | undefined>;
   getPortfolioSummary(userId?: string): Promise<any>;
@@ -199,6 +200,26 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(optionsTrade.createdAt))
       .limit(1);
     return trade?.premium || null;
+  }
+
+  async getLatestOptionsData(ticker: string, optionType: 'call' | 'put'): Promise<{ premium: number; greeks: any; strike: number; expiry: string } | null> {
+    const [trade] = await db
+      .select()
+      .from(optionsTrade)
+      .where(and(eq(optionsTrade.ticker, ticker), eq(optionsTrade.optionType, optionType)))
+      .orderBy(desc(optionsTrade.createdAt))
+      .limit(1);
+    
+    if (!trade || !trade.premium) {
+      return null;
+    }
+    
+    return {
+      premium: trade.premium,
+      greeks: trade.greeks,
+      strike: trade.strikePrice,
+      expiry: trade.expiry
+    };
   }
 
   async createAiInsight(insight: InsertAiInsights): Promise<AiInsights> {

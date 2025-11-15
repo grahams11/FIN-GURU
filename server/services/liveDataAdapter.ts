@@ -346,7 +346,60 @@ export class LiveDataAdapter {
     try {
       const isMarketOpen = marketStatusService.isMarketOpen();
       
-      // Fetch Greeks from Polygon (needed for strike, expiry, Greeks regardless of market status)
+      // MARKET CLOSED: Try to use stored data (premium + Greeks) from database
+      if (!isMarketOpen) {
+        const storedData = await storage.getLatestOptionsData(symbol, optionType);
+        if (storedData && storedData.greeks && typeof storedData.greeks === 'object') {
+          const greeksData = storedData.greeks as any;
+          console.log(`💾 EOD Data: ${symbol} $${storedData.premium.toFixed(2)} + Greeks from options_trades`);
+          
+          const analytics: OptionsAnalytics = {
+            symbol,
+            strike: storedData.strike,
+            expiry: storedData.expiry,
+            optionType,
+            
+            // Greeks from stored data
+            delta: greeksData.delta || 0,
+            gamma: greeksData.gamma || 0,
+            theta: greeksData.theta || 0,
+            vega: greeksData.vega || 0,
+            
+            // Volatility (from stored data or defaults)
+            impliedVolatility: greeksData.impliedVolatility || greeksData.iv || 0,
+            ivPercentile: greeksData.ivPercentile || 50,
+            
+            // Volume (from stored data or defaults)
+            volume: greeksData.volume || 0,
+            openInterest: greeksData.openInterest || greeksData.oi || 0,
+            avgVolume20Day: greeksData.avgVolume20Day || greeksData.volume || 0,
+            volumeRatio: greeksData.volumeRatio || 1,
+            
+            // Pricing from stored data
+            bid: greeksData.bid || 0,
+            ask: greeksData.ask || 0,
+            lastPrice: greeksData.lastPrice || storedData.premium,
+            premium: storedData.premium,
+            
+            // Metadata
+            timestamp: Date.now(),
+            source: 'database',
+            cacheAge: 0
+          };
+          
+          // Cache result
+          this.optionsCache.set(`${symbol}_${optionType}`, {
+            data: analytics,
+            fetchedAt: Date.now()
+          });
+          
+          return analytics;
+        }
+        // If no valid stored data, fall through to Polygon API
+        console.log(`⚠️ No valid stored data for ${symbol} ${optionType}, falling back to Polygon`);
+      }
+      
+      // MARKET OPEN or no stored data: Fetch from Polygon
       const greeks = await polygonService.getOptionsGreeks(symbol, optionType);
       
       if (!greeks) {
@@ -372,14 +425,6 @@ export class LiveDataAdapter {
           dataSource = 'polygon-websocket';
           console.log(`💎 Live WebSocket: ${symbol} $${premium.toFixed(2)}`);
         }
-      } else {
-        // MARKET CLOSED: Use EOD premium from options_trades
-        const eodPremium = await storage.getLatestPremium(symbol, optionType);
-        if (eodPremium && eodPremium > 0) {
-          premium = eodPremium;
-          dataSource = 'database';
-          console.log(`💾 EOD Premium: ${symbol} $${premium.toFixed(2)} from options_trades`);
-        }
       }
       
       // Get IV percentile from PolygonService
@@ -394,7 +439,7 @@ export class LiveDataAdapter {
         expiry: greeks.expiry,
         optionType,
         
-        // Greeks (from REST API)
+        // Greeks (from Polygon API)
         delta: greeks.delta,
         gamma: greeks.gamma,
         theta: greeks.theta,
