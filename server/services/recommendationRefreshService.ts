@@ -166,13 +166,27 @@ export class RecommendationRefreshService {
       
       // Validate existing trades
       const validationResults = await RecommendationValidator.validateRecommendations(existingTrades);
-      const invalidCount = Array.from(validationResults.values()).filter(r => !r.isValid).length;
+      const invalidTrades = existingTrades.filter(trade => {
+        const result = validationResults.get(trade.id);
+        return result && !result.isValid;
+      });
       
-      if (invalidCount > 0 || existingTrades.length === 0) {
-        console.log(`🧹 Found ${invalidCount} stale/invalid recommendations - clearing and regenerating...`);
-        
-        // Clear all trades and regenerate fresh ones
-        await storage.clearTrades();
+      // Delete ONLY invalid trades (surgical deletion instead of clearing all)
+      if (invalidTrades.length > 0) {
+        console.log(`🧹 Found ${invalidTrades.length} invalid recommendations - removing them...`);
+        for (const trade of invalidTrades) {
+          await storage.deleteOptionsTrade(trade.id);
+          const result = validationResults.get(trade.id);
+          console.log(`  ❌ Removed ${trade.ticker} (${result?.reason || 'invalid'})`);
+        }
+      }
+      
+      // Check if we need new recommendations (less than target count)
+      const remainingTrades = await storage.getTopTrades();
+      const needsRefresh = remainingTrades.length === 0;
+      
+      if (needsRefresh) {
+        console.log(`🔄 Generating new recommendations (${remainingTrades.length} remaining)...`);
         
         // Generate new recommendations using Elite Scanner
         const scanResponse = await eliteScanner.scan();

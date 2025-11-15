@@ -79,21 +79,21 @@ export class MarketStatusService {
   refreshStatus(): void {
     const now = new Date();
     
-    // Get current time in ET timezone - use separate formatters for reliability
-    const hour = parseInt(new Intl.DateTimeFormat('en-US', {
+    // Get current time in ET timezone using a single formatter for consistency
+    const etTimeString = now.toLocaleString('en-US', {
       timeZone: 'America/New_York',
-      hour: 'numeric',
-      hour12: false
-    }).format(now));
+      hour12: false,
+      hour: '2-digit',
+      minute: '2-digit'
+    });
     
-    const minute = parseInt(new Intl.DateTimeFormat('en-US', {
-      timeZone: 'America/New_York',
-      minute: 'numeric'
-    }).format(now));
-    
+    // Parse "HH:MM" format
+    const [hourStr, minuteStr] = etTimeString.split(':');
+    const hour = parseInt(hourStr, 10);
+    const minute = parseInt(minuteStr, 10);
     const timeInMinutes = hour * 60 + minute;
     
-    // Check if it's a weekday
+    // Check if it's a weekday in ET timezone
     const dayOfWeek = now.toLocaleDateString('en-US', { 
       timeZone: 'America/New_York', 
       weekday: 'short' 

@@ -56,6 +56,7 @@ export interface IStorage {
   createOptionsTrade(trade: InsertOptionsTrade): Promise<OptionsTrade>;
   getTopTrades(): Promise<OptionsTrade[]>;
   executeTrade(tradeId: string): Promise<boolean>;
+  deleteOptionsTrade(tradeId: string): Promise<boolean>;
   clearTrades(): Promise<void>;
   createAiInsight(insight: InsertAiInsights): Promise<AiInsights>;
   getLatestAiInsights(): Promise<AiInsights | undefined>;
@@ -172,6 +173,14 @@ export class DatabaseStorage implements IStorage {
     const result = await db
       .update(optionsTrade)
       .set({ isExecuted: true })
+      .where(eq(optionsTrade.id, tradeId))
+      .returning();
+    return result.length > 0;
+  }
+
+  async deleteOptionsTrade(tradeId: string): Promise<boolean> {
+    const result = await db
+      .delete(optionsTrade)
       .where(eq(optionsTrade.id, tradeId))
       .returning();
     return result.length > 0;

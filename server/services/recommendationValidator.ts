@@ -2,14 +2,15 @@
  * Recommendation Validator Service
  * 
  * Validates that trade recommendations are still actionable:
- * 1. Not too old (stale recommendations)
- * 2. Price hasn't moved too far from entry (invalidates setup)
+ * 1. Not too old (stale recommendations) - ONLY during market hours
+ * 2. Price hasn't moved too far from entry (invalidates setup) - ONLY during market hours
  * 3. Still within trading hours
  * 4. Expiration hasn't passed
  */
 
 import type { OptionsTrade } from '@shared/schema';
 import { polygonService } from './polygonService';
+import { marketStatusService } from './marketStatusService';
 
 export interface ValidationResult {
   isValid: boolean;
@@ -52,8 +53,12 @@ export class RecommendationValidator {
     }
     
     // PREMIUM PLAYS: Full validation (age + price drift + expiration)
-    // 1. Check age (stale recommendations)
-    if (ageMinutes > (this.MAX_AGE_MS / 60000)) {
+    // Check market status to determine which validations to apply
+    const isMarketOpen = marketStatusService.isMarketOpen();
+    
+    // 1. Check age (stale recommendations) - ONLY during market hours
+    // During closed markets, allow plays to persist overnight/weekends
+    if (isMarketOpen && ageMinutes > (this.MAX_AGE_MS / 60000)) {
       return {
         isValid: false,
         reason: `Stale (${ageMinutes.toFixed(0)}min old)`,
@@ -61,7 +66,7 @@ export class RecommendationValidator {
       };
     }
     
-    // 2. Check if expiration has passed
+    // 2. Check if expiration has passed (ALWAYS check this)
     const expirationDate = new Date(trade.expiry);
     if (expirationDate < new Date()) {
       return {
@@ -71,19 +76,22 @@ export class RecommendationValidator {
       };
     }
     
-    // 3. Check if price has moved too much (setup invalidated)
-    const currentPrice = await this.getCurrentPrice(trade.ticker);
-    if (currentPrice !== null) {
-      const entryPrice = trade.stockEntryPrice || trade.currentPrice;
-      const priceDriftPercent = Math.abs(((currentPrice - entryPrice) / entryPrice) * 100);
-      
-      if (priceDriftPercent > this.MAX_PRICE_DRIFT_PERCENT) {
-        return {
-          isValid: false,
-          reason: `Price moved ${priceDriftPercent.toFixed(1)}% (>${this.MAX_PRICE_DRIFT_PERCENT}%)`,
-          priceMoved: priceDriftPercent,
-          ageMinutes
-        };
+    // 3. Check if price has moved too much (setup invalidated) - ONLY during market hours
+    // During closed markets, prices don't change so skip this check
+    if (isMarketOpen) {
+      const currentPrice = await this.getCurrentPrice(trade.ticker);
+      if (currentPrice !== null) {
+        const entryPrice = trade.stockEntryPrice || trade.currentPrice;
+        const priceDriftPercent = Math.abs(((currentPrice - entryPrice) / entryPrice) * 100);
+        
+        if (priceDriftPercent > this.MAX_PRICE_DRIFT_PERCENT) {
+          return {
+            isValid: false,
+            reason: `Price moved ${priceDriftPercent.toFixed(1)}% (>${this.MAX_PRICE_DRIFT_PERCENT}%)`,
+            priceMoved: priceDriftPercent,
+            ageMinutes
+          };
+        }
       }
     }
     
@@ -175,16 +183,10 @@ export class RecommendationValidator {
    */
   private static async getCurrentPrice(ticker: string): Promise<number | null> {
     try {
-      // Try to get cached quote from Polygon
-      const quote = polygonService.getCachedQuote(ticker);
-      if (quote && quote.price > 0) {
-        return quote.price;
-      }
-      
-      // Fallback: Fetch from Polygon API
-      const snapshot = await polygonService.getSnapshot(ticker);
-      if (snapshot?.ticker?.lastTrade?.p) {
-        return snapshot.ticker.lastTrade.p;
+      // Get cached quote from Polygon WebSocket
+      const quote = await polygonService.getCachedQuote(ticker);
+      if (quote && quote.lastPrice > 0) {
+        return quote.lastPrice;
       }
       
       return null;
