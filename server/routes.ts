@@ -704,18 +704,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return null;
         }
         
-        // Calculate exit price (2x premium for 100% ROI)
-        const exitPrice = premium * 2.0;
+        // Calculate target stock price for exit
+        const targetMove = result.optionType === 'call' ? 1.05 : 0.95;
+        const stockExitPrice = result.stockPrice * targetMove;
+        
+        // Calculate exit premium based on stock movement and increased intrinsic value
+        // When stock moves favorably, option gains intrinsic value + maintains time value
+        const stockMovement = Math.abs(stockExitPrice - result.stockPrice);
+        const intrinsicValueGain = stockMovement * Math.abs(result.delta); // Delta approximation
+        const timeValueRetention = premium * 0.7; // Retain 70% of time value
+        const exitPrice = premium + intrinsicValueGain + (timeValueRetention - premium);
         
         // Calculate projected ROI (guarded by totalCost validation above)
         const contractMultiplier = 100;
         const totalExitValue = contracts * exitPrice * contractMultiplier;
         const profit = totalExitValue - totalCost;
         const projectedROI = (profit / totalCost) * 100;
-        
-        // Calculate target stock price for exit
-        const targetMove = result.optionType === 'call' ? 1.05 : 0.95;
-        const stockExitPrice = result.stockPrice * targetMove;
+        const projectedROIAmount = totalExitValue;
         
         return {
           ticker: result.symbol,
@@ -731,6 +736,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           totalCost,
           contracts,
           projectedROI,
+          projectedROIAmount,
           aiConfidence: result.signalQuality,
           greeks: {
             delta: result.delta,

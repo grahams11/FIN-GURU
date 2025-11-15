@@ -54,6 +54,7 @@ export const optionsTrade = pgTable("options_trades", {
   totalCost: real("total_cost"), // Total investment required (contracts × premium × 100)
   contracts: integer("contracts").notNull(),
   projectedROI: real("projected_roi").notNull(),
+  projectedROIAmount: real("projected_roi_amount"), // Estimated total exit value in dollars
   aiConfidence: real("ai_confidence").notNull(),
   greeks: jsonb("greeks").notNull(),
   sentiment: real("sentiment"),
@@ -558,6 +559,7 @@ export interface TradeRecommendation {
   totalCost: number; // Total investment required (contracts × premium × 100)
   contracts: number;
   projectedROI: number;
+  projectedROIAmount?: number; // Estimated total exit value in dollars
   aiConfidence: number;
   greeks: Greeks;
   sentiment: number;
