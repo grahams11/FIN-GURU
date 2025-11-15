@@ -217,13 +217,20 @@ export function TradeCard({ trade, rank, liveQuotes }: TradeCardProps) {
           </div>
         )}
 
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4 bg-gradient-to-r from-green-500/10 to-accent/10 rounded-lg p-4 border border-green-500/20">
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-4 bg-gradient-to-r from-green-500/10 to-accent/10 rounded-lg p-4 border border-green-500/20">
           <div>
             <p className="text-xs text-muted-foreground uppercase tracking-wide">💵 Exit Premium Target</p>
             <p className="text-lg font-bold text-green-500" data-testid={`exit-target-${trade.ticker}`}>
               ${formatNumber(trade.exitPrice || 0)}
             </p>
             <p className="text-xs text-muted-foreground">option premium per contract</p>
+          </div>
+          <div className="bg-green-500/10 rounded-md p-2 border border-green-500/30">
+            <p className="text-xs text-muted-foreground uppercase tracking-wide">💰 Projected ROI Amount</p>
+            <p className="text-lg font-bold text-green-400" data-testid={`roi-amount-${trade.ticker}`}>
+              ${trade.projectedROIAmount != null ? formatNumber(trade.projectedROIAmount, 0) : 'N/A'}
+            </p>
+            <p className="text-xs text-muted-foreground">total exit value</p>
           </div>
           <div>
             <p className="text-xs text-muted-foreground uppercase tracking-wide">🎯 Stock Price Target</p>
