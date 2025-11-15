@@ -7,7 +7,6 @@ import { polygonService } from "./services/polygonService";
 import { robinhoodService } from "./services/robinhoodService";
 import { EliteStrategyEngine } from "./services/eliteStrategyEngine";
 import { RecommendationTracker } from "./services/recommendationTracker";
-import { GhostScheduler } from "./services/ghostScheduler";
 import { eodCacheService } from "./services/eodCache";
 
 const app = express();
