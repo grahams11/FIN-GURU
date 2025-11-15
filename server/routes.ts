@@ -16,7 +16,7 @@ import { marketStatusService } from "./services/marketStatusService";
 import { dailyIndexCache } from "./cache/DailyIndexCache";
 import { eodCacheService } from "./services/eodCache";
 import { batchDataService } from "./services/batchDataService";
-import { insertMarketDataSchema, insertOptionsTradeSchema, insertAiInsightsSchema, insertPortfolioPositionSchema, type OptionsTrade, appConfig } from "@shared/schema";
+import { insertMarketDataSchema, insertOptionsTradeSchema, insertAiInsightsSchema, insertPortfolioPositionSchema, type OptionsTrade, appConfig, optionsTrade } from "@shared/schema";
 import { formatOptionSymbol, toPolygonSubscriptionTopic, toTastytradeOptionSymbol } from "./utils/optionSymbols";
 import { eq } from "drizzle-orm";
 
