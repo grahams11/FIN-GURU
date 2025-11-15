@@ -70,12 +70,10 @@ export class RecommendationRefreshService {
     const targetMove = result.optionType === 'call' ? 1.05 : 0.95; // 5% move
     const stockExitPrice = result.stockPrice * targetMove;
     
-    // Calculate exit premium based on stock movement and increased intrinsic value
-    // When stock moves favorably, option gains intrinsic value + maintains time value
+    // Calculate exit premium based on stock movement and delta
+    // Delta represents the change in option price per $1 move in underlying stock
     const stockMovement = Math.abs(stockExitPrice - result.stockPrice);
-    const intrinsicValueGain = stockMovement * Math.abs(result.delta); // Delta approximation
-    const timeValueRetention = premium * 0.7; // Retain 70% of time value
-    const exitPrice = premium + intrinsicValueGain + (timeValueRetention - premium);
+    const exitPrice = premium + (stockMovement * Math.abs(result.delta));
     
     // Calculate projected ROI (guarded by totalCost validation above)
     const contractMultiplier = 100;

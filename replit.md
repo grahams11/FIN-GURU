@@ -78,6 +78,13 @@ Preferred communication style: Simple, everyday language.
   - **Watchlist Plays**: Exempted from age/price checks to persist overnight for pre-market research. Only checked for expiration.
   - Prevents watchlist plays from being filtered out by staleness checks during overnight/weekend periods.
 - **TradeExitMonitor**: Tracks historical trade recommendations and evaluates strategy win percentage daily at 4:15 PM ET.
+- **Dynamic ROI Calculation System** (Nov 2025): Realistic profit projections based on delta sensitivity and stock movement.
+  - **Exit Price Formula**: `premium + (stockMovement × |delta|)` where stockMovement = 5% for calls, -5% for puts.
+  - **Projected ROI %**: Calculated as `(totalExitValue - totalCost) / totalCost × 100`.
+  - **Projected ROI Amount**: Total exit value in dollars = `contracts × exitPrice × 100`.
+  - **UI Display**: Shows both ROI% (percentage gain) and Projected ROI Amount (dollar value) in trade cards.
+  - **Replaces**: Previous simplistic 2x premium approach that always showed 100% ROI regardless of delta.
+  - **Accuracy**: More realistic projections accounting for option price sensitivity to underlying stock movement.
 
 ### Self-Learning System (AI Education Engine)
 - **Architecture**: Five core services orchestrate autonomous learning using Grok AI reasoning.
