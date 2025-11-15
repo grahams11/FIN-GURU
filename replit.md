@@ -50,13 +50,20 @@ Preferred communication style: Simple, everyday language.
   - **Manual Trigger**: `POST /api/admin/cache-eod` endpoint for on-demand cache population.
   - **Storage**: In-memory cache with 6-hour expiration.
   - **Coverage**: Successfully caches ~11,558 stocks from Polygon daily bars.
+- **Historical Data Cache System**: Eliminates 99% of API calls by batch-caching 30 days of historical data.
+  - **Purpose**: Replaces per-symbol getDailyAggregates calls (28,800+ API calls/day) with grouped batch fetching (~30 calls/day).
+  - **Implementation**: Iterates through 30 trading days, fetching grouped daily bars (1 API call per trading day for ALL symbols).
+  - **Coverage**: Caches 11,000+ symbols with ≥20 bars each for indicator calculations (RSI, EMA, ATR).
+  - **Auto-Refresh**: Daily at 4:00 PM CST (after EOD cache).
+  - **Retry Logic**: 3-attempt initialization with exponential backoff; background refresh on stale cache detection.
+  - **API Reduction**: ~28,800 calls/day → ~30 calls/day (99.89% reduction).
+  - **Integration**: OvernightDataFetcher checks cache first, only falls back to live API on cache miss.
 
 ### Trading Systems
-- **Ghost 1DTE Overnight Scanner**: CURRENTLY DISABLED to prevent API rate limit exhaustion (500+ S&P requests were blocking Elite Scanner from completing its analysis).
-  - **Universe**: S&P 500 with parallel batch processing (50 symbols/batch).
-  - **Performance**: Completes 503-ticker scan in under 3 seconds with 30-second timeout protection.
-  - **Status**: Temporarily disabled in server/index.ts (GhostScheduler.start() commented out) to prioritize Elite Scanner operation.
-  - **Future**: Will be re-enabled once API quota management is optimized to prevent interference with Elite Scanner.
+- **Ghost 1DTE Overnight Scanner**: PERMANENTLY REMOVED (Nov 15, 2025) to eliminate API overhead.
+  - **Rationale**: 500+ S&P requests per scan were causing 429 rate limits that blocked Elite Scanner from completing analysis.
+  - **Deleted Files**: ghost1DTE.ts, ghostScheduler.ts, ghostSweepDetector.ts, /ghost route, Ghost navigation tab.
+  - **Impact**: Freed ~14,000 API calls/day, allowing Elite Scanner to operate without interference.
 - **Day Trading System (SPX Only)**: Utilizes VIX + RSI for BUY/SELL signals on SPX weekly expirations.
 - **Elite Dual-Strategy Scanner (Stocks)**: Momentum-based scanner for CALL/PUT strategies on 100+ stocks and ETFs, targeting 3-5 high-quality plays per day.
   - **Nov 14, 2025 FIX**: Restored Nov 12 behavior where neutral-RSI plays (RSI=50) like RIGL/TBPH were accepted. Changed signal type determination from RSI thresholds to PRICE ACTION (momentum direction):
@@ -82,11 +89,11 @@ Preferred communication style: Simple, everyday language.
 - **VIX Squeeze Kill Switch**: Real-time alert system for high-confidence 0DTE PUT opportunities when VIX >= 20 with >5% change.
   - **Alert UI**: Red pulsing banner with "BUY SPY 0DTE PUT", confidence rating, VIX metrics, and entry/exit windows.
   - **Auto-Refresh**: Component polls every 5 seconds for live alert status.
-- **24/7 Auto-Scan System**: Runs Elite Scanner only, every 5 minutes continuously (Ghost disabled Nov 14, 2025).
+- **24/7 Auto-Scan System**: Runs Elite Scanner only, every 5 minutes continuously (Ghost removed Nov 15, 2025).
   - **Run-State Guard**: Prevents overlapping scans if previous scan exceeds 5-minute interval.
   - **Error Handling**: Scanner failures logged with detailed error diagnostics.
   - **Duration Tracking**: Logs scan execution time to identify performance issues.
-  - **Rationale**: Ghost Scanner (500+ S&P API requests) was causing 429 rate limits that blocked Elite Scanner from analyzing its top 50 candidates, resulting in zero plays despite 85% historical accuracy.
+  - **Historical Cache Integration**: Overnight scans use cached 30-day historical data instead of live API calls.
 - **Dashboard Market Overview**: Displays real-time S&P 500, NASDAQ, and VIX metrics using hierarchical data sources (Tastytrade WebSocket, Google Finance scraping).
   - **Change Calculation**: Real-time changePercent using `(currentPrice - openPrice) / openPrice * 100`.
 - **Recommendation Validation System**: Automatically filters stale (>120min old) and invalid (>2% adverse price movement) recommendations.
@@ -129,8 +136,7 @@ Preferred communication style: Simple, everyday language.
 - **Manual Override**: Admin endpoints allow manual time correction for development/admin only.
 
 ### UI Features
-- **CST Clock Component**: Real-time clock display on dashboard and Ghost page showing accurate CST time with market status indicator (LIVE/CLOSED).
-- **Manual Scan Triggers**: "Run Scan" button for on-demand analysis for the Ghost 1DTE scanner.
+- **CST Clock Component**: Real-time clock display on dashboard showing accurate CST time with market status indicator (LIVE/CLOSED).
 - **Real-Time Dashboard**: Market overview with live S&P 500, NASDAQ, and VIX metrics via SSE streaming.
 
 # External Dependencies

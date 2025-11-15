@@ -8,6 +8,7 @@ import { robinhoodService } from "./services/robinhoodService";
 import { EliteStrategyEngine } from "./services/eliteStrategyEngine";
 import { RecommendationTracker } from "./services/recommendationTracker";
 import { eodCacheService } from "./services/eodCache";
+import { historicalDataCache } from "./services/historicalDataCache";
 
 const app = express();
 app.use(express.json());
@@ -79,9 +80,17 @@ app.use((req, res, next) => {
   RecommendationRefreshService.start();
   console.log('✅ Recommendation auto-refresh service started');
   
-  // ACTIVATE EOD CACHE — DAILY 4:05 PM EST
+  // ACTIVATE EOD CACHE — DAILY 3:00 PM CST
   eodCacheService.startScheduler();
   console.log('✅ EOD Cache scheduler started - daily snapshot at 3:00 PM CST');
+  
+  // ACTIVATE HISTORICAL DATA CACHE — ELIMINATES 99% OF API CALLS
+  // Populates 30 days of historical bars for all symbols
+  // Refreshes daily at 4:00 PM CST (after EOD cache)
+  historicalDataCache.initialize().catch(err => {
+    console.error('❌ Historical cache initialization failed:', err.message);
+  });
+  console.log('✅ Historical cache initializing - daily refresh at 4:00 PM CST');
   
   // 24/7 AUTO-SCAN — ELITE SCANNER ONLY (Ghost disabled to prevent API rate limits)
   const { eliteScanner } = await import('./services/eliteScanner');

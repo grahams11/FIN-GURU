@@ -11,6 +11,7 @@
 import { polygonService } from './polygonService';
 import { eodCacheService, EODSnapshot } from './eodCache';
 import { TimeUtils } from './timeUtils';
+import { historicalDataCache } from './historicalDataCache';
 
 export interface OvernightBar {
   timestamp: number;
@@ -152,10 +153,29 @@ export class OvernightDataFetcher {
         return null;
       }
       
-      try {
-        console.log(`📊 ${symbol}: Fetching historical daily bars as fallback...`);
+      // OPTIMIZED: Use cached historical data (eliminates 99% of API calls)
+      const cachedBars = historicalDataCache.getHistoricalBars(symbol);
+      
+      if (cachedBars && cachedBars.length >= 20) {
+        console.log(`✅ ${symbol}: Using ${cachedBars.length} cached historical bars for indicators`);
         
-        // Fetch last 30 days of daily bars for indicator calculation
+        // Use cached bars directly (already in correct format)
+        return {
+          symbol,
+          eodSnapshot,
+          overnightBars: cachedBars,
+          overnightHigh: eodSnapshot.high,
+          overnightLow: eodSnapshot.low,
+          overnightVolume: eodSnapshot.volume,
+          breakoutDetected: false,
+          timestamp: Date.now()
+        };
+      }
+      
+      // Only fetch live data if cache miss (rare case)
+      try {
+        console.log(`⚠️ ${symbol}: Cache miss - fetching historical daily bars from API...`);
+        
         const endDate = new Date(eodSnapshot.date);
         const startDate = new Date(endDate);
         startDate.setDate(startDate.getDate() - 30);
@@ -170,7 +190,6 @@ export class OvernightDataFetcher {
         if (historicalBars && historicalBars.length >= 20) {
           console.log(`✅ ${symbol}: Using ${historicalBars.length} historical daily bars for indicators`);
           
-          // Convert daily bars to overnight bar format for compatibility
           const convertedBars = historicalBars.map((b: any) => ({
             timestamp: b.t,
             open: b.o,
@@ -183,7 +202,7 @@ export class OvernightDataFetcher {
           return {
             symbol,
             eodSnapshot,
-            overnightBars: convertedBars, // Use historical daily bars as proxy
+            overnightBars: convertedBars,
             overnightHigh: eodSnapshot.high,
             overnightLow: eodSnapshot.low,
             overnightVolume: eodSnapshot.volume,
@@ -200,7 +219,7 @@ export class OvernightDataFetcher {
       return {
         symbol,
         eodSnapshot,
-        overnightBars: [], // Empty array signals insufficient data
+        overnightBars: [],
         overnightHigh: eodSnapshot.close,
         overnightLow: eodSnapshot.close,
         overnightVolume: 0,
