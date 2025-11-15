@@ -89,9 +89,18 @@ export class HistoricalDataCache {
       }
     }
     
-    // If all retries failed, continue but log warning
-    console.warn('⚠️ Historical cache initialization failed after all retries');
+    // If all retries failed, reject promise to prevent scanner from starting
+    const error = new Error('Historical cache initialization failed after all retries');
+    console.error('❌ Historical cache initialization failed after all retries');
     console.warn('⚠️ Scheduler disabled - cache will remain empty until manual refresh');
+    throw error;
+  }
+  
+  /**
+   * Check if cache is ready with sufficient data
+   */
+  isReady(): boolean {
+    return this.cache.size > 0 && this.lastCacheTime > 0;
   }
   
   /**
@@ -152,12 +161,12 @@ export class HistoricalDataCache {
       console.log('🔄 Refreshing historical data cache (30 trading days)...');
       const startTime = Date.now();
       
-      // Calculate date range (go back 45 calendar days to ensure 30 trading days)
+      // Calculate date range (go back 60 calendar days to ensure 30 trading days)
       const endDate = new Date();
       endDate.setDate(endDate.getDate() - 1); // Yesterday (most recent complete data)
       
       const startDate = new Date(endDate);
-      startDate.setDate(startDate.getDate() - 45); // Extra buffer for weekends/holidays
+      startDate.setDate(startDate.getDate() - 60); // Extra buffer for weekends/holidays
       
       const endDateStr = endDate.toISOString().split('T')[0];
       const startDateStr = startDate.toISOString().split('T')[0];
@@ -235,7 +244,7 @@ export class HistoricalDataCache {
       
       // Validate we got enough trading days
       if (tradingDays < 20) {
-        throw new Error(`Insufficient trading days: ${tradingDays}/30 required`);
+        throw new Error(`Insufficient trading days: ${tradingDays}/20 required`);
       }
       
       // Filter symbols with sufficient data and populate cache

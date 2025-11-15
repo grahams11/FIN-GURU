@@ -85,14 +85,30 @@ app.use((req, res, next) => {
   console.log('✅ EOD Cache scheduler started - daily snapshot at 3:00 PM CST');
   
   // ACTIVATE HISTORICAL DATA CACHE — ELIMINATES 99% OF API CALLS
-  // Populates 30 days of historical bars for all symbols
+  // Populates 30 days of historical bars for all symbols in BACKGROUND
   // Refreshes daily at 4:00 PM CST (after EOD cache)
-  historicalDataCache.initialize().catch(err => {
-    console.error('❌ Historical cache initialization failed:', err.message);
-  });
-  console.log('✅ Historical cache initializing - daily refresh at 4:00 PM CST');
+  console.log('📊 Starting historical cache initialization (background)...');
+  const cacheStartTime = Date.now();
+  
+  // Store raw promise before attaching handlers
+  const cacheInitPromise = historicalDataCache.initialize();
+  
+  // Log results but don't swallow rejection
+  cacheInitPromise
+    .then(() => {
+      const cacheDuration = ((Date.now() - cacheStartTime) / 1000).toFixed(1);
+      console.log(`✅ Historical cache ready in ${cacheDuration}s - daily refresh at 4:00 PM CST`);
+    })
+    .catch((err: any) => {
+      // Log error but don't swallow rejection - promise remains rejected
+      console.error('❌ Historical cache initialization failed:', err.message);
+    });
   
   // 24/7 AUTO-SCAN — ELITE SCANNER ONLY (Ghost disabled to prevent API rate limits)
+  // SMART DELAY: Waits for cache initialization to complete before starting
+  // - If cache already populated (market hours): starts immediately
+  // - If cache populating (aftermarket): waits for completion (~2.5 min)
+  // - Server continues serving HTTP while cache initializes in background
   const { eliteScanner } = await import('./services/eliteScanner');
   
   let isAutoScanRunning = false;
@@ -101,6 +117,12 @@ app.use((req, res, next) => {
     // Prevent overlapping scans
     if (isAutoScanRunning) {
       console.warn('⏭️ AUTO-SCAN skipped — previous scan still running');
+      return;
+    }
+    
+    // Check cache readiness before running scan
+    if (!historicalDataCache.isReady()) {
+      console.warn('⏭️ AUTO-SCAN skipped — historical cache not ready (using live API fallback)');
       return;
     }
     
@@ -122,8 +144,16 @@ app.use((req, res, next) => {
     }
   };
   
-  // Run initial scan on startup (after 30s delay for services to initialize)
-  setTimeout(runAutoScan, 30000);
+  // Run initial scan only if cache initialization succeeds
+  cacheInitPromise
+    .then(() => {
+      setTimeout(runAutoScan, 5000); // 5s delay after cache ready
+      console.log('🎯 Elite Scanner will start in 5s (cache ready)');
+    })
+    .catch(() => {
+      console.error('❌ Elite Scanner DISABLED — historical cache initialization failed');
+      console.warn('⚠️ Scanner will not run automatically to prevent API quota exhaustion');
+    });
   
   // Run auto-scan every 5 minutes
   setInterval(runAutoScan, 5 * 60 * 1000);
