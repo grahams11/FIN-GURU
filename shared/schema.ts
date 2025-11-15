@@ -44,6 +44,7 @@ export const optionsTrade = pgTable("options_trades", {
   fibonacciColor: text("fibonacci_color"), // 'gold' for 0.707, 'green' for 0.618
   estimatedProfit: real("estimated_profit"), // Dollar amount profit (not percentage)
   isExecuted: boolean("is_executed").default(false),
+  isWatchlist: boolean("is_watchlist").default(false), // Overnight watchlist tier (relaxed filters)
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -546,6 +547,7 @@ export interface TradeRecommendation {
   fibonacciLevel?: number; // 0.707 or 0.618 if bouncing off Fibonacci level
   fibonacciColor?: 'gold' | 'green'; // Color coding for UI display
   estimatedProfit?: number; // Dollar amount profit (not percentage)
+  isWatchlist?: boolean; // Overnight watchlist tier (relaxed filters)
 }
 
 export interface PortfolioSummary {

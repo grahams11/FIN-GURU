@@ -129,9 +129,18 @@ export function TradeCard({ trade, rank, liveQuotes }: TradeCardProps) {
                 >
                   {trade.optionType?.toUpperCase() ?? 'CALL'}
                 </span>
+                {trade.isWatchlist && (
+                  <span 
+                    className="text-xs font-bold px-2 py-1 rounded bg-yellow-500/20 text-yellow-400 border border-yellow-500/40"
+                    data-testid={`watchlist-badge-${trade.ticker}`}
+                    title="Overnight watchlist - verify with live data at market open"
+                  >
+                    WATCHLIST
+                  </span>
+                )}
               </div>
               <p className="text-sm text-muted-foreground">
-                {trade.optionType === 'put' ? 'Bearish Elite Play' : 'Bullish Elite Play'}
+                {trade.isWatchlist ? 'Overnight Watchlist Setup' : trade.optionType === 'put' ? 'Bearish Elite Play' : 'Bullish Elite Play'}
               </p>
             </div>
           </div>

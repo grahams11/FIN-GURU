@@ -727,7 +727,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
               fibonacciLevel: validFibLevel,
               fibonacciColor: rec.fibonacciColor ?? null,
               estimatedProfit: validEstimatedProfit,
-              isExecuted: false
+              isExecuted: false,
+              isWatchlist: rec.isWatchlist ?? false
             });
           } catch (error) {
             console.error(`Error storing refreshed trade for ${rec.ticker}:`, error);

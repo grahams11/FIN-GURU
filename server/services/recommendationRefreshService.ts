@@ -115,7 +115,8 @@ export class RecommendationRefreshService {
               fibonacciLevel: validFibLevel,
               fibonacciColor: rec.fibonacciColor ?? null,
               estimatedProfit: validEstimatedProfit,
-              isExecuted: false
+              isExecuted: false,
+              isWatchlist: rec.isWatchlist ?? false
             });
             storedCount++;
           } catch (error) {
