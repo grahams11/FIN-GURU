@@ -225,6 +225,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
             const optionPremium = await getOptionPremium(trade);
             if (optionPremium) {
               quote.option = optionPremium;
+              
+              // Calculate live ROI when we have live premium data
+              if (optionPremium.source === 'polygon' || optionPremium.source === 'tastytrade') {
+                const entryPremium = trade.entryPrice || trade.premium;
+                if (entryPremium && entryPremium > 0) {
+                  const liveROI = ((optionPremium.premium - entryPremium) / entryPremium) * 100;
+                  quote.liveROI = liveROI;
+                }
+              }
             }
           }
           
@@ -257,6 +266,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
             const optionPremium = await getOptionPremium(trade);
             if (optionPremium) {
               quote.option = optionPremium;
+              
+              // Calculate live ROI when we have live premium data
+              if (optionPremium.source === 'polygon' || optionPremium.source === 'tastytrade') {
+                const entryPremium = trade.entryPrice || trade.premium;
+                if (entryPremium && entryPremium > 0) {
+                  const liveROI = ((optionPremium.premium - entryPremium) / entryPremium) * 100;
+                  quote.liveROI = liveROI;
+                }
+              }
             }
           }
           
@@ -337,6 +355,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
             const optionPremium = await getOptionPremium(trade);
             if (optionPremium) {
               quote.option = optionPremium;
+              
+              // Calculate live ROI when we have live premium data
+              if (optionPremium.source === 'polygon' || optionPremium.source === 'tastytrade') {
+                const entryPremium = trade.entryPrice || trade.premium;
+                if (entryPremium && entryPremium > 0) {
+                  const liveROI = ((optionPremium.premium - entryPremium) / entryPremium) * 100;
+                  quote.liveROI = liveROI;
+                }
+              }
             }
           }
           

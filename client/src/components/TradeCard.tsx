@@ -27,6 +27,7 @@ interface Quote {
     rho: number;
   };
   option?: OptionPremium;
+  liveROI?: number;
 }
 
 interface TradeCardProps {
@@ -54,6 +55,11 @@ export function TradeCard({ trade, rank, liveQuotes }: TradeCardProps) {
   const liveOptionPremium = liveQuotes?.[trade.ticker]?.option;
   const displayPremium = liveOptionPremium?.premium ?? trade.premium ?? trade.entryPrice;
   const isPremiumLive = !!liveOptionPremium && (liveOptionPremium.source === 'polygon' || liveOptionPremium.source === 'tastytrade');
+  
+  // Get live ROI if available, otherwise use projected ROI
+  const liveROI = liveQuotes?.[trade.ticker]?.liveROI;
+  const displayROI = liveROI ?? trade.projectedROI;
+  const isROILive = liveROI != null;
 
   const executeMutation = useMutation({
     mutationFn: () => apiRequest("POST", `/api/execute-trade/${trade.id}`),
@@ -140,11 +146,15 @@ export function TradeCard({ trade, rank, liveQuotes }: TradeCardProps) {
             </div>
           </div>
           <div className="text-right">
-            <p className={`text-lg font-bold ${trade.projectedROI >= 100 ? 'text-green-500 animate-pulse' : trade.projectedROI >= 0 ? 'text-green-500' : 'text-red-500'}`} data-testid={`roi-${trade.ticker}`}>
-              {trade.projectedROI > 0 ? '+' : ''}{trade.projectedROI.toFixed(0)}%
-            </p>
+            <div className="flex items-center justify-end space-x-1 mb-1">
+              <p className={`text-lg font-bold ${displayROI >= 100 ? 'text-green-500 animate-pulse' : displayROI >= 0 ? 'text-green-500' : 'text-red-500'}`} data-testid={`roi-${trade.ticker}`}>
+                {displayROI > 0 ? '+' : ''}{displayROI.toFixed(0)}%
+              </p>
+              {isROILive && <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" title="Live ROI from market data"></span>}
+              {!isROILive && <span className="w-2 h-2 bg-yellow-500 rounded-full" title="Projected ROI (market closed or no live data)"></span>}
+            </div>
             <p className="text-sm text-muted-foreground">
-              {trade.projectedROI >= 100 ? '✨ Elite ROI ✨' : 'Projected ROI'}
+              {displayROI >= 100 ? '✨ Elite ROI ✨' : isROILive ? 'Live ROI' : 'Projected ROI'}
             </p>
           </div>
         </div>
