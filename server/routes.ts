@@ -838,6 +838,88 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Manual scan endpoint with cache readiness metadata
+  let isScanning = false; // Concurrency guard
+  app.post('/api/scan-now', async (req, res) => {
+    try {
+      // Concurrency guard - prevent multiple simultaneous scans
+      if (isScanning) {
+        return res.status(429).json({ 
+          message: 'Scan already in progress. Please wait.',
+          isScanning: true 
+        });
+      }
+
+      isScanning = true;
+      console.log('🔍 Manual scan triggered by user...');
+      
+      // Get cache readiness info
+      const { historicalDataCache } = await import('./services/historicalDataCache');
+      const cacheStats = historicalDataCache.getStats();
+      
+      // Calculate total bars by sampling a few symbols
+      let estimatedAvgBars = 0;
+      const symbols = historicalDataCache.getAllSymbols().slice(0, 10);
+      if (symbols.length > 0) {
+        const totalBarsInSample = symbols.reduce((sum, sym) => {
+          const data = historicalDataCache.getHistoricalData(sym);
+          return sum + (data?.bars.length || 0);
+        }, 0);
+        estimatedAvgBars = Math.round(totalBarsInSample / symbols.length);
+      }
+      
+      const cacheReadiness = {
+        totalSymbols: cacheStats.symbolsCached,
+        avgBarsPerSymbol: estimatedAvgBars,
+        isReady: cacheStats.symbolsCached > 100 && estimatedAvgBars >= 20
+      };
+      
+      // Check if cache is ready before scanning (prevents 500 errors)
+      if (!cacheReadiness.isReady) {
+        console.log(`⏳ Cache warming up: ${cacheStats.symbolsCached} symbols, ${estimatedAvgBars} avg bars/symbol`);
+        return res.status(202).json({
+          success: false,
+          warming: true,
+          cacheReadiness,
+          message: `Cache loading... ${estimatedAvgBars}/${20} days loaded. Scanner needs 20+ days of data.`
+        });
+      }
+      
+      // Run Elite Scanner
+      const { eliteScanner } = await import('./services/eliteScanner');
+      const scanResponse = await eliteScanner.scan();
+      const scanResults = scanResponse.results;
+      
+      console.log(`🔍 Manual scan complete: ${scanResults.length} opportunities found`);
+      console.log(`📊 Cache status: ${cacheReadiness.totalSymbols} symbols, ${cacheReadiness.avgBarsPerSymbol} avg bars/symbol`);
+      
+      // Return results with metadata
+      res.json({
+        success: true,
+        results: scanResults.length,
+        premium: scanResults.filter(r => !r.isWatchlist).length,
+        watchlist: scanResults.filter(r => r.isWatchlist).length,
+        isOvernight: scanResponse.isOvernight,
+        cacheReadiness,
+        message: scanResults.length > 0 
+          ? `Found ${scanResults.length} plays` 
+          : cacheReadiness.avgBarsPerSymbol < 20 
+            ? `No plays found. Cache loading (${cacheReadiness.avgBarsPerSymbol}/20 days loaded)` 
+            : 'No plays found with current market conditions'
+      });
+      
+    } catch (error) {
+      console.error('❌ Manual scan error:', error);
+      res.status(500).json({ 
+        success: false,
+        message: 'Scan failed',
+        error: error instanceof Error ? error.message : 'Unknown error' 
+      });
+    } finally {
+      isScanning = false;
+    }
+  });
+
   // Execute trade endpoint
   app.post('/api/execute-trade/:id', async (req, res) => {
     try {

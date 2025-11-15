@@ -83,26 +83,30 @@ export class OvernightDataFetcher {
    */
   async getOvernightAggregates(symbol: string): Promise<OvernightData | null> {
     try {
-      // PRIORITY 1: Try EOD cache (if available)
-      let eodSnapshot = eodCacheService.getEODSnapshot(symbol);
+      // PRIORITY 1: Use Historical Cache (PRIMARY SOURCE - always fresh, 30 days of data)
+      let eodSnapshot: EODSnapshot | null = null;
+      const historicalData = historicalDataCache.getHistoricalData(symbol);
       
-      // PRIORITY 2: Use historical cache to create EOD snapshot
-      if (!eodSnapshot) {
-        const historicalData = historicalDataCache.getHistoricalData(symbol);
-        if (historicalData && historicalData.bars.length > 0) {
-          // Get most recent bar as EOD snapshot
-          const mostRecentBar = historicalData.bars[historicalData.bars.length - 1];
-          eodSnapshot = {
-            symbol,
-            date: new Date(mostRecentBar.timestamp).toISOString().split('T')[0],
-            high: mostRecentBar.high,
-            low: mostRecentBar.low,
-            close: mostRecentBar.close,
-            volume: mostRecentBar.volume,
-            timestamp: mostRecentBar.timestamp
-          };
+      if (historicalData && historicalData.bars.length > 0) {
+        // Get most recent bar from historical cache as EOD snapshot
+        const mostRecentBar = historicalData.bars[historicalData.bars.length - 1];
+        eodSnapshot = {
+          symbol,
+          date: new Date(mostRecentBar.timestamp).toISOString().split('T')[0],
+          high: mostRecentBar.high,
+          low: mostRecentBar.low,
+          close: mostRecentBar.close,
+          volume: mostRecentBar.volume,
+          timestamp: mostRecentBar.timestamp
+        };
+        console.log(`✅ ${symbol}: Using historical cache (${new Date(mostRecentBar.timestamp).toISOString().split('T')[0]}, ${historicalData.bars.length} bars available)`);
+      } else {
+        // PRIORITY 2: Fallback to EOD cache (only if historical cache has no data)
+        eodSnapshot = eodCacheService.getEODSnapshot(symbol);
+        if (eodSnapshot) {
+          console.log(`⚠️ ${symbol}: Fallback to EOD cache (${eodSnapshot.date}) - historical cache empty`);
         } else {
-          console.warn(`⚠️ No EOD snapshot or historical data for ${symbol} - skipping`);
+          console.warn(`⚠️ ${symbol}: No historical data or EOD snapshot available - skipping`);
           return null;
         }
       }
