@@ -146,7 +146,7 @@ export class HistoricalDataCache {
             high: bar.high,
             low: bar.low,
             close: bar.close,
-            volume: bar.volume,
+            volume: Math.round(bar.volume), // Ensure integer for bigint column
             lastUpdated: new Date()
           });
         }

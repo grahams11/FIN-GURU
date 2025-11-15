@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, real, integer, timestamp, jsonb, boolean } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, real, integer, bigint, timestamp, jsonb, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -27,7 +27,7 @@ export const historicalBars = pgTable("historical_bars", {
   high: real("high").notNull(),
   low: real("low").notNull(),
   close: real("close").notNull(),
-  volume: integer("volume").notNull(),
+  volume: bigint("volume", { mode: "number" }).notNull(),
   lastUpdated: timestamp("last_updated").defaultNow(),
 }, (table) => ({
   // Index for efficient querying by symbol and date range
