@@ -19,6 +19,24 @@ export const marketData = pgTable("market_data", {
   timestamp: timestamp("timestamp").defaultNow(),
 });
 
+export const historicalBars = pgTable("historical_bars", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  symbol: text("symbol").notNull(),
+  barTimestamp: timestamp("bar_timestamp").notNull(),
+  open: real("open").notNull(),
+  high: real("high").notNull(),
+  low: real("low").notNull(),
+  close: real("close").notNull(),
+  volume: integer("volume").notNull(),
+  lastUpdated: timestamp("last_updated").defaultNow(),
+}, (table) => ({
+  // Index for efficient querying by symbol and date range
+  symbolTimestampIdx: {
+    columns: [table.symbol, table.barTimestamp],
+    name: "idx_historical_bars_symbol_timestamp",
+  },
+}));
+
 export const optionsTrade = pgTable("options_trades", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   ticker: text("ticker").notNull(),
