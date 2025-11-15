@@ -203,6 +203,7 @@ export const recommendationTracking = pgTable("recommendation_tracking", {
   
   // Status tracking
   status: text("status").notNull().default('pending'), // 'pending' | 'monitoring' | 'closed' | 'expired'
+  isWatchlist: boolean("is_watchlist").default(false), // True for overnight plays with relaxed criteria
   recommendedAt: timestamp("recommended_at").defaultNow(),
 }, (table) => ({
   // Fast lookup by strategy version and date for learning analysis

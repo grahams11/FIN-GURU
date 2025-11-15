@@ -56,6 +56,7 @@ export interface EliteScanResult {
   
   // Metadata
   isLive: boolean; // True if market open
+  isWatchlist: boolean; // True for overnight plays with relaxed criteria
   scannedAt: number;
 }
 
@@ -124,7 +125,7 @@ export class EliteScanner {
     // STEP 3: WEBSOCKET-ONLY APPROACH - Subscribe all candidates upfront for LIVE data
     // This eliminates REST API bottleneck and prevents 429 errors
     const MAX_QUALIFIED_PLAYS = 12; // Target: 8-12 plays per scan
-    const MAX_CANDIDATES_TO_ANALYZE = 100; // Safety cap to prevent infinite processing
+    const MAX_CANDIDATES_TO_ANALYZE = 500; // Increased from 100 to 500 for better overnight watchlist coverage
     
     // Sort candidates by momentum and volume for best-first processing
     const sortedCandidates = basicFiltered
@@ -153,37 +154,65 @@ export class EliteScanner {
     console.log(`🔄 Processing candidates using WebSocket-cached LIVE data...`);
     
     const analysisResults: (EliteScanResult | null)[] = [];
-    let totalPlaysFound = 0;
+    let totalPremiumFound = 0;
+    let totalWatchlistFound = 0;
     let totalAnalyzed = 0;
     
     for (let i = 0; i < sortedCandidates.length; i++) {
-      // ADAPTIVE STOP: Once we have enough qualified plays, stop to save API calls
-      if (totalPlaysFound >= MAX_QUALIFIED_PLAYS) {
-        console.log(`🎯 Target reached: ${totalPlaysFound} plays found after ${totalAnalyzed} candidates`);
+      const stock = sortedCandidates[i];
+      
+      // ADAPTIVE STOP for live mode: Stop at 12 plays
+      // For overnight: Continue until 10 premium plays OR all candidates analyzed
+      const shouldStop = !isOvernight && (totalPremiumFound >= MAX_QUALIFIED_PLAYS);
+      const overnightComplete = isOvernight && totalPremiumFound >= 10;
+      
+      if (shouldStop || overnightComplete) {
+        const reason = shouldStop ? 'live target reached' : 'premium target reached';
+        console.log(`🎯 Stopping scan: ${reason} (${totalPremiumFound} premium, ${totalWatchlistFound} watchlist)`);
         break;
       }
       
-      const stock = sortedCandidates[i];
-      const result = await this.analyzeTicker(stock.ticker, config, marketContext.isLive, isOvernight);
+      // Enable watchlist tier for overnight mode
+      const result = await this.analyzeTicker(stock.ticker, config, marketContext.isLive, isOvernight, isOvernight);
       analysisResults.push(result);
       totalAnalyzed++;
       
       if (result !== null) {
-        totalPlaysFound++;
-        console.log(`✅ ${totalAnalyzed}/${sortedCandidates.length} — Found play: ${stock.ticker} (${totalPlaysFound}/${MAX_QUALIFIED_PLAYS})`);
+        if (result.isWatchlist) {
+          totalWatchlistFound++;
+          console.log(`✅ ${totalAnalyzed}/${sortedCandidates.length} — Found play: ${stock.ticker} [WATCHLIST] (${totalPremiumFound}P + ${totalWatchlistFound}W)`);
+        } else {
+          totalPremiumFound++;
+          console.log(`✅ ${totalAnalyzed}/${sortedCandidates.length} — Found play: ${stock.ticker} [PREMIUM] (${totalPremiumFound}P + ${totalWatchlistFound}W)`);
+        }
       } else {
         // Log progress every 10 tickers
         if (totalAnalyzed % 10 === 0) {
-          console.log(`⏳ Progress: ${totalAnalyzed}/${sortedCandidates.length} analyzed — ${totalPlaysFound} plays found`);
+          console.log(`⏳ Progress: ${totalAnalyzed}/${sortedCandidates.length} analyzed — ${totalPremiumFound}P + ${totalWatchlistFound}W found`);
         }
       }
     }
     
-    // Filter out nulls and sort by signal quality
+    // Filter out nulls and separate into premium vs watchlist
     const validResults = analysisResults.filter((r): r is EliteScanResult => r !== null);
-    const topResults = validResults
-      .sort((a, b) => b.signalQuality - a.signalQuality)
-      .slice(0, 5); // Return top 5 plays
+    const premiumPlays = validResults.filter(r => !r.isWatchlist).sort((a, b) => b.signalQuality - a.signalQuality);
+    const watchlistPlays = validResults.filter(r => r.isWatchlist).sort((a, b) => b.signalQuality - a.signalQuality);
+    
+    console.log(`📊 Results breakdown: ${premiumPlays.length} premium, ${watchlistPlays.length} watchlist`);
+    
+    // Build final results: Premium first, then backfill with watchlist to reach target
+    let topResults: EliteScanResult[];
+    if (isOvernight) {
+      // Overnight: Ensure minimum 10 plays (premium + watchlist)
+      const premiumTop = premiumPlays.slice(0, 10);
+      const needWatchlist = Math.max(0, 10 - premiumTop.length);
+      const watchlistTop = watchlistPlays.slice(0, needWatchlist);
+      topResults = [...premiumTop, ...watchlistTop];
+      console.log(`🌙 Overnight results: ${premiumTop.length} premium + ${watchlistTop.length} watchlist = ${topResults.length} total`);
+    } else {
+      // Live: Return top 5 premium plays only
+      topResults = premiumPlays.slice(0, 5);
+    }
     
     const scanDuration = Date.now() - startTime;
     
@@ -222,7 +251,8 @@ export class EliteScanner {
     symbol: string,
     config: any,
     isLive: boolean,
-    isOvernight: boolean = false
+    isOvernight: boolean = false,
+    allowWatchlist: boolean = false
   ): Promise<EliteScanResult | null> {
     try {
       // OVERNIGHT MODE — REAL ANALYSIS WITH EOD + OVERNIGHT AGGS
@@ -292,20 +322,55 @@ export class EliteScanner {
           ? ((currentPrice - eod.close) / eod.close) * 100
           : 0; // No price change if only EOD data
         
-        // OVERNIGHT FILTERS (Liquidity-aware, loosened for better play detection)
+        // TIER CLASSIFICATION: Try premium first, fall back to watchlist
         const passedFilters: string[] = [];
         let optionType: 'call' | 'put' | null = null;
+        let isWatchlist = false;
         
-        // Filter 1: RSI Signal (Asymmetric: 45/55 to avoid neutral zone)
-        if (rsi < 45) {
+        // Determine signal type based on RSI
+        if (rsi < 40) {
           optionType = 'call';
-          passedFilters.push(`RSI Oversold ${rsi.toFixed(1)}`);
-        } else if (rsi > 55) {
+        } else if (rsi > 60) {
           optionType = 'put';
-          passedFilters.push(`RSI Overbought ${rsi.toFixed(1)}`);
+        } else if (rsi >= 40 && rsi < 50) {
+          optionType = 'call'; // Neutral-to-bearish, watch for call setup
+        } else if (rsi >= 50 && rsi <= 60) {
+          optionType = 'put'; // Neutral-to-bullish, watch for put setup
         } else {
-          console.log(`❌ ${symbol}: Neutral RSI ${rsi.toFixed(1)} (need <45 or >55)`);
-          return null; // Neutral RSI, skip
+          console.log(`❌ ${symbol}: Neutral RSI ${rsi.toFixed(1)}`);
+          return null;
+        }
+        
+        // Calculate filter metrics
+        const overnightVolume = validBars.reduce((sum, b) => sum + b.volume, 0);
+        const volumeRatio = hasOvernightBars ? overnightVolume / eod.volume : 1.0;
+        
+        // Try PREMIUM tier first (strict thresholds)
+        const meetsPremiumRSI = (optionType === 'call' && rsi < 45) || (optionType === 'put' && rsi > 55);
+        const meetsPremiumMovement = !hasOvernightBars || Math.abs(priceChange) >= 0.8;
+        const meetsPremiumVolume = !hasOvernightBars || volumeRatio >= 1.2;
+        const meetsPremiumATR = !hasOvernightBars || Math.abs(currentPrice - eod.close) >= atr * 1.2;
+        const meetsPremium = meetsPremiumRSI && meetsPremiumMovement && meetsPremiumVolume && meetsPremiumATR;
+        
+        // Try WATCHLIST tier if premium fails and watchlist is allowed (RSI 40-60 full range)
+        const meetsWatchlistRSI = (optionType === 'call' && rsi >= 40 && rsi <= 60) || (optionType === 'put' && rsi >= 40 && rsi <= 60);
+        const meetsWatchlistMovement = !hasOvernightBars || Math.abs(priceChange) >= 0.5;
+        const meetsWatchlistVolume = !hasOvernightBars || volumeRatio >= 1.0;
+        const meetsWatchlistATR = !hasOvernightBars || Math.abs(currentPrice - eod.close) >= atr * 1.0;
+        const meetsWatchlist = meetsWatchlistRSI && meetsWatchlistMovement && meetsWatchlistVolume && meetsWatchlistATR;
+        
+        // Classify into tier
+        if (meetsPremium) {
+          isWatchlist = false;
+          passedFilters.push(`RSI ${optionType === 'call' ? 'Oversold' : 'Overbought'} ${rsi.toFixed(1)}`);
+        } else if (allowWatchlist && meetsWatchlist) {
+          isWatchlist = true;
+          passedFilters.push(`RSI Watchlist ${rsi.toFixed(1)} (${optionType.toUpperCase()})`);
+        } else {
+          // Didn't meet either tier
+          const tier = allowWatchlist ? 'watchlist' : 'premium';
+          console.log(`❌ ${symbol}: Failed ${tier} filters - RSI: ${rsi.toFixed(1)}, Move: ${priceChange.toFixed(2)}%, Vol: ${volumeRatio.toFixed(2)}x`);
+          return null;
         }
         
         // Filter 2: Price/EMA Alignment
@@ -319,35 +384,13 @@ export class EliteScanner {
         }
         passedFilters.push('EMA Aligned');
         
-        // Filter 3: Minimum Price Movement (0.8% vs EOD) - Skip if EOD only
-        if (hasOvernightBars && Math.abs(priceChange) < 0.8) {
-          console.log(`❌ ${symbol}: Insufficient movement ${priceChange.toFixed(2)}% (need 0.8%)`);
-          return null;
-        }
+        // Additional filter checks (already calculated above)
         if (hasOvernightBars) {
-          passedFilters.push(`Move ${priceChange >= 0 ? '+' : ''}${priceChange.toFixed(1)}%`);
+          passedFilters.push(`Move ${priceChange >= 0 ? '+' : ''}${priceChange.toFixed(1)}%${isWatchlist ? ' [W]' : ''}`);
+          passedFilters.push(`Vol ${volumeRatio.toFixed(1)}x${isWatchlist ? ' [W]' : ''}`);
+          passedFilters.push(`ATR Breakout${isWatchlist ? ' [W]' : ''}`);
         } else {
           passedFilters.push('EOD Only');
-        }
-        
-        // Filter 4: Volume Spike (Relaxed: 1.2x vs live 1.5x) - Skip if EOD only
-        const overnightVolume = validBars.reduce((sum, b) => sum + b.volume, 0);
-        const volumeRatio = hasOvernightBars ? overnightVolume / eod.volume : 1.0;
-        if (hasOvernightBars && volumeRatio < 1.2) {
-          console.log(`❌ ${symbol}: Low volume ${volumeRatio.toFixed(2)}x (need 1.2x)`);
-          return null;
-        }
-        if (hasOvernightBars) {
-          passedFilters.push(`Vol ${volumeRatio.toFixed(1)}x`);
-        }
-        
-        // Filter 5: ATR Breakout (Relaxed: 1.2x vs live 1.5x) - Skip if EOD only
-        if (hasOvernightBars && Math.abs(currentPrice - eod.close) < atr * 1.2) {
-          console.log(`❌ ${symbol}: No ATR breakout (Move $${Math.abs(currentPrice - eod.close).toFixed(2)} vs ATR*1.2 $${(atr * 1.2).toFixed(2)})`);
-          return null;
-        }
-        if (hasOvernightBars) {
-          passedFilters.push('ATR Breakout');
         }
         
         // Select best option contract (ATM bias, DTE 3-7, premium ≥$0.30)
@@ -436,6 +479,7 @@ export class EliteScanner {
           signalQuality,
           passedFilters,
           isLive: false,
+          isWatchlist,
           scannedAt: Date.now()
         };
       }
@@ -617,6 +661,7 @@ export class EliteScanner {
         
         // Metadata
         isLive,
+        isWatchlist: false, // Live mode is always premium
         scannedAt: Date.now()
       };
     } catch (error: any) {
