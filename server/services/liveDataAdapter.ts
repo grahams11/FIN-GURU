@@ -346,40 +346,7 @@ export class LiveDataAdapter {
     try {
       const isMarketOpen = marketStatusService.isMarketOpen();
       
-      // MARKET CLOSED: Use database snapshot (zero Polygon calls)
-      if (!isMarketOpen) {
-        const snapshot = await storage.getOptionsSnapshot(symbol, optionType);
-        if (snapshot && snapshot.fetchedAt) {
-          const hoursAgo = Math.floor((Date.now() - new Date(snapshot.fetchedAt).getTime()) / 3600000);
-          console.log(`💾 DB Snapshot: ${symbol} $${snapshot.premium.toFixed(2)} (saved ${hoursAgo}h ago)`);
-          
-          return {
-            symbol,
-            strike: snapshot.strike,
-            expiry: snapshot.expiry,
-            optionType,
-            delta: snapshot.delta,
-            gamma: snapshot.gamma,
-            theta: snapshot.theta,
-            vega: snapshot.vega,
-            impliedVolatility: snapshot.impliedVolatility,
-            ivPercentile: snapshot.ivPercentile,
-            volume: snapshot.volume,
-            openInterest: snapshot.openInterest,
-            avgVolume20Day: snapshot.avgVolume20Day,
-            volumeRatio: snapshot.volumeRatio,
-            bid: snapshot.bid,
-            ask: snapshot.ask,
-            lastPrice: snapshot.lastPrice,
-            premium: snapshot.premium,
-            timestamp: Date.now(),
-            source: 'database',
-            cacheAge: snapshot.fetchedAt ? Math.floor((Date.now() - new Date(snapshot.fetchedAt).getTime()) / 1000) : 0
-          };
-        }
-      }
-      
-      // MARKET OPEN or no snapshot: Fetch from Polygon
+      // Fetch Greeks from Polygon (needed for strike, expiry, Greeks regardless of market status)
       const greeks = await polygonService.getOptionsGreeks(symbol, optionType);
       
       if (!greeks) {
@@ -389,13 +356,14 @@ export class LiveDataAdapter {
       
       const optionSymbol = this.formatOptionSymbol(symbol, greeks.strike, greeks.expiry, optionType);
       
-      // Premium sourcing: Prioritize WebSocket when market open
+      // Premium sourcing based on market status
       let bid = greeks.bid;
       let ask = greeks.ask;
       let premium = greeks.bid > 0 && greeks.ask > 0 ? (greeks.bid + greeks.ask) / 2 : greeks.lastPrice;
       let dataSource: 'polygon-rest' | 'polygon-websocket' | 'database' = 'polygon-rest';
       
       if (isMarketOpen) {
+        // MARKET OPEN: Use WebSocket for live premiums
         const wsQuote = polygonService.getCachedOptionQuote(optionSymbol);
         if (wsQuote && wsQuote.premium > 0) {
           bid = wsQuote.bid;
@@ -403,6 +371,14 @@ export class LiveDataAdapter {
           premium = wsQuote.premium;
           dataSource = 'polygon-websocket';
           console.log(`💎 Live WebSocket: ${symbol} $${premium.toFixed(2)}`);
+        }
+      } else {
+        // MARKET CLOSED: Use EOD premium from options_trades
+        const eodPremium = await storage.getLatestPremium(symbol, optionType);
+        if (eodPremium && eodPremium > 0) {
+          premium = eodPremium;
+          dataSource = 'database';
+          console.log(`💾 EOD Premium: ${symbol} $${premium.toFixed(2)} from options_trades`);
         }
       }
       
@@ -450,29 +426,6 @@ export class LiveDataAdapter {
       this.optionsCache.set(cacheKey, {
         data: analytics,
         fetchedAt: Date.now()
-      });
-      
-      // Save snapshot to database for overnight use
-      await storage.saveOptionsSnapshot({
-        symbol,
-        optionType,
-        strike: greeks.strike,
-        expiry: greeks.expiry,
-        delta: greeks.delta,
-        gamma: greeks.gamma,
-        theta: greeks.theta,
-        vega: greeks.vega,
-        impliedVolatility: greeks.impliedVolatility,
-        ivPercentile: ivPercentileData?.ivPercentile || 50,
-        volume: greeks.volume,
-        openInterest: greeks.openInterest,
-        avgVolume20Day: volumeData?.avgVolume20Day || greeks.volume,
-        volumeRatio: volumeData?.volumeRatio || 1,
-        bid,
-        ask,
-        lastPrice: greeks.lastPrice,
-        premium,
-        source: dataSource
       });
       
       return analytics;

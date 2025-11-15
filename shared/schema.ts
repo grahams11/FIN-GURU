@@ -66,46 +66,6 @@ export const optionsTrade = pgTable("options_trades", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
-export const optionsAnalyticsSnapshots = pgTable("options_analytics_snapshots", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  symbol: text("symbol").notNull(),
-  optionType: text("option_type").notNull(), // 'call' | 'put'
-  strike: real("strike").notNull(),
-  expiry: text("expiry").notNull(),
-  
-  // Greeks
-  delta: real("delta").notNull(),
-  gamma: real("gamma").notNull(),
-  theta: real("theta").notNull(),
-  vega: real("vega").notNull(),
-  
-  // Volatility
-  impliedVolatility: real("implied_volatility").notNull(),
-  ivPercentile: real("iv_percentile").notNull(),
-  
-  // Volume
-  volume: integer("volume").notNull(),
-  openInterest: integer("open_interest").notNull(),
-  avgVolume20Day: integer("avg_volume_20day").notNull(),
-  volumeRatio: real("volume_ratio").notNull(),
-  
-  // Pricing
-  bid: real("bid").notNull(),
-  ask: real("ask").notNull(),
-  lastPrice: real("last_price").notNull(),
-  premium: real("premium").notNull(),
-  
-  // Metadata
-  source: text("source").notNull(), // 'polygon-rest' | 'polygon-websocket' | 'database'
-  fetchedAt: timestamp("fetched_at").defaultNow(),
-}, (table) => ({
-  // Composite index for efficient lookups by symbol + option type
-  symbolTypeIdx: {
-    columns: [table.symbol, table.optionType],
-    name: "idx_options_snapshots_symbol_type",
-  },
-}));
-
 export const aiInsights = pgTable("ai_insights", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   marketConfidence: real("market_confidence").notNull(),
@@ -546,8 +506,6 @@ export type MarketData = typeof marketData.$inferSelect;
 export type InsertMarketData = z.infer<typeof insertMarketDataSchema>;
 export type OptionsTrade = typeof optionsTrade.$inferSelect;
 export type InsertOptionsTrade = z.infer<typeof insertOptionsTradeSchema>;
-export type OptionsAnalyticsSnapshot = typeof optionsAnalyticsSnapshots.$inferSelect;
-export type InsertOptionsAnalyticsSnapshot = typeof optionsAnalyticsSnapshots.$inferInsert;
 export type AiInsights = typeof aiInsights.$inferSelect;
 export type InsertAiInsights = z.infer<typeof insertAiInsightsSchema>;
 export type PortfolioPosition = typeof portfolioPositions.$inferSelect;

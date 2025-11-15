@@ -451,11 +451,10 @@ export class EliteScanner {
         
         console.log(`✅ ${symbol}: PASSED ALL FILTERS → ${optionType.toUpperCase()} setup (${passedFilters.join(', ')})`);
 
-        // Try to get options analytics from database snapshot (market closed)
-        // This provides real premiums/Greeks if available from previous market session
-        const snapshotAnalytics = await liveDataAdapter.getOptionsAnalytics(symbol, optionType);
-        if (snapshotAnalytics && snapshotAnalytics.source === 'database') {
-          console.log(`💾 Using DB snapshot for ${symbol} ${optionType.toUpperCase()}: $${snapshotAnalytics.premium.toFixed(2)}`);
+        // Try to get options analytics (will use EOD premium from options_trades when market closed)
+        const optionsAnalytics = await liveDataAdapter.getOptionsAnalytics(symbol, optionType);
+        if (optionsAnalytics && optionsAnalytics.source === 'database') {
+          console.log(`💾 Using EOD premium from options_trades for ${symbol} ${optionType.toUpperCase()}: $${optionsAnalytics.premium.toFixed(2)}`);
         }
         
         // Calculate pivot from overnight data (or use EOD if no overnight)
@@ -484,7 +483,7 @@ export class EliteScanner {
         defaultExpiry.setDate(today.getDate() + 5); // 5 DTE default
         
         // Return full EliteScanResult for overnight analysis
-        // Prioritize snapshot analytics if available, then bestContract, then defaults
+        // Prioritize options analytics if available, then bestContract, then defaults
         return {
           symbol,
           optionType,
@@ -496,22 +495,22 @@ export class EliteScanner {
           atrLong: atr, // Same for overnight
           pivotLevel,
           abovePivot,
-          strike: snapshotAnalytics?.strike || bestContract?.strike || defaultStrike,
-          expiry: snapshotAnalytics?.expiry || bestContract?.expiry || defaultExpiry.toISOString().split('T')[0],
-          delta: snapshotAnalytics?.delta || bestContract?.delta || (optionType === 'call' ? 0.5 : -0.5),
-          gamma: snapshotAnalytics?.gamma || bestContract?.gamma || 0,
-          theta: snapshotAnalytics?.theta || bestContract?.theta || 0,
-          vega: snapshotAnalytics?.vega || bestContract?.vega || 0,
-          impliedVolatility: snapshotAnalytics?.impliedVolatility || bestContract?.iv || 0,
-          ivPercentile: snapshotAnalytics?.ivPercentile || 0,
-          volumeRatio: snapshotAnalytics?.volumeRatio || volumeRatio,
-          isUnusualVolume: (snapshotAnalytics?.volumeRatio || volumeRatio) > 3,
+          strike: optionsAnalytics?.strike || bestContract?.strike || defaultStrike,
+          expiry: optionsAnalytics?.expiry || bestContract?.expiry || defaultExpiry.toISOString().split('T')[0],
+          delta: optionsAnalytics?.delta || bestContract?.delta || (optionType === 'call' ? 0.5 : -0.5),
+          gamma: optionsAnalytics?.gamma || bestContract?.gamma || 0,
+          theta: optionsAnalytics?.theta || bestContract?.theta || 0,
+          vega: optionsAnalytics?.vega || bestContract?.vega || 0,
+          impliedVolatility: optionsAnalytics?.impliedVolatility || bestContract?.iv || 0,
+          ivPercentile: optionsAnalytics?.ivPercentile || 0,
+          volumeRatio: optionsAnalytics?.volumeRatio || volumeRatio,
+          isUnusualVolume: (optionsAnalytics?.volumeRatio || volumeRatio) > 3,
           signalQuality,
           passedFilters,
           isLive: false,
           isWatchlist,
           scannedAt: Date.now(),
-          premium: snapshotAnalytics?.premium || bestContract?.premium || 0
+          premium: optionsAnalytics?.premium || bestContract?.premium || 0
         };
       }
       
