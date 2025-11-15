@@ -203,12 +203,34 @@ export class EliteScanner {
     // Build final results: Premium first, then backfill with watchlist to reach target
     let topResults: EliteScanResult[];
     if (isOvernight) {
-      // Overnight: Ensure minimum 10 plays (premium + watchlist)
-      const premiumTop = premiumPlays.slice(0, 10);
-      const needWatchlist = Math.max(0, 10 - premiumTop.length);
-      const watchlistTop = watchlistPlays.slice(0, needWatchlist);
-      topResults = [...premiumTop, ...watchlistTop];
-      console.log(`🌙 Overnight results: ${premiumTop.length} premium + ${watchlistTop.length} watchlist = ${topResults.length} total`);
+      // Dual-quota system: Cap premium, ensure watchlist visibility, max total
+      const PREMIUM_QUOTA = 8;
+      const WATCHLIST_MIN = 2;
+      const TOTAL_MAX = 12;
+      
+      // Take top premium plays (capped at quota)
+      const premiumTop = premiumPlays.slice(0, PREMIUM_QUOTA);
+      
+      // Ensure minimum watchlist plays when available
+      const watchlistAvailable = Math.min(watchlistPlays.length, WATCHLIST_MIN);
+      const watchlistTop = watchlistPlays.slice(0, watchlistAvailable);
+      
+      // Calculate remaining slots for backfill
+      const currentTotal = premiumTop.length + watchlistTop.length;
+      const remainingSlots = TOTAL_MAX - currentTotal;
+      
+      // Backfill remaining slots with best-scoring plays from either tier
+      if (remainingSlots > 0) {
+        const remaining = [...premiumPlays.slice(PREMIUM_QUOTA), ...watchlistPlays.slice(watchlistAvailable)]
+          .sort((a, b) => b.signalQuality - a.signalQuality)
+          .slice(0, remainingSlots);
+        topResults = [...premiumTop, ...watchlistTop, ...remaining];
+      } else {
+        topResults = [...premiumTop, ...watchlistTop];
+      }
+      
+      const watchlistCount = topResults.filter(r => r.isWatchlist).length;
+      console.log(`🌙 Overnight results: ${topResults.length - watchlistCount} premium + ${watchlistCount} watchlist = ${topResults.length} total`);
     } else {
       // Live: Return top 5 premium plays only
       topResults = premiumPlays.slice(0, 5);
