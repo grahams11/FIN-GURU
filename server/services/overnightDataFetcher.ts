@@ -83,9 +83,32 @@ export class OvernightDataFetcher {
    */
   async getOvernightAggregates(symbol: string): Promise<OvernightData | null> {
     try {
-      const eodSnapshot = eodCacheService.getEODSnapshot(symbol);
+      // PRIORITY 1: Try EOD cache (if available)
+      let eodSnapshot = eodCacheService.getEODSnapshot(symbol);
+      
+      // PRIORITY 2: Use historical cache to create EOD snapshot
       if (!eodSnapshot) {
-        console.warn(`⚠️ No EOD snapshot for ${symbol} - cannot compute overnight data`);
+        const historicalData = historicalDataCache.getHistoricalData(symbol);
+        if (historicalData && historicalData.bars.length > 0) {
+          // Get most recent bar as EOD snapshot
+          const mostRecentBar = historicalData.bars[historicalData.bars.length - 1];
+          eodSnapshot = {
+            symbol,
+            date: new Date(mostRecentBar.timestamp).toISOString().split('T')[0],
+            high: mostRecentBar.high,
+            low: mostRecentBar.low,
+            close: mostRecentBar.close,
+            volume: mostRecentBar.volume,
+            timestamp: mostRecentBar.timestamp
+          };
+        } else {
+          console.warn(`⚠️ No EOD snapshot or historical data for ${symbol} - skipping`);
+          return null;
+        }
+      }
+      
+      // At this point, eodSnapshot is guaranteed to be non-null
+      if (!eodSnapshot) {
         return null;
       }
       
@@ -180,10 +203,12 @@ export class OvernightDataFetcher {
         const startDate = new Date(endDate);
         startDate.setDate(startDate.getDate() - 30);
         
-        const historicalBars = await polygonService.getDailyAggregates(
+        const historicalBars = await polygonService.getHistoricalBars(
           symbol,
           startDate.toISOString().split('T')[0],
           endDate.toISOString().split('T')[0],
+          'day',
+          1,
           true // unlimited mode
         );
         
